@@ -15,6 +15,11 @@
  * call chains, at fewer samples: the buffer stays ~1 MB (AmiAgent fetches it
  * in parts), 4000 samples of 64 longwords by default (40 s). The sampler
  * costs a few percent: time profiled runs separately. Host builds: nothing.
+ *
+ * Sampling starts after ZOD_PROFILE_SKIP seconds of the run (default 15):
+ * the first seconds are the map download, the path finder's set-up and the
+ * first upload of every image, and a profile that starts at frame one is
+ * mostly those (MEASURED: 13 s at 192 longwords were all start-up).
  */
 
 #include "zod_prof.h"
@@ -38,7 +43,29 @@ extern "C" {
 
 static char prof_path[256];
 static int prof_on = 0;
+static int prof_wanted = -1;      /* -1 not read, 0 no, 1 yes */
+static double prof_skip = 15.0;
 static unsigned long prof_lib = 0;
+
+extern "C" void zod_prof_tick(double run_seconds)
+{
+	if(prof_wanted < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_PROFILE", prof_path, sizeof(prof_path));
+
+		prof_wanted = (e && *e) ? 1 : 0;
+
+		e = zod_env("ZOD_PROFILE_SKIP", buf, sizeof(buf));
+		if(e && *e) prof_skip = strtod(e, 0);
+	}
+
+	if(prof_wanted == 1 && !prof_on && run_seconds >= prof_skip)
+	{
+		prof_wanted = 2;   /* once */
+		zod_prof_start();
+	}
+}
 
 extern "C" void zod_prof_start(void)
 {
@@ -88,5 +115,6 @@ extern "C" void zod_prof_stop(void)
 
 extern "C" void zod_prof_start(void) {}
 extern "C" void zod_prof_stop(void) {}
+extern "C" void zod_prof_tick(double) {}
 
 #endif

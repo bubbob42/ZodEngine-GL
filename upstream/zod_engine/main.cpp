@@ -545,8 +545,8 @@ void run_single_player()
     double start_time = current_time();
     long frames = 0;
 
-    //ZOD_PROFILE=<file>: PC samples over the -B run (port/zod_prof.cpp)
-    if(measure) zod_prof_start();
+    //ZOD_PROFILE=<file>: PC samples over the -B run, after ZOD_PROFILE_SKIP
+    //seconds of it (port/zod_prof.cpp, zod_prof_tick below)
 
     //Servertakt und feste Pause liegen AUSSERHALB von ZPlayer::Tick und fehlten
     //deshalb in der Bilanz: auf dem Amiga waren von 16863 us je Bild nur 1800
@@ -665,6 +665,8 @@ void run_single_player()
         if(starting_conditions.read_bench)
         {
             double run_time = current_time() - start_time;
+
+            zod_prof_tick(run_time);
 
             if(run_time >= starting_conditions.bench_seconds)
             {
