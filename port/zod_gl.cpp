@@ -18,7 +18,28 @@ int zod_gl_active = 0;
 enum
 {
 	TILE_MAX    = 1024,   /* largest tile edge: every library has 1024 */
-	BATCH_QUADS = 1000    /* 4000 vertices: below MiniGL's vertex buffer (4096) */
+	BATCH_QUADS = 1000,   /* 4000 vertices: below MiniGL's vertex buffer (4096) */
+	MAP_TILE    = 128,    /* the map texture's tile: 32 KB at 16 bit */
+	MAP_MIN_PX  = 1024 * 1024  /* surfaces larger than this get a map texture */
+};
+
+/* ---- the map texture -------------------------------------------------------
+ * The map surface (1024x1376 to 4096x4096) does not fit the texture heap
+ * (16 MB on RadeonGL, no eviction). Instead one opaque texture of the
+ * screen's size plus a tile on every side holds the part around the view,
+ * in MAP_TILE squares: map tile (x, y) lives in slot (x mod nx, y mod ny),
+ * so a scrolling view only ever needs the tiles at its edge. A tile is sent
+ * when a draw needs it; one more of the ring around the view goes up each
+ * frame ahead of time. A crater or zone marker baked into the map marks the
+ * tiles it touches stale. */
+struct torus
+{
+	GLuint name;
+	int W, H;                 /* texture size, powers of two */
+	int nx, ny;               /* slots across and down */
+	int mtx, mty;             /* map tiles across and down */
+	int *slot_tile;           /* nx * ny: the map tile in the slot, -1 none */
+	unsigned char *stale;     /* nx * ny: the map changed under the slot */
 };
 
 struct zod_gl_tex
@@ -31,6 +52,7 @@ struct zod_gl_tex
 	int dx0, dy0, dx1, dy1;   /* pixels to send again; dx1 <= dx0: none */
 	int failed;               /* the library refused it: not tried again */
 	unsigned long gen;        /* the context it belongs to */
+	struct torus *tor;        /* a map texture instead of tiles (MAP_MIN_PX) */
 };
 
 static int screen_w = 0, screen_h = 0;
@@ -55,7 +77,7 @@ static int cur_mode = -1;      /* 0 textured, 1 hit flash, 2 fill */
 /* counters (per run; divided by frames in the report) */
 static unsigned long st_frames, st_binds, st_batches, st_quads, st_fills;
 static unsigned long st_made, st_made_px, st_updates, st_update_px, st_refused;
-static unsigned long st_reused;
+static unsigned long st_reused, st_map_tiles, st_map_quads;
 
 /* ---- texture names of freed surfaces -------------------------------------
  * A surface freed right after it was drawn -- the HUD renders each clock
@@ -292,6 +314,30 @@ static int gl_refused(void)
 
 static void tex_drop_names(struct zod_gl_tex *t)
 {
+	if(t->tor)
+	{
+		struct torus *tr = t->tor;
+
+		if(tr->name && zod_gl_active && t->gen == ctx_gen)
+		{
+			if(retired_n < RETIRE_MAX)
+			{
+				retired[retired_n].name = tr->name;
+				retired[retired_n].tw = (short)tr->W;
+				retired[retired_n].th = (short)tr->H;
+				retired[retired_n].frame = frame_no;
+				retired_n++;
+			}
+			else
+				delete_name(tr->name);
+		}
+
+		free(tr->slot_tile);
+		free(tr->stale);
+		free(tr);
+		t->tor = 0;
+	}
+
 	if(t->names)
 	{
 		/* only into the context that made them -- and never without one:
@@ -320,6 +366,183 @@ static void tex_drop_names(struct zod_gl_tex *t)
 	}
 }
 
+static void vertex(float u, float v, float x, float y);
+static void batch_begin(GLuint name, Uint8 alpha, int mode);
+
+/* the map texture for t (see struct torus) */
+static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
+{
+	struct torus *tr = (struct torus *)calloc(1, sizeof(*tr));
+	int W = MAP_TILE, H = MAP_TILE, i;
+
+	if(!tr)
+	{
+		t->failed = 1;
+		return;
+	}
+
+	while(W < screen_w + 2 * MAP_TILE && W < tile_max) W <<= 1;
+	while(H < screen_h + 2 * MAP_TILE && H < tile_max) H <<= 1;
+
+	tr->W = W;
+	tr->H = H;
+	tr->nx = W / MAP_TILE;
+	tr->ny = H / MAP_TILE;
+	tr->mtx = (s->w + MAP_TILE - 1) / MAP_TILE;
+	tr->mty = (s->h + MAP_TILE - 1) / MAP_TILE;
+	tr->slot_tile = (int *)malloc(sizeof(int) * tr->nx * tr->ny);
+	tr->stale = (unsigned char *)calloc((size_t)tr->nx * tr->ny, 1);
+	t->tor = tr;
+
+	if(!tr->slot_tile || !tr->stale)
+	{
+		t->failed = 1;
+		return;
+	}
+
+	for(i = 0; i < tr->nx * tr->ny; i++) tr->slot_tile[i] = -1;
+
+	batch_end();
+
+	/* a freed map's texture of the same size (the last map) */
+	for(i = pool_n - 1; i >= 0; i--)
+		if(pool[i].tw == W && pool[i].th == H) break;
+
+	if(i >= 0)
+	{
+		tr->name = pool[i].name;
+		pool[i] = pool[--pool_n];
+		st_reused++;
+	}
+	else
+	{
+		/* RadeonGL takes no pixels (storage only); other libraries get zeros */
+		unsigned char *zero = npot_ok ? 0 : (unsigned char *)calloc((size_t)W * H, 3);
+
+		glGenTextures(1, &tr->name);
+		glBindTexture(GL_TEXTURE_2D, tr->name);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		/* opaque: RGB, which RadeonGL keeps as RGB565 */
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_UNSIGNED_BYTE, zero);
+		free(zero);
+
+		if(gl_refused())
+		{
+			delete_name(tr->name);
+			tr->name = 0;
+			t->failed = 1;
+			st_refused++;
+			ZLOG("GL: no room for the %dx%d map texture -- the map stays undrawn\n", W, H);
+			return;
+		}
+
+		st_made_px += (unsigned long)W * H;
+	}
+
+	cur_name = 0;
+	st_made++;
+	ZLOG("GL: map %dx%d through a %dx%d texture of %dx%d tiles\n",
+	     s->w, s->h, W, H, MAP_TILE, MAP_TILE);
+}
+
+/* map tile (mx, my) into its slot, if it is not there yet */
+static int torus_tile(struct zod_gl_tex *t, int mx, int my)
+{
+	struct torus *tr = t->tor;
+	const int slot = (my % tr->ny) * tr->nx + (mx % tr->nx);
+	const int tile = my * tr->mtx + mx;
+	const int x0 = mx * MAP_TILE, y0 = my * MAP_TILE;
+	const int w = (t->w - x0 < MAP_TILE) ? t->w - x0 : MAP_TILE;
+	const int h = (t->h - y0 < MAP_TILE) ? t->h - y0 : MAP_TILE;
+	static unsigned char buf[MAP_TILE * MAP_TILE * 4];
+
+	if(tr->slot_tile[slot] == tile && !tr->stale[slot]) return 0;
+
+	batch_end();
+	convert(t->s, x0, y0, w, h, buf, w * 4);
+	glBindTexture(GL_TEXTURE_2D, tr->name);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
+	                w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	cur_name = 0;
+
+	tr->slot_tile[slot] = tile;
+	tr->stale[slot] = 0;
+	st_map_tiles++;
+
+	return 1;
+}
+
+/* the map surface's rectangle src at x, y */
+static void torus_blit(struct zod_gl_tex *t, int sx0, int sy0, int sx1, int sy1,
+                       int x, int y, Uint8 alpha)
+{
+	struct torus *tr = t->tor;
+	const int mx0 = sx0 / MAP_TILE, my0 = sy0 / MAP_TILE;
+	const int mx1 = (sx1 - 1) / MAP_TILE, my1 = (sy1 - 1) / MAP_TILE;
+	int mx, my, ahead = 1;
+
+	/* the view's tiles first, all of them: they are drawn now */
+	for(my = my0; my <= my1; my++)
+		for(mx = mx0; mx <= mx1; mx++)
+			torus_tile(t, mx, my);
+
+	/* one tile of the ring around the view ahead of time -- only those
+	 * whose slot holds nothing of the view itself */
+	for(my = my0 - 1; my <= my1 + 1 && ahead; my++)
+		for(mx = mx0 - 1; mx <= mx1 + 1 && ahead; mx++)
+		{
+			if(mx < 0 || my < 0 || mx >= tr->mtx || my >= tr->mty) continue;
+			if(mx >= mx0 && mx <= mx1 && my >= my0 && my <= my1) continue;
+			if(mx1 - mx0 + 1 >= tr->nx || my1 - my0 + 1 >= tr->ny) continue;
+			{
+				/* its slot is free of the view: another column or row */
+				const int sxl = mx % tr->nx, syl = my % tr->ny;
+				int vx, vy, used = 0;
+
+				for(vy = my0; vy <= my1 && !used; vy++)
+					for(vx = mx0; vx <= mx1 && !used; vx++)
+						if(vx % tr->nx == sxl && vy % tr->ny == syl) used = 1;
+
+				if(!used && torus_tile(t, mx, my)) ahead = 0;
+			}
+		}
+
+	for(my = my0; my <= my1; my++)
+		for(mx = mx0; mx <= mx1; mx++)
+		{
+			const int tx0 = mx * MAP_TILE, ty0 = my * MAP_TILE;
+			const int ox0 = sx0 > tx0 ? sx0 : tx0;
+			const int oy0 = sy0 > ty0 ? sy0 : ty0;
+			const int ox1 = sx1 < tx0 + MAP_TILE ? sx1 : tx0 + MAP_TILE;
+			const int oy1 = sy1 < ty0 + MAP_TILE ? sy1 : ty0 + MAP_TILE;
+			const int px = (mx % tr->nx) * MAP_TILE, py = (my % tr->ny) * MAP_TILE;
+			float u0, v0, u1, v1, X0, Y0, X1, Y1;
+
+			if(ox1 <= ox0 || oy1 <= oy0) continue;
+
+			u0 = (float)(px + ox0 - tx0) / tr->W;
+			v0 = (float)(py + oy0 - ty0) / tr->H;
+			u1 = (float)(px + ox1 - tx0) / tr->W;
+			v1 = (float)(py + oy1 - ty0) / tr->H;
+			X0 = (float)(x + ox0 - sx0);
+			Y0 = (float)(y + oy0 - sy0);
+			X1 = X0 + (ox1 - ox0);
+			Y1 = Y0 + (oy1 - oy0);
+
+			batch_begin(tr->name, alpha, 0);
+			vertex(u0, v0, X0, Y0);
+			vertex(u1, v0, X1, Y0);
+			vertex(u1, v1, X1, Y1);
+			vertex(u0, v1, X0, Y1);
+			batch_quads++;
+			st_quads++;
+			st_map_quads++;
+		}
+}
+
 static struct zod_gl_tex *tex_make(SDL_Surface *s)
 {
 	struct zod_gl_tex *t = (struct zod_gl_tex *)calloc(1, sizeof(*t));
@@ -331,6 +554,14 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s)
 	t->s = s;
 	t->w = s->w;
 	t->h = s->h;
+	t->gen = ctx_gen;
+
+	if((long)s->w * s->h > MAP_MIN_PX)
+	{
+		torus_make(t, s);
+		return t;
+	}
+
 	t->tw = (npot_ok && s->w > 256) ? (s->w < tile_max ? s->w : tile_max) : pot(s->w);
 	t->th = (npot_ok && s->h > 256) ? (s->h < tile_max ? s->h : tile_max) : pot(s->h);
 	t->cols = (s->w + t->tw - 1) / t->tw;
@@ -500,7 +731,7 @@ static struct zod_gl_tex *tex_get(SDL_Surface *s)
 	if(!t) t = e->t = tex_make(s);
 	if(!t || t->failed) return 0;
 
-	tex_refresh(t);
+	if(!t->tor) tex_refresh(t);
 
 	return t;
 }
@@ -521,6 +752,22 @@ void zod_gl_changed(SDL_Surface *s, int x, int y, int w, int h)
 	if(x1 > t->w) x1 = t->w;
 	if(y1 > t->h) y1 = t->h;
 	if(x1 <= x || y1 <= y) return;
+
+	if(t->tor)
+	{
+		struct torus *tr = t->tor;
+		int mx, my;
+
+		for(my = y / MAP_TILE; my <= (y1 - 1) / MAP_TILE; my++)
+			for(mx = x / MAP_TILE; mx <= (x1 - 1) / MAP_TILE; mx++)
+			{
+				const int slot = (my % tr->ny) * tr->nx + (mx % tr->nx);
+
+				if(tr->slot_tile[slot] == my * tr->mtx + mx) tr->stale[slot] = 1;
+			}
+
+		return;
+	}
 
 	if(t->dx1 <= t->dx0)
 	{
@@ -668,6 +915,12 @@ void zod_gl_blit(SDL_Surface *s, const SDL_Rect *src, int x, int y,
 	if(sy1 > t->h) sy1 = t->h;
 	if(sx1 <= sx0 || sy1 <= sy0) return;
 
+	if(t->tor)
+	{
+		torus_blit(t, sx0, sy0, sx1, sy1, x, y, alpha);
+		return;
+	}
+
 	for(r = 0; r < t->rows; r++)
 		for(c = 0; c < t->cols; c++)
 		{
@@ -761,6 +1014,8 @@ void zod_gl_report(void)
 
 	ZLOG("GL: %lu frames; per frame x10: batches %lu, binds %lu, quads %lu, fills %lu\n",
 	     st_frames, st_batches * 10 / f, st_binds * 10 / f, st_quads * 10 / f, st_fills * 10 / f);
+	ZLOG("GL: map texture: %lu tiles sent, %lu quads drawn (per frame x10: %lu, %lu)\n",
+	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f);
 	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu\n",
 	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused);
 }
