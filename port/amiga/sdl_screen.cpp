@@ -887,6 +887,12 @@ static unsigned long zeig_bilder = 0, zeig_punkte = 0;
  * beinahe ein zweites Mal gebrochen. */
 extern "C" int zod_zeiger_spaet(void)
 {
+#ifndef DISABLE_OPENGL
+	/* GL: the cursor hands its image over too, and gl_bild_zeigen draws
+	 * it last, at the mouse position of the moment before the frame is
+	 * shown -- the same reason as for the 8-bit path */
+	if(gl_kontext) return zeiger_weg;
+#endif
 	return screen_bpp == 8 && zeiger_weg;
 }
 
