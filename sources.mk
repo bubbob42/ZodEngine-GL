@@ -10,6 +10,7 @@ PORT_SRCS := \
 	port/zod_strings.cpp \
 	port/zod_zeiger.cpp \
 	port/zod_census.cpp \
+	port/zod_prof.cpp \
 	port/amiga/amiga_startup.cpp \
 	port/amiga/amiga_audio.cpp \
 	port/amiga/video_play.cpp \

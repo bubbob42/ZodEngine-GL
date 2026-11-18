@@ -184,6 +184,8 @@ else ifeq ($(PLATFORM),amiga)
   # anders als AMMX, das nur der 080er bekommt.
   ASM_SRCS      += port/amiga/musik_kern.s
   ENGINE_C_SRCS += port/amiga/musik_mischer.c port/amiga/musik_ausgabe.c
+  # the PC sampler behind ZOD_PROFILE (RadeonGL's glsmoke/pcprof.c)
+  ENGINE_C_SRCS += port/amiga/pcprof.c
   DEFINES       += -DZOD_MIX_ASM
 
   ifeq ($(ZOD_AMMX),1)

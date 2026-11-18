@@ -38,6 +38,7 @@ TCHAR *optarg;
 #include <amiga_audio.h>
 #include <amiga_startup.h>
 #include <zod_census.h>
+#include <zod_prof.h>
 #ifndef DISABLE_OPENGL
 #include <zod_gl.h>
 #endif
@@ -544,6 +545,9 @@ void run_single_player()
     double start_time = current_time();
     long frames = 0;
 
+    //ZOD_PROFILE=<file>: PC samples over the -B run (port/zod_prof.cpp)
+    if(measure) zod_prof_start();
+
     //Servertakt und feste Pause liegen AUSSERHALB von ZPlayer::Tick und fehlten
     //deshalb in der Bilanz: auf dem Amiga waren von 16863 us je Bild nur 1800
     //erklaert. Diese beiden schliessen die Luecke.
@@ -654,6 +658,7 @@ void run_single_player()
         if(zod_amiga_break())
         {
             ZLOG("Strg-C erkannt, beende\n");
+            zod_prof_stop();   //the sampler must not outlive the task it reads
             break;
         }
 
@@ -663,6 +668,8 @@ void run_single_player()
 
             if(run_time >= starting_conditions.bench_seconds)
             {
+                zod_prof_stop();
+
                 //Achtung: der serielle Kanal (RawDoFmt) kann kein %f,
                 //deshalb die Bildrate verzehnfacht als Ganzzahl.
                 long fps10 = run_time > 0 ? (long)((frames * 10.0) / run_time) : 0;
