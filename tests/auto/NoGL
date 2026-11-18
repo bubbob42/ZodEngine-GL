@@ -1,0 +1,21 @@
+; NoGL -- an Amiga without minigl.library: the game asks for GL (no -o), does
+; not find the library, and must draw in software by itself. A 30 s bot
+; match on p02_bb_orig01 without the library in LIBS: (RunZodNoGL does not
+; assign DEV:Libs/RadeonGL); frame 300 saved by ZOD_SHOT to compare with
+; GLSmoke's software frame. The log must show the fallback and an [OK].
+; LIMIT 900
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+Echo "=== LIBS: has no minigl.library ===" >>DEV:Test/auto.log
+Version LIBS:minigl.library >>DEV:Test/auto.log
+Echo "=== GL asked for, no library ===" >>DEV:Test/auto.log
+SetEnv ZOD_SHOT DEV:Test/zod-nogl-f300.bmp:300
+Run >NIL: Execute DEV:Test/RunZodNoGL nogl 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-nogl.done
+Type DEV:Test/zod-nogl.log >>DEV:Test/auto.log
+UnSetEnv ZOD_SHOT
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

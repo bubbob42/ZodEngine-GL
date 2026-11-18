@@ -1,0 +1,14 @@
+.KEY tag/A,secs/A,args/F
+.BRA {
+.KET }
+; RunZodNoGL -- RunZod without minigl.library: LIBS: is left as the system
+; has it (the autotest machine has none there), so the game's GL request
+; fails and it must fall back to the software path. Log to
+; DEV:Test/zod-{tag}.log, then a done marker.
+FailAt 1000
+Stack 262144
+CD DEV:Zod
+Echo "no minigl.library assigned" >DEV:Test/zod-{tag}.log
+DEV:Zod/zod_040 -t null -b red -b blue -e psettings_nopause.txt -r 640x480 -s -u -G zod -F on -B {secs} {args} >>DEV:Test/zod-{tag}.log
+Echo "zod rc=$RC" >>DEV:Test/zod-{tag}.log
+Echo >DEV:Test/zod-{tag}.done done
