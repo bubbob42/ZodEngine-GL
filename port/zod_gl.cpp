@@ -12,6 +12,7 @@
 #include <math.h>
 
 #include "zod_log.h"
+#include "amiga_startup.h"   /* zod_env */
 
 int zod_gl_active = 0;
 
@@ -75,6 +76,7 @@ static unsigned long ctx_gen = 0;
  * and text surfaces of every width would not match. */
 static int tile_max = 1024;     /* largest edge */
 static int npot_ok = 0;         /* the library takes any size */
+static int copy565_ok = 0;      /* RGB565 words go into an RGB texture as they are */
 static int refused_told = 0;
 
 /* the open batch */
@@ -388,6 +390,40 @@ static void convert(SDL_Surface *s, int x0, int y0, int w, int h,
 	}
 }
 
+/* The rectangle x0, y0, w, h of an 8-bit surface as RGB565 words (the
+ * 68k's own order: big-endian, as MGL_UNSIGNED_SHORT_5_6_5 wants them),
+ * rows of w words; 0 = not an 8-bit surface. Opaque: the map texture is RGB. */
+static int convert565(SDL_Surface *s, int x0, int y0, int w, int h, Uint16 *out)
+{
+	const SDL_PixelFormat *f = s->format;
+	Uint16 tab[256];
+	int i, x, y;
+
+	if(f->BytesPerPixel != 1 || !f->palette) return 0;
+
+	for(i = 0; i < 256; i++)
+	{
+		if(i < f->palette->ncolors)
+		{
+			const SDL_Color *c = &f->palette->colors[i];
+
+			tab[i] = (Uint16)(((c->r >> 3) << 11) | ((c->g >> 2) << 5) | (c->b >> 3));
+		}
+		else
+			tab[i] = 0;
+	}
+
+	for(y = 0; y < h; y++)
+	{
+		const Uint8 *src = (const Uint8 *)s->pixels + (size_t)(y0 + y) * s->pitch + x0;
+		Uint16 *d = out + (size_t)y * w;
+
+		for(x = 0; x < w; x++) d[x] = tab[src[x]];
+	}
+
+	return 1;
+}
+
 static int gl_refused(void)
 {
 	GLenum e = glGetError();
@@ -561,8 +597,8 @@ static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
 
 	cur_name = 0;
 	st_made++;
-	ZLOG("GL: map %dx%d through a %dx%d texture of %dx%d tiles\n",
-	     s->w, s->h, W, H, MAP_TILE, MAP_TILE);
+	ZLOG("GL: map %dx%d through a %dx%d texture of %dx%d tiles, sent as %s\n",
+	     s->w, s->h, W, H, MAP_TILE, MAP_TILE, copy565_ok ? "RGB565 words" : "RGBA bytes");
 }
 
 /* map tile (mx, my) into its slot, if it is not there yet */
@@ -575,14 +611,25 @@ static int torus_tile(struct zod_gl_tex *t, int mx, int my)
 	const int w = (t->w - x0 < MAP_TILE) ? t->w - x0 : MAP_TILE;
 	const int h = (t->h - y0 < MAP_TILE) ? t->h - y0 : MAP_TILE;
 	static unsigned char buf[MAP_TILE * MAP_TILE * 4];
+	static Uint16 buf565[MAP_TILE * MAP_TILE];
 
 	if(tr->slot_tile[slot] == tile && !tr->stale[slot]) return 0;
 
 	batch_end();
-	convert(t->s, x0, y0, w, h, buf, w * 4);
 	glBindTexture(GL_TEXTURE_2D, tr->name);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
-	                w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+
+	/* 2 bytes a texel the library only copies (A4000D, scrolling: a tile
+	 * as RGBA bytes cost ~20 ms, converted twice) */
+	if(copy565_ok && convert565(t->s, x0, y0, w, h, buf565))
+		glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
+		                w, h, GL_RGB, MGL_UNSIGNED_SHORT_5_6_5, buf565);
+	else
+	{
+		convert(t->s, x0, y0, w, h, buf, w * 4);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
+		                w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	}
+
 	cur_name = 0;
 
 	tr->slot_tile[slot] = tile;
@@ -1326,6 +1373,20 @@ void zod_gl_init(int w, int h)
 		tile_max = max >= 256 ? (max > 2048 ? 2048 : (int)max) : TILE_MAX;
 		/* RadeonGL (its extensions are GL_RGL_*): any size, one level */
 		npot_ok = ext && strstr(ext, "GL_RGL_") != 0;
+		/* RadeonGL keeps GL_RGB as RGB565 and copies MGL_UNSIGNED_SHORT_5_6_5
+		 * rows into it word for word; RGBA bytes it converts texel by
+		 * texel. Other libraries keep the RGBA bytes until tested. */
+		copy565_ok = npot_ok;
+
+		/* ZOD_GL_565=aus: map tiles as RGBA bytes (to measure the
+		 * difference); default on */
+		{
+			char buf[16];
+			const char *e = zod_env("ZOD_GL_565", buf, sizeof(buf));
+
+			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+				copy565_ok = 0;
+		}
 
 		ZLOG("GL: textures up to %d, %s\n", tile_max,
 		     npot_ok ? "any size (large surfaces at their own size)" : "powers of two");
