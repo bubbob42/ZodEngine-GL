@@ -273,6 +273,47 @@ checker sees every command; r200view renders the dumped frames.
   - RadeonGL gives power-of-two textures a full mip chain. Large surfaces
     therefore go up at their own size, and atlas pages are 1023 high.
 
+## 5c. First A4000D runs (M1 baseline, M4 start), 2026-11-18
+
+A4000D, 68060, Radeon 9200 through the Mediator, RadeonGL 0.16 as installed.
+60 s bot matches, sound off, 640x480, logs in RAM:; the game's -B report.
+R = cego's v1.1 zod_060, S = ours with -o, G/H/D = ours through MiniGL
+(G = 4746f4a, H = + content sums fe71755, D = + HUD text 8e069ed + 565
+tiles adc3502). Runners: tools/hw/zod_run.py, zod_ab.py (git-ignored).
+
+**orig01, still view (R S G G S R, then G H H G):**
+
+| variant | fps | draw ms | flip ms | HUD ms |
+|---|---|---|---|---|
+| R cego v1.1 | 18.0 / 19.0 | 22.7 | 14.2 | 2.7 |
+| S ours, software | 20.4 / 19.8 | 21.2 | 13.5 | 2.6 |
+| G GL | 17.0 / 16.6 / 17.7 / 16.9 | 42.5 | 0 | 20.2 |
+| H GL + content sums | 20.9 / 22.5 | 31.0 | 0 | 9.2 |
+
+**orig04, view scrolling (ZOD_TOUR; S H H S):**
+
+| variant | fps | draw ms | flip ms | map ms | HUD ms | gui ms |
+|---|---|---|---|---|---|---|
+| S | 7.2 / 7.0 | 56.1 | 44.6 | 25.7 | 5.4 | 0.5 |
+| H | 6.3 / 6.7 | 115 | 0 | 65.0 | 15.1 | 5.2 |
+
+What the numbers said, and what was done:
+- **Texture hazards.** RadeonGL waits for the card to go idle before an
+  upload into a texture the frame has drawn from (docs/core.md "Texture
+  hazards"). The HUD's per-frame text went into the atlas page every sprite
+  uses: 4.4 idle waits a frame, ~18 ms. Fixed by content sums (fe71755).
+- **The HUD's full redraw.** GL redraws the whole HUD every frame; the
+  clock and the unit count rendered four new text surfaces a frame. Fixed
+  by keeping them (8e069ed). FS-UAE: GL HUD 674 -> 327 us. A software full
+  redraw costs 2983 us there, so GL itself draws the HUD cheaply.
+- **Scrolling.** Each 128x128 map tile went up as RGBA bytes, converted
+  twice: ~20 ms a tile, 1.7 tiles a frame. Now RGB565 words the library
+  only copies (adc3502, ZOD_GL_565=aus to compare).
+- **Map section in a still view** costs the same in S and GL (~7 ms): the
+  game's own work, not drawing.
+- Not yet measured on the A4000D: D (8e069ed + adc3502). Next: still
+  H D D H, tour E D D E (E = D with ZOD_GL_565=aus), with S for reference.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
