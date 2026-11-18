@@ -175,10 +175,12 @@ static const char *musikwege[] = { "AHI", "Paula", NULL };
 /* How the game draws. Software is cego's 8-bit RTG path; MiniGL draws
  * through minigl.library (RadeonGL on a Radeon, PiStorm3D on a PiStorm)
  * and falls back to software by itself when the library or its screen is
- * not there. Saved as a word, "software" or "minigl". */
+ * not there (tests/auto/NoGL). So MiniGL is the default: GL where it is,
+ * software everywhere else -- and on a PiStorm only GL is free of tearing
+ * (the game's own present). Saved as a word, "software" or "minigl". */
 static const char *renderer_namen[] =
 {
-    "Software (RTG)", "MiniGL (RadeonGL, PiStorm3D)", NULL
+    "Software (RTG)", "MiniGL if installed (RadeonGL, PiStorm3D)", NULL
 };
 
 /* Die beiden Spielvarianten. Gespeichert wird der LISTENPLATZ -- es gibt
@@ -385,7 +387,7 @@ static void cfg_vorgaben(void)
     strcpy(cfg.spielername, "spieler");
     cfg.team        = 0;                 /* red                          */
     cfg.aufloesung  = aufloesung_platz("640x480");
-    cfg.renderer    = 0;                 /* software, as before            */
+    cfg.renderer    = 1;                 /* MiniGL, software without it    */
     cfg.ton         = TRUE;
     cfg.musik       = FALSE;             /* Musik ist nicht mitgeliefert  */
     cfg.musikweg    = 0;                 /* AHI                           */
