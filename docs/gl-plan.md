@@ -372,6 +372,65 @@ v1.1 zod_040, ours d2d111d = build/amiga-g6e). 60 s bot matches, 640x480.
   like Doom64's panflip would cure it, at the cost of a bitmap context
   (defect 3: leaks per context round).
 
+## 5e. Next steps -- concepts for review (2026-11-18 evening)
+
+Three candidates; none is started. Each is a new piece of behaviour, so it
+waits for the user's choice.
+
+**A. Tear-free on the PiStorm: a present of our own.**
+- Problem: PiStorm3D keeps one buffer and no vsync below VideoCore.card 2.0
+  (defect 4; the PiStorm runs Emu68-VC4.card 1.0). The GPU draws into the
+  screen on display, so the picture tears. Zod runs at 177-234 fps there,
+  so the picture tears all the time.
+- Recipe, measured by Doom64 (amiga/panflip_amiga.c, GPL-2-or-later, same
+  author, so usable under GPLv3):
+  - an own 640x960 BGRA32 screen, plus a backdrop window for IDCMP;
+  - mglCreateContextFromBitMap into an own 32-bit friend bitmap;
+  - per frame: mglSwitchDisplay, BltBitMap into the hidden half (1 ms),
+    then RyOffset + ScrollVPort, which waits for the blank.
+  - Result: 58.8 fps locked to 60 Hz. The wait spins the CPU (a timer
+    sleep first; raised priority is forbidden).
+- Zod: a branch in gl_oeffnen (port/amiga/sdl_screen.cpp), only when the
+  library's id string says PiStorm3D and no VideoCore.card 2+ is loaded.
+  window_ptr becomes our backdrop window. The pointer is already drawn by
+  the engine (gl_bild_zeigen), so nothing changes there.
+- Cost: defect 3 (bitmap contexts leak ~16 KB a round and slow down after
+  ~5 rounds). Zod makes its context once per start and per resolution
+  change. A ZodLaunch switch "Sync" (default on with PiStorm3D).
+- Effort: medium (~400 lines from Doom64, adapted to Zod's SDL layer).
+- **Recommended: yes.** It is what a PiStorm player sees first.
+
+**B. The HUD as a layer: the last ~2.4 ms on the A4000D.**
+- Problem: GL redraws the whole HUD every frame (zplayer ReRenderAll).
+  Software draws only what changed into the compose surface. A4000D:
+  HUD 5.0 ms in GL against 2.6 ms in software.
+- Idea: in GL, the HUD draws in software, incrementally as the software
+  path does, into a persistent 8-bit layer. Around zhud.DoRender:
+  SetUseOpenGL(false) and SetMainSoftwareSurface(layer); no ReRenderAll.
+  GL then draws the layer's two HUD rectangles (the right column and the
+  bottom bar) as two quads at the end of the frame.
+- Needed in zod_gl: a few dirty rectangles per texture instead of one
+  bounding box. Otherwise the clock (top right), the minimap and the chat
+  bar union into nearly the whole layer each second.
+- Hazard: the layer is uploaded in frame N and last drawn at the end of
+  frame N-1, so usually no wait.
+- Gain: ~2 ms of ~36 ms, about 6 % on the A4000D; nothing on the PiStorm
+  (game logic bound).
+- Risks: the portrait animation (frequent small uploads); team palettes.
+- **Recommended: later, or not at all.** Small gain for a change in how
+  cego's HUD is driven.
+
+**C. M6 preparation (no code).**
+- A README section in English: "Made with AI" (the RadeonGL convention),
+  what the GL renderer does, the measured tables, and how to choose it
+  (ZodLaunch "Renderer", or -o for software).
+- The licence question for cego: the MiniGL SDK's AmigaOS-only clause next
+  to GPLv3 (GLTron and Doom64 link the same SDK). cego decides.
+- The shape of the hand-over: branch gl pushed to cego's repo (we have
+  write access) or a PR from bubbob42/ZodEngine-GL. Toolchain note:
+  bebbo gcc 6.5 with libstdc++; his Docker image now ships GCC 16.
+- **Recommended: yes, after A.** The user writes to cego; I never send mail.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
