@@ -664,7 +664,26 @@ static int atlas_page_new(void)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	/* NULL pixels (storage only) on RadeonGL alone: PiStorm3D reads them
+	 * from address 0 over the Amiga bus -- with RGBA that froze the machine
+	 * (memory: pistorm3d-defects 1). Elsewhere the page comes zeroed. */
+	if(npot_ok)
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	else
+	{
+		zero = (unsigned char *)calloc((size_t)ATLAS_W * p->h, 4);
+
+		if(!zero)
+		{
+			delete_name(p->name);
+			p->name = 0;
+			return -1;
+		}
+
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, zero);
+		free(zero);
+	}
+
 	cur_name = 0;
 
 	if(gl_refused())
@@ -675,15 +694,19 @@ static int atlas_page_new(void)
 		return -1;
 	}
 
-	/* transparent between the images: in strips, the buffer stays small */
-	zero = (unsigned char *)calloc((size_t)ATLAS_W * 64, 4);
-
-	if(zero)
+	/* RadeonGL: transparent between the images, in strips (the buffer
+	 * stays small); the contents are undefined until written */
+	if(npot_ok)
 	{
-		for(y = 0; y < p->h; y += 64)
-			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, ATLAS_W, (p->h - y < 64) ? p->h - y : 64,
-			                GL_RGBA, GL_UNSIGNED_BYTE, zero);
-		free(zero);
+		zero = (unsigned char *)calloc((size_t)ATLAS_W * 64, 4);
+
+		if(zero)
+		{
+			for(y = 0; y < p->h; y += 64)
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, ATLAS_W, (p->h - y < 64) ? p->h - y : 64,
+				                GL_RGBA, GL_UNSIGNED_BYTE, zero);
+			free(zero);
+		}
 	}
 
 	st_made_px += (unsigned long)ATLAS_W * p->h;
