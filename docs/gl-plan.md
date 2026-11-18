@@ -338,6 +338,17 @@ but fps D 23.7 / 25.7 against F 24.8 / 25.2: within the runs' own spread.
 Batch breaks are cheap on RadeonGL 0.16; their number no longer limits.
 The largest GL extra left is the effects section (2.4-3.4 ms against 0.8).
 
+**No sin/cos for unturned sprites (119d63b; T = F + 119d63b, still F T T F,
+20:10):** every scaled sprite paid two sin/cos pairs, in software on the
+040/060 (~47 us an effect). F 22.3 / 24.9 fps, T 27.4 / 27.5; effects
+3.4 / 1.1 -> 0.7 / 1.0 ms, draw 28.6 / 25.4 -> 22.5 / 21.9 ms.
+
+**Where the A4000D stands (orig01 still, 60 s):** GL 27.5 fps, our software
+build ~20, cego's v1.1 18.5. Scrolling (orig04): GL 12.4, software 7.1.
+GL still costs more than software in: HUD +2.4 ms (the full redraw), gui
++0.9, pre-drawn objects +0.9, birds +0.35; it saves 4.7 ms on the map,
+1 ms on objects and the whole 13.5 ms flip.
+
 ## 5d. PiStorm3D (M5), 2026-11-18
 
 A1200 PiStorm CM4 (Emu68, reported as a 68040), PiStorm3D 30.0 (MiniGLV3D
