@@ -1447,6 +1447,52 @@ void ZSDL_Surface::ZSDL_FillDots(const SDL_Rect *dots, int count, Uint8 r, Uint8
 	if(SDL_MUSTLOCK(screen)) SDL_UnlockSurface(screen);
 }
 
+#ifndef DISABLE_OPENGL
+/* rotozoomSurfaceSize's arithmetic (rotozoomSurfaceSizeTrig: the turned
+ * box's size), with cos(angle) * size and sin(angle) * size handed back for
+ * the GL quad. sin and cos run in software on the 040/060 -- A4000D: ~47 us
+ * an effect with two pairs of them, 666 effects a frame in a big fight -- so
+ * they are worked out once, and not at all at angle 0 (scaled effects,
+ * unturned debris), where the result is the same to the bit. */
+static void zod_rot_size(int w, int h, float angle, float size,
+                         int *rw, int *rh, float *ca, float *sa)
+{
+	double c = size, s = 0.0, cx, cy, sx, sy, mw, mh;
+	const double x = w >> 1, y = h >> 1;
+	int hw, hh;
+
+	if(angle != 0.0f)
+	{
+		const double rad = angle * (3.14159265358979323846 / 180.0);
+
+		s = sin(rad) * size;
+		c = cos(rad) * size;
+	}
+
+	cx = c * x;
+	cy = c * y;
+	sx = s * x;
+	sy = s * y;
+
+	/* the largest of |cx +- sy|, |sx +- cy|, rounded up (ceil of a value
+	 * >= 0), at least 1 */
+	mw = fabs(cx + sy);
+	if(fabs(cx - sy) > mw) mw = fabs(cx - sy);
+	mh = fabs(sx + cy);
+	if(fabs(sx - cy) > mh) mh = fabs(sx - cy);
+
+	hw = (int)mw;
+	if((double)hw < mw) hw++;
+	hh = (int)mh;
+	if((double)hh < mh) hh++;
+
+	*rw = 2 * (hw > 1 ? hw : 1);
+	*rh = 2 * (hh > 1 ? hh : 1);
+	*ca = (float)c;
+	*sa = (float)s;
+}
+#endif
+
 void ZSDL_Surface::RenderSurface(int x, int y, bool render_hit, bool about_center)
 {
 	if(use_opengl)
@@ -1461,8 +1507,9 @@ void ZSDL_Surface::RenderSurface(int x, int y, bool render_hit, bool about_cente
 		if(!isz(angle) || !is1(size))
 		{
 			int rw = 0, rh = 0;
+			float ca, sa;
 
-			rotozoomSurfaceSize(sdl_surface->w, sdl_surface->h, angle, size, &rw, &rh);
+			zod_rot_size(sdl_surface->w, sdl_surface->h, angle, size, &rw, &rh, &ca, &sa);
 
 			if(about_center)
 			{
@@ -1481,9 +1528,9 @@ void ZSDL_Surface::RenderSurface(int x, int y, bool render_hit, bool about_cente
 
 			if(!GetMapBlitInfo(&box, x, y, from_rect, to_rect)) return;
 
-			zod_gl_blit_rot(sdl_surface,
-			                map_place_x + x + rw * 0.5f, map_place_y + y + rh * 0.5f,
-			                size, angle, alpha, render_hit);
+			zod_gl_blit_rot_cs(sdl_surface,
+			                   map_place_x + x + rw * 0.5f, map_place_y + y + rh * 0.5f,
+			                   ca, sa, alpha, render_hit);
 			return;
 		}
 

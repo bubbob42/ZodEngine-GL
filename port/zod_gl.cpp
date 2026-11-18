@@ -1540,9 +1540,25 @@ void zod_gl_blit(SDL_Surface *s, const SDL_Rect *src, int x, int y,
 void zod_gl_blit_rot(SDL_Surface *s, float cx, float cy, float size,
                      float angle, Uint8 alpha, int hit)
 {
+	float ca = size, sa = 0.0f;
+
+	/* sin and cos run in software on the 040/060 (no FPU opcode is used
+	 * for them): none at all for an unturned sprite */
+	if(angle != 0.0f)
+	{
+		const float a = angle * 3.14159265f / 180.0f;
+
+		ca = cosf(a) * size;
+		sa = sinf(a) * size;
+	}
+
+	zod_gl_blit_rot_cs(s, cx, cy, ca, sa, alpha, hit);
+}
+
+void zod_gl_blit_rot_cs(SDL_Surface *s, float cx, float cy, float ca, float sa,
+                        Uint8 alpha, int hit)
+{
 	struct zod_gl_tex *t = tex_get(s);
-	const float a = angle * 3.14159265f / 180.0f;
-	const float ca = cosf(a) * size, sa = sinf(a) * size;
 	int c, r;
 
 	if(!t) return;

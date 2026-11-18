@@ -61,6 +61,11 @@ void zod_gl_blit(SDL_Surface *s, const SDL_Rect *src, int x, int y,
 void zod_gl_blit_rot(SDL_Surface *s, float cx, float cy, float size,
                      float angle, Uint8 alpha, int hit);
 
+/* the same with cos(angle) * size and sin(angle) * size already worked out
+ * (by the caller, who needed them for the size anyway) */
+void zod_gl_blit_rot_cs(SDL_Surface *s, float cx, float cy, float ca, float sa,
+                        Uint8 alpha, int hit);
+
 /* an untextured rectangle */
 void zod_gl_fill(int x, int y, int w, int h, Uint8 r, Uint8 g, Uint8 b);
 
