@@ -172,6 +172,15 @@ static LONG aufloesung_platz(const char *wert)
  * Bedeutung, die man verwechseln koennte. */
 static const char *musikwege[] = { "AHI", "Paula", NULL };
 
+/* How the game draws. Software is cego's 8-bit RTG path; MiniGL draws
+ * through minigl.library (RadeonGL on a Radeon, PiStorm3D on a PiStorm)
+ * and falls back to software by itself when the library or its screen is
+ * not there. Saved as a word, "software" or "minigl". */
+static const char *renderer_namen[] =
+{
+    "Software (RTG)", "MiniGL (RadeonGL, PiStorm3D)", NULL
+};
+
 /* Die beiden Spielvarianten. Gespeichert wird der LISTENPLATZ -- es gibt
  * hier keine Zahl mit eigener Bedeutung, die man verwechseln koennte, und
  * die Liste wird nicht waermer als zwei Eintraege. */
@@ -330,6 +339,7 @@ struct einstellungen
     LONG  team;             /* Index in team_namen                      */
     BOOL  bot[8];           /* je Team ein Bot                          */
     LONG  aufloesung;       /* Index in aufloesungen                    */
+    LONG  renderer;         /* 0 software, 1 minigl.library             */
     BOOL  ton;
     BOOL  musik;
     /* Deckel auf die GEZEICHNETE Groesse der Effekte, in HALBEN Schritten:
@@ -375,6 +385,7 @@ static void cfg_vorgaben(void)
     strcpy(cfg.spielername, "spieler");
     cfg.team        = 0;                 /* red                          */
     cfg.aufloesung  = aufloesung_platz("640x480");
+    cfg.renderer    = 0;                 /* software, as before            */
     cfg.ton         = TRUE;
     cfg.musik       = FALSE;             /* Musik ist nicht mitgeliefert  */
     cfg.musikweg    = 0;                 /* AHI                           */
@@ -460,6 +471,7 @@ static void cfg_laden(void)
         if(!strcmp(zeile, "spielername"))  { strncpy(cfg.spielername, wert, MAX_TEXT-1); cfg.spielername[MAX_TEXT-1] = 0; }
         else if(!strcmp(zeile, "team"))        cfg.team       = atoi(wert);
         else if(!strcmp(zeile, "aufloesung"))  cfg.aufloesung = aufloesung_platz(wert);
+        else if(!strcmp(zeile, "renderer"))    cfg.renderer   = !strcmp(wert, "minigl") ? 1 : 0;
         else if(!strcmp(zeile, "ton"))         cfg.ton        = (BOOL)atoi(wert);
         else if(!strcmp(zeile, "musik"))       cfg.musik      = (BOOL)atoi(wert);
         /* "fenster" gab es bis zum 23.09. Der Schluessel wird jetzt
@@ -513,6 +525,7 @@ static void cfg_speichern(void)
     snprintf(zeile, sizeof(zeile), "spielername=%s\n", cfg.spielername);   FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "team=%ld\n", (long)cfg.team);          FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "aufloesung=%s\n", aufloesungen[cfg.aufloesung]); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "renderer=%s\n", cfg.renderer ? "minigl" : "software"); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "ton=%d\n", cfg.ton ? 1 : 0);           FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "musik=%d\n", cfg.musik ? 1 : 0);       FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "videos=%d\n", cfg.videos ? 1 : 0);     FPuts(f, zeile);
@@ -658,9 +671,10 @@ static void befehlszeile_bauen(char *aus, size_t platz)
              (long)(cfg.skalierung / 2), (long)((cfg.skalierung & 1) ? 5 : 0));
     strncat(aus, teil, platz - strlen(aus) - 1);
 
-    /* OpenGL ist in dieser Fassung abgeschaltet; -o schadet nicht und haelt
-     * die Zeile mit den dokumentierten Beispielen deckungsgleich. */
-    strncat(aus, "-o ", platz - strlen(aus) - 1);
+    /* -o: draw in software. Without it the game draws through
+     * minigl.library and falls back to software when it cannot. */
+    if(!cfg.renderer)
+        strncat(aus, "-o ", platz - strlen(aus) - 1);
 
     if(cfg.extra[0])
     {
@@ -971,7 +985,7 @@ enum
 int main(int argc, char **argv)
 {
     Object *app, *fenster;
-    Object *o_name, *o_team, *o_aufl;
+    Object *o_name, *o_team, *o_aufl, *o_renderer;
     Object *o_skalierung, *o_skalierung_text;
     Object *o_ton, *o_musik, *o_videos, *o_musikweg;
     Object *o_ahi, *o_ahi_label, *o_ahi_gruppe, *o_ahi_waehlen, *o_ahi_vorgabe;
@@ -1131,6 +1145,15 @@ int main(int argc, char **argv)
                     Child, o_aufl = CycleObject,
                         MUIA_Cycle_Entries, (ULONG)aufloesungen,
                         MUIA_Cycle_Active,  cfg.aufloesung,
+                    End,
+                    Child, Label2("Renderer"),
+                    Child, o_renderer = CycleObject,
+                        MUIA_Cycle_Entries, (ULONG)renderer_namen,
+                        MUIA_Cycle_Active,  cfg.renderer,
+                        MUIA_ShortHelp, (ULONG)"Software: the 8-bit RTG path.\n"
+                            "MiniGL: draws through minigl.library (RadeonGL\n"
+                            "on a Radeon, PiStorm3D on a PiStorm). Without the\n"
+                            "library the game draws in software by itself.",
                     End,
                     Child, Label2("Scaling"),
                     Child, HGroup,
@@ -1315,6 +1338,7 @@ int main(int argc, char **argv)
             get(o_musikweg, MUIA_Cycle_Active, &l); cfg.musikweg = l;
             get(o_variante, MUIA_Cycle_Active, &l); cfg.variante = (l == 1) ? 1 : 0;
             get(o_aufl,  MUIA_Cycle_Active, &l); cfg.aufloesung = l;
+            get(o_renderer, MUIA_Cycle_Active, &l); cfg.renderer = l ? 1 : 0;
 
             for(i = 0; i < 8; i++) { get(o_bot[i], MUIA_Selected, &l); cfg.bot[i] = (BOOL)l; }
             get(o_ton,          MUIA_Selected, &l); cfg.ton               = (BOOL)l;

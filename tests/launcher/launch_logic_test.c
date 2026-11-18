@@ -396,6 +396,36 @@ int main(void)
         { printf("FEHLER Variante ueberlebt das Speichern nicht\n"); fehler++; }
     }
 
+    /* ---- 5b. Renderer -------------------------------------------------- *
+     *
+     * Software (the default) passes -o; MiniGL leaves it out, and the game
+     * draws through minigl.library. The choice survives saving. */
+    {
+        char z[MAX_ZEILE];
+
+        cfg_vorgaben();
+
+        if(cfg.renderer != 0)
+        { printf("FEHLER default renderer is not software\n"); fehler++; }
+
+        befehlszeile_bauen(z, sizeof(z));
+        if(!strstr(z, "-o "))
+        { printf("FEHLER software renderer without -o: '%s'\n", z); fehler++; }
+
+        cfg.renderer = 1;
+        befehlszeile_bauen(z, sizeof(z));
+        if(strstr(z, "-o "))
+        { printf("FEHLER MiniGL renderer with -o: '%s'\n", z); fehler++; }
+
+        cfg_speichern();
+        cfg_vorgaben();
+        cfg_laden();
+        if(cfg.renderer != 1)
+        { printf("FEHLER renderer does not survive saving\n"); fehler++; }
+
+        cfg_vorgaben();
+    }
+
     /* ---- 5c. FPS-Anzeige ---------------------------------------------- *
      *
      * Der Schalter wird IMMER mitgegeben, auch in der Vorgabestellung --
