@@ -431,6 +431,59 @@ waits for the user's choice.
   bebbo gcc 6.5 with libstdc++; his Docker image now ships GCC 16.
 - **Recommended: yes, after A.** The user writes to cego; I never send mail.
 
+## 5f. Overnight 2026-11-18/19 (the user: "continue optimizing through the night without asking back -- max FPS on the 4000D, tear free on the PiStorm, cego's software path still working on non-GL Amigas and as fast as possible")
+
+Branches, each on the one before, none pushed:
+
+| branch | commits | what | measured |
+|---|---|---|---|
+| `pistorm-present` | 3af6c02 | PiStorm3D: a present of our own (port/amiga/zod_present.cpp, Doom64's panflip recipe) | PiStorm orig01: 56-57 fps on the 60 Hz output, every frame synced; refreshes missed 50-79 of ~1700; mouse y stays 0..479 |
+| `gl-fps-2` | 43e6a8c | PC profile of the -B run (ZOD_PROFILE, tools/prof_report.py) | first profiles below |
+| | e7dc207 | RGBA uploads as ARGB4444 words on RadeonGL, even atlas places | A4000D B Q Q B: 26.2 / 25.3 -> 28.3 / 27.9 fps (+9 %) |
+| | 83ae128 | tests/auto/NoGL: no minigl.library -> software by itself | FS-UAE: passes |
+| | a2b00fb | profile starts after ZOD_PROFILE_SKIP s | -- |
+| | fe89c8b | ZodLaunch: MiniGL is the default renderer | launchtest passes; ZodLaunch builds in cego's image |
+| `sw-speed` | 1e9cb89 | software path: the copy gap from the machine's own prices | A4000D M P P M: 19.8 / 19.9 -> 22.1 / 21.5 fps (+10 %) |
+
+Tried and dropped (measured, not committed; patches in build/hw/):
+- **Map items' server shortcut** (868 of ~1000 objects skip six no-op calls):
+  server.process 5.1 -> 4.7 ms, but the frame got slower through code layout
+  elsewhere (objects +0.45 ms in both runs) -- the 060 layout lottery
+  swallows a 1 % gain.
+- **Inline sort comparator**: K L L K 27.6 / 28.2 against 29.1 / 25.7, noise.
+- **The flip's shadow** (skip unchanged bytes): exact (FS-UAE check: 0 of
+  666 M screen bytes differ from the shadow, and 0 from the compose
+  surface), and 96 % of the copied bytes were unchanged -- but no gain on
+  the A4000D: there the CPU reads its own card RAM at ~40 ns a byte and
+  writes the Radeon at ~120 ns, so reading compose AND shadow costs about
+  what the saved writes did. build/hw/flip-shadow.patch.
+- **The HUD as a GL layer** (concept B): worse, 23.6 / 24.2 -> 23.3 / 21.4
+  fps. The software HUD redraws small parts nearly every frame; as texels
+  they cost ~240 ns each over the bus (16 M px a minute against 1.3 M).
+  build/hw/hud-layer.patch.
+
+What the profiles say (A4000D, GL, orig01, 40 s after a 15 s warm-up):
+program 80 % of the running samples, minigl.library 15 %, the OS 5 %. The
+game's own logic is about half the frame (the server's object loop alone
+~17 %: ~130 units at ~36 us each per tick; the 868 map items cost only
+~0.4 ms). Texture uploads are down to 1.7 %; the vertex stream to the card
+(ToVram) 5 %, the per-vertex calls ~5 %. A profile from frame one is mostly
+start-up (map download, first uploads) -- hence the skip.
+
+A4000D facts measured tonight: memory -- CPU card 128 MB (pri 40, from
+$08000000), motherboard 16 MB (pri 30); card RAM reads ~40 ns/byte with a
+plain longword loop; Radeon VRAM writes through the Mediator ~120 ns/byte;
+a copy call ~0.5-0.65 us. Runs of the same binary drift by up to 15 %
+between blocks on a long-running machine: compare only inside one A B B A
+series, reboot before a series.
+
+Waiting for the user's eye: tearing on the PiStorm (the present), the
+4444 picture on the A4000D (FS-UAE frames match software), and the software
+path with gap 0 on the A4000D (by construction it copies a subset of the
+same dirty blocks). Not done: a tear-free software path on the PiStorm (the
+same panned screen, copying the dirty blocks of the last two frames) -- GL
+is the launcher's default now and tear-free there.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
