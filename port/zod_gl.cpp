@@ -24,7 +24,10 @@ enum
 	MAP_MIN_PX  = 1024 * 1024, /* surfaces larger than this get a map texture */
 	ATLAS_W     = 1024,
 	ATLAS_PAGES = 4,
-	ATLAS_SIDE  = 256,    /* larger images keep a texture of their own */
+	ATLAS_SIDE  = 256,    /* wider images keep a texture of their own */
+	ATLAS_TALL  = 512,    /* taller ones too: the HUD's 100x484 side panel
+	                       * fits, which the HUD draws from four times a
+	                       * frame between atlas images */
 	ATLAS_SHELVES = 512
 };
 
@@ -806,7 +809,9 @@ static int shelf_class(int h)
 	if(h <= 96) return 96;
 	if(h <= 128) return 128;
 	if(h <= 192) return 192;
-	return 256;
+	if(h <= 256) return 256;
+	if(h <= 384) return 384;
+	return 512;
 }
 
 /* forget every image in the atlas: they are packed again as drawn */
@@ -1089,7 +1094,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 		return t;
 	}
 
-	if(atlas_ok && s->w <= ATLAS_SIDE && s->h <= ATLAS_SIDE && atlas_put(t, s))
+	if(atlas_ok && s->w <= ATLAS_SIDE && s->h <= ATLAS_TALL && atlas_put(t, s))
 	{
 		st_made++;
 		return t;
