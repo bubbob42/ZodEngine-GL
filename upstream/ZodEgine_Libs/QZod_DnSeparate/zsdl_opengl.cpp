@@ -602,6 +602,11 @@ void ZSDL_Surface::LoadBaseImage(string filename)
 	LoadBaseImage(surface);
 
 	if(zod_census_on) zod_census_image(sdl_surface, filename.c_str());
+
+#ifndef DISABLE_OPENGL
+	/* a loaded image: small ones share the GL atlas pages */
+	if(use_opengl) zod_gl_hint_atlas(sdl_surface);
+#endif
 }
 
 void ZSDL_Surface::LoadNewSurface(int w, int h, bool opaque)

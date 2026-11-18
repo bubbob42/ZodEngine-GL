@@ -20,7 +20,11 @@ enum
 	TILE_MAX    = 1024,   /* largest tile edge: every library has 1024 */
 	BATCH_QUADS = 1000,   /* 4000 vertices: below MiniGL's vertex buffer (4096) */
 	MAP_TILE    = 128,    /* the map texture's tile: 32 KB at 16 bit */
-	MAP_MIN_PX  = 1024 * 1024  /* surfaces larger than this get a map texture */
+	MAP_MIN_PX  = 1024 * 1024, /* surfaces larger than this get a map texture */
+	ATLAS_W     = 1024,
+	ATLAS_PAGES = 4,
+	ATLAS_SIDE  = 256,    /* larger images keep a texture of their own */
+	ATLAS_SHELVES = 512
 };
 
 /* ---- the map texture -------------------------------------------------------
@@ -53,6 +57,10 @@ struct zod_gl_tex
 	int failed;               /* the library refused it: not tried again */
 	unsigned long gen;        /* the context it belongs to */
 	struct torus *tor;        /* a map texture instead of tiles (MAP_MIN_PX) */
+	int atlas;                /* in an atlas page (names[0] is the page):
+	                           * 1 a loaded image, 2 a run-time slot */
+	int bx, by;               /* where the surface starts in its texture */
+	int slot_w, slot_h;       /* a run-time slot's size class */
 };
 
 static int screen_w = 0, screen_h = 0;
@@ -71,13 +79,67 @@ static int refused_told = 0;
 static int in_batch = 0;
 static int batch_quads = 0;
 static GLuint cur_name = 0;
-static Uint8 cur_alpha = 255;
-static int cur_mode = -1;      /* 0 textured, 1 hit flash, 2 fill */
+static int cur_mode = -1;      /* 0 textured, 1 hit flash, 2 fill without texel */
+static Uint32 cur_rgba = 0;    /* the last glColor4ub, valid if cur_rgba_ok */
+static int cur_rgba_ok = 0;
 
 /* counters (per run; divided by frames in the report) */
 static unsigned long st_frames, st_binds, st_batches, st_quads, st_fills;
 static unsigned long st_made, st_made_px, st_updates, st_update_px, st_refused;
 static unsigned long st_reused, st_map_tiles, st_map_quads;
+static unsigned long st_atlas_in, st_atlas_px, st_atlas_resets;
+static unsigned long st_bind_own;   /* binds of textures outside atlas and map */
+static int bind_is_own = 0;         /* set by the caller before batch_begin */
+
+/* ---- atlas pages -------------------------------------------------------------
+ * Small loaded images (zod_gl_hint_atlas) share pages of ATLAS_W x ATLAS_W,
+ * packed on their first draw onto shelves of fixed height classes with one
+ * transparent pixel between neighbours. Images of different kinds drawn one
+ * after another then share a texture and a batch. Page 0 starts with a
+ * small white block: fills draw with it and need no switch of texturing.
+ * On RadeonGL a page is one texel shorter than a power of two, so it is
+ * stored as one level, without the mip chain (+33 %) it would get. When all
+ * pages are full, the atlas starts again: its images are packed anew as
+ * they are drawn. */
+struct atlas_page
+{
+	GLuint name;
+	int h;                    /* height (ATLAS_W, or ATLAS_W - 1) */
+	int ycur;                 /* next free row for a new shelf */
+};
+
+struct atlas_shelf
+{
+	short page, y, h, x;      /* x: the next free column */
+};
+
+static struct atlas_page pages[ATLAS_PAGES];
+static int page_n = 0;
+static struct atlas_shelf shelves[ATLAS_SHELVES];
+static int shelf_n = 0;
+static GLuint white_name = 0;   /* page 0, for fills */
+static float white_u = 0.0f, white_v = 0.0f;
+
+/* ---- run-time slots ----------------------------------------------------------
+ * Surfaces the engine makes while it runs -- text above all: chat lines,
+ * the clock's digits, labels -- would each be a texture of their own and
+ * break the batch wherever they are drawn. Up to DYN_W x DYN_H they get a
+ * slot of a size class (powers of two from 16 x 8) in the atlas pages
+ * instead, theirs while they live. A freed surface's slot waits
+ * RETIRE_FRAMES frames, then serves the next surface of its class. */
+enum { DYN_W = 256, DYN_H = 64, DYN_FREE = 1024 };
+
+struct dyn_slot
+{
+	short page, x, y, cw, ch;
+	unsigned long frame;      /* when it was retired */
+};
+
+static struct dyn_slot dyn_free[DYN_FREE];      /* ready for a new surface */
+static int dyn_free_n = 0;
+static struct dyn_slot dyn_retired[DYN_FREE];   /* waiting RETIRE_FRAMES */
+static int dyn_retired_n = 0;
+static unsigned long st_dyn_in, st_dyn_reused;
 
 /* ---- texture names of freed surfaces -------------------------------------
  * A surface freed right after it was drawn -- the HUD renders each clock
@@ -122,6 +184,7 @@ struct reg_entry
 {
 	SDL_Surface *s;
 	struct zod_gl_tex *t;
+	int atlas_ok;             /* a loaded image (zod_gl_hint_atlas) */
 };
 
 static struct reg_entry reg[REG_SIZE];
@@ -156,6 +219,7 @@ static struct reg_entry *reg_add(SDL_Surface *s)
 		{
 			reg[i].s = s;
 			reg[i].t = 0;
+			reg[i].atlas_ok = 0;
 			return &reg[i];
 		}
 
@@ -186,10 +250,10 @@ static void batch_end(void)
 	}
 }
 
-static void batch_begin(GLuint name, Uint8 alpha, int mode)
+static void batch_begin(GLuint name, int mode)
 {
 	if(in_batch && mode == cur_mode && batch_quads < BATCH_QUADS &&
-	   (mode == 2 || (name == cur_name && alpha == cur_alpha)))
+	   (mode == 2 || name == cur_name))
 		return;
 
 	batch_end();
@@ -208,23 +272,30 @@ static void batch_begin(GLuint name, Uint8 alpha, int mode)
 		cur_mode = mode;
 	}
 
-	if(mode != 2)
+	if(mode != 2 && name != cur_name)
 	{
-		if(name != cur_name)
-		{
-			glBindTexture(GL_TEXTURE_2D, name);
-			cur_name = name;
-			st_binds++;
-		}
-
-		glColor4ub(255, 255, 255, alpha);
-		cur_alpha = alpha;
+		glBindTexture(GL_TEXTURE_2D, name);
+		cur_name = name;
+		st_binds++;
+		if(bind_is_own) st_bind_own++;
 	}
 
 	glBegin(GL_QUADS);
 	in_batch = 1;
 	batch_quads = 0;
 	st_batches++;
+}
+
+/* the next quad's colour -- inside the batch, sent only when it changes */
+static void quad_colour(Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+	const Uint32 c = ((Uint32)r << 24) | ((Uint32)g << 16) | ((Uint32)b << 8) | a;
+
+	if(cur_rgba_ok && c == cur_rgba) return;
+
+	glColor4ub(r, g, b, a);
+	cur_rgba = c;
+	cur_rgba_ok = 1;
 }
 
 /* ---- textures ------------------------------------------------------------ */
@@ -338,6 +409,36 @@ static void tex_drop_names(struct zod_gl_tex *t)
 		t->tor = 0;
 	}
 
+	if(t->atlas)
+	{
+		/* the page belongs to the atlas. A loaded image's place stays used
+		 * until the atlas starts again; a run-time slot is retired. */
+		if(t->atlas == 2 && t->names && zod_gl_active && t->gen == ctx_gen &&
+		   dyn_retired_n < DYN_FREE)
+		{
+			int pg;
+
+			for(pg = 0; pg < page_n; pg++)
+				if(pages[pg].name == t->names[0]) break;
+
+			if(pg < page_n)
+			{
+				struct dyn_slot *d = &dyn_retired[dyn_retired_n++];
+
+				d->page = (short)pg;
+				d->x = (short)t->bx;
+				d->y = (short)t->by;
+				d->cw = (short)t->slot_w;
+				d->ch = (short)t->slot_h;
+				d->frame = frame_no;
+			}
+		}
+
+		free(t->names);
+		t->names = 0;
+		return;
+	}
+
 	if(t->names)
 	{
 		/* only into the context that made them -- and never without one:
@@ -367,7 +468,6 @@ static void tex_drop_names(struct zod_gl_tex *t)
 }
 
 static void vertex(float u, float v, float x, float y);
-static void batch_begin(GLuint name, Uint8 alpha, int mode);
 
 /* the map texture for t (see struct torus) */
 static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
@@ -532,7 +632,8 @@ static void torus_blit(struct zod_gl_tex *t, int sx0, int sy0, int sx1, int sy1,
 			X1 = X0 + (ox1 - ox0);
 			Y1 = Y0 + (oy1 - oy0);
 
-			batch_begin(tr->name, alpha, 0);
+			batch_begin(tr->name, 0);
+			quad_colour(255, 255, 255, alpha);
 			vertex(u0, v0, X0, Y0);
 			vertex(u1, v0, X1, Y0);
 			vertex(u1, v1, X1, Y1);
@@ -543,7 +644,240 @@ static void torus_blit(struct zod_gl_tex *t, int sx0, int sy0, int sx1, int sy1,
 		}
 }
 
-static struct zod_gl_tex *tex_make(SDL_Surface *s)
+/* a cleared page; page 0 gets the white block for fills */
+static int atlas_page_new(void)
+{
+	struct atlas_page *p;
+	unsigned char *zero;
+	int y;
+
+	if(page_n >= ATLAS_PAGES) return -1;
+
+	p = &pages[page_n];
+	p->h = npot_ok ? ATLAS_W - 1 : ATLAS_W;
+	p->ycur = 0;
+
+	batch_end();
+	glGenTextures(1, &p->name);
+	glBindTexture(GL_TEXTURE_2D, p->name);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	cur_name = 0;
+
+	if(gl_refused())
+	{
+		delete_name(p->name);
+		p->name = 0;
+		st_refused++;
+		return -1;
+	}
+
+	/* transparent between the images: in strips, the buffer stays small */
+	zero = (unsigned char *)calloc((size_t)ATLAS_W * 64, 4);
+
+	if(zero)
+	{
+		for(y = 0; y < p->h; y += 64)
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, ATLAS_W, (p->h - y < 64) ? p->h - y : 64,
+			                GL_RGBA, GL_UNSIGNED_BYTE, zero);
+		free(zero);
+	}
+
+	st_made_px += (unsigned long)ATLAS_W * p->h;
+
+	if(page_n == 0)
+	{
+		/* a 4x4 white block at the top left, its own 4-row shelf */
+		static unsigned char white[4 * 4 * 4];
+
+		memset(white, 255, sizeof(white));
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, white);
+		white_name = p->name;
+		white_u = 2.0f / ATLAS_W;
+		white_v = 2.0f / p->h;
+		p->ycur = 5;
+	}
+
+	return page_n++;
+}
+
+/* the shelf height for an image h rows tall */
+static int shelf_class(int h)
+{
+	if(h <= 8)  return 8;
+	if(h <= 16) return 16;
+	if(h <= 24) return 24;
+	if(h <= 32) return 32;
+	if(h <= 48) return 48;
+	if(h <= 64) return 64;
+	if(h <= 96) return 96;
+	if(h <= 128) return 128;
+	if(h <= 192) return 192;
+	return 256;
+}
+
+/* forget every image in the atlas: they are packed again as drawn */
+static void atlas_reset(void)
+{
+	int i;
+
+	for(i = 0; i < REG_SIZE; i++)
+		if(reg[i].s && reg[i].s != REG_TOMB && reg[i].t && reg[i].t->atlas)
+		{
+			free(reg[i].t->names);
+			free(reg[i].t);
+			reg[i].t = 0;
+		}
+
+	shelf_n = 0;
+	dyn_free_n = 0;
+	dyn_retired_n = 0;
+
+	for(i = 0; i < page_n; i++) pages[i].ycur = (i == 0) ? 5 : 0;
+
+	st_atlas_resets++;
+	ZLOG("GL: atlas full -- starting it again\n");
+}
+
+/* a place for w x h in a page; 0 = no room */
+static int atlas_place(int w, int h, int *page, int *x, int *y)
+{
+	const int cls = shelf_class(h);
+	int i;
+
+	for(i = 0; i < shelf_n; i++)
+	{
+		struct atlas_shelf *sh = &shelves[i];
+
+		if(sh->h == cls && sh->x + w <= ATLAS_W)
+		{
+			*page = sh->page; *x = sh->x; *y = sh->y;
+			sh->x = (short)(sh->x + w + 1);
+			return 1;
+		}
+	}
+
+	if(shelf_n >= ATLAS_SHELVES) return 0;
+
+	/* a new shelf: in the last page with room, else a new page */
+	for(i = 0; i <= page_n; i++)
+	{
+		const int pg = (i < page_n) ? i : atlas_page_new();
+
+		if(pg < 0) return 0;
+
+		if(pages[pg].ycur + cls <= pages[pg].h)
+		{
+			struct atlas_shelf *sh = &shelves[shelf_n++];
+
+			sh->page = (short)pg;
+			sh->y = (short)pages[pg].ycur;
+			sh->h = (short)cls;
+			sh->x = (short)(w + 1);
+			pages[pg].ycur += cls + 1;
+			*page = pg; *x = 0; *y = sh->y;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+/* s into page pg at x, y */
+static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y);
+
+/* s into the atlas; 0 = no room (it then gets a texture of its own) */
+static int atlas_put(struct zod_gl_tex *t, SDL_Surface *s)
+{
+	int pg, x, y;
+
+	if(!atlas_place(s->w, s->h, &pg, &x, &y))
+	{
+		atlas_reset();
+		if(!atlas_place(s->w, s->h, &pg, &x, &y)) return 0;
+	}
+
+	if(!atlas_fill(t, s, pg, x, y)) return 0;
+
+	t->atlas = 1;
+	st_atlas_in++;
+	st_atlas_px += (unsigned long)s->w * s->h;
+
+	return 1;
+}
+
+/* a run-time surface into a slot of its size class */
+static int dyn_put(struct zod_gl_tex *t, SDL_Surface *s)
+{
+	int cw = 16, ch = 8, pg, x, y, i;
+
+	while(cw < s->w) cw <<= 1;
+	while(ch < s->h) ch <<= 1;
+
+	for(i = dyn_free_n - 1; i >= 0; i--)
+		if(dyn_free[i].cw == cw && dyn_free[i].ch == ch) break;
+
+	if(i >= 0)
+	{
+		pg = dyn_free[i].page;
+		x = dyn_free[i].x;
+		y = dyn_free[i].y;
+		dyn_free[i] = dyn_free[--dyn_free_n];
+		st_dyn_reused++;
+	}
+	else if(!atlas_place(cw, ch, &pg, &x, &y))
+	{
+		atlas_reset();
+		if(!atlas_place(cw, ch, &pg, &x, &y)) return 0;
+	}
+
+	if(!atlas_fill(t, s, pg, x, y)) return 0;
+
+	t->atlas = 2;
+	t->slot_w = cw;
+	t->slot_h = ch;
+	st_dyn_in++;
+
+	return 1;
+}
+
+static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y)
+{
+	unsigned char *buf;
+
+	t->names = (GLuint *)malloc(sizeof(GLuint));
+	buf = (unsigned char *)malloc((size_t)s->w * s->h * 4);
+
+	if(!t->names || !buf)
+	{
+		free(t->names);
+		t->names = 0;
+		free(buf);
+		return 0;
+	}
+
+	convert(s, 0, 0, s->w, s->h, buf, s->w * 4);
+
+	batch_end();
+	glBindTexture(GL_TEXTURE_2D, pages[pg].name);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, s->w, s->h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	cur_name = 0;
+	free(buf);
+
+	t->names[0] = pages[pg].name;
+	t->tw = ATLAS_W;
+	t->th = pages[pg].h;
+	t->cols = t->rows = 1;
+	t->bx = x;
+	t->by = y;
+
+	return 1;
+}
+
+static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 {
 	struct zod_gl_tex *t = (struct zod_gl_tex *)calloc(1, sizeof(*t));
 	unsigned char *buf;
@@ -559,6 +893,18 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s)
 	if((long)s->w * s->h > MAP_MIN_PX)
 	{
 		torus_make(t, s);
+		return t;
+	}
+
+	if(atlas_ok && s->w <= ATLAS_SIDE && s->h <= ATLAS_SIDE && atlas_put(t, s))
+	{
+		st_made++;
+		return t;
+	}
+
+	if(!atlas_ok && s->w <= DYN_W && s->h <= DYN_H && dyn_put(t, s))
+	{
+		st_made++;
 		return t;
 	}
 
@@ -683,8 +1029,8 @@ static void tex_refresh(struct zod_gl_tex *t)
 			convert(t->s, ox0, oy0, ox1 - ox0, oy1 - oy0, buf, (ox1 - ox0) * 4);
 
 			glBindTexture(GL_TEXTURE_2D, t->names[r * t->cols + c]);
-			glTexSubImage2D(GL_TEXTURE_2D, 0, ox0 - x0, oy0 - y0, ox1 - ox0, oy1 - oy0,
-			                GL_RGBA, GL_UNSIGNED_BYTE, buf);
+			glTexSubImage2D(GL_TEXTURE_2D, 0, t->bx + ox0 - x0, t->by + oy0 - y0,
+			                ox1 - ox0, oy1 - oy0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
 			free(buf);
 
 			st_updates++;
@@ -728,7 +1074,7 @@ static struct zod_gl_tex *tex_get(SDL_Surface *s)
 		t = e->t = 0;
 	}
 
-	if(!t) t = e->t = tex_make(s);
+	if(!t) t = e->t = tex_make(s, e->atlas_ok);
 	if(!t || t->failed) return 0;
 
 	if(!t->tor) tex_refresh(t);
@@ -818,9 +1164,14 @@ void zod_gl_init(int w, int h)
 	in_batch = 0;
 	cur_name = 0;
 	cur_mode = -1;
-	cur_alpha = 255;
+	cur_rgba_ok = 0;
 	retired_n = 0;
 	pool_n = 0;
+	page_n = 0;
+	shelf_n = 0;
+	white_name = 0;
+	dyn_free_n = 0;
+	dyn_retired_n = 0;
 
 	{
 		const char *ext = (const char *)glGetString(GL_EXTENSIONS);
@@ -879,6 +1230,16 @@ void zod_gl_flush(void)
 	}
 
 	retired_n = j;
+
+	for(i = 0, j = 0; i < dyn_retired_n; i++)
+	{
+		if(frame_no - dyn_retired[i].frame < RETIRE_FRAMES)
+			dyn_retired[j++] = dyn_retired[i];
+		else if(dyn_free_n < DYN_FREE)
+			dyn_free[dyn_free_n++] = dyn_retired[i];
+	}
+
+	dyn_retired_n = j;
 }
 
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b)
@@ -933,16 +1294,19 @@ void zod_gl_blit(SDL_Surface *s, const SDL_Rect *src, int x, int y,
 
 			if(ox1 <= ox0 || oy1 <= oy0) continue;
 
-			u0 = (float)(ox0 - tx0) / t->tw;
-			v0 = (float)(oy0 - ty0) / t->th;
-			u1 = (float)(ox1 - tx0) / t->tw;
-			v1 = (float)(oy1 - ty0) / t->th;
+			u0 = (float)(t->bx + ox0 - tx0) / t->tw;
+			v0 = (float)(t->by + oy0 - ty0) / t->th;
+			u1 = (float)(t->bx + ox1 - tx0) / t->tw;
+			v1 = (float)(t->by + oy1 - ty0) / t->th;
 			X0 = (float)(x + ox0 - sx0);
 			Y0 = (float)(y + oy0 - sy0);
 			X1 = X0 + (ox1 - ox0);
 			Y1 = Y0 + (oy1 - oy0);
 
-			batch_begin(t->names[r * t->cols + c], alpha, hit ? 1 : 0);
+			bind_is_own = !t->atlas;
+			batch_begin(t->names[r * t->cols + c], hit ? 1 : 0);
+			bind_is_own = 0;
+			quad_colour(255, 255, 255, alpha);
 			vertex(u0, v0, X0, Y0);
 			vertex(u1, v0, X1, Y0);
 			vertex(u1, v1, X1, Y1);
@@ -971,16 +1335,18 @@ void zod_gl_blit_rot(SDL_Surface *s, float cx, float cy, float size,
 			/* the tile's corners around the surface's centre */
 			const float x0 = tx0 - t->w * 0.5f, y0 = ty0 - t->h * 0.5f;
 			const float x1 = x0 + cw, y1 = y0 + ch;
-			const float u1 = (float)cw / t->tw, v1 = (float)ch / t->th;
+			const float u0 = (float)t->bx / t->tw, v0 = (float)t->by / t->th;
+			const float u1 = (float)(t->bx + cw) / t->tw, v1 = (float)(t->by + ch) / t->th;
 
-			batch_begin(t->names[r * t->cols + c], alpha, hit ? 1 : 0);
+			batch_begin(t->names[r * t->cols + c], hit ? 1 : 0);
+			quad_colour(255, 255, 255, alpha);
 
 			/* counter-clockwise on screen (y grows downwards):
 			 * x' = x cos + y sin, y' = -x sin + y cos */
-			vertex(0.0f, 0.0f, cx + x0 * ca + y0 * sa, cy - x0 * sa + y0 * ca);
-			vertex(u1,   0.0f, cx + x1 * ca + y0 * sa, cy - x1 * sa + y0 * ca);
-			vertex(u1,   v1,   cx + x1 * ca + y1 * sa, cy - x1 * sa + y1 * ca);
-			vertex(0.0f, v1,   cx + x0 * ca + y1 * sa, cy - x0 * sa + y1 * ca);
+			vertex(u0, v0, cx + x0 * ca + y0 * sa, cy - x0 * sa + y0 * ca);
+			vertex(u1, v0, cx + x1 * ca + y0 * sa, cy - x1 * sa + y0 * ca);
+			vertex(u1, v1, cx + x1 * ca + y1 * sa, cy - x1 * sa + y1 * ca);
+			vertex(u0, v1, cx + x0 * ca + y1 * sa, cy - x0 * sa + y1 * ca);
 			batch_quads++;
 			st_quads++;
 		}
@@ -990,14 +1356,41 @@ void zod_gl_fill(int x, int y, int w, int h, Uint8 r, Uint8 g, Uint8 b)
 {
 	if(!zod_gl_active || w <= 0 || h <= 0) return;
 
-	batch_begin(0, 255, 2);
-	glColor4ub(r, g, b, 255);
-	glVertex3f((float)x, (float)y, 0.0f);
-	glVertex3f((float)(x + w), (float)y, 0.0f);
-	glVertex3f((float)(x + w), (float)(y + h), 0.0f);
-	glVertex3f((float)x, (float)(y + h), 0.0f);
+	if(!white_name && page_n == 0) atlas_page_new();
+
+	if(white_name)
+	{
+		/* the atlas's white block, coloured: no switch of texturing */
+		batch_begin(white_name, 0);
+		quad_colour(r, g, b, 255);
+		vertex(white_u, white_v, (float)x, (float)y);
+		vertex(white_u, white_v, (float)(x + w), (float)y);
+		vertex(white_u, white_v, (float)(x + w), (float)(y + h));
+		vertex(white_u, white_v, (float)x, (float)(y + h));
+	}
+	else
+	{
+		batch_begin(0, 2);
+		quad_colour(r, g, b, 255);
+		glVertex3f((float)x, (float)y, 0.0f);
+		glVertex3f((float)(x + w), (float)y, 0.0f);
+		glVertex3f((float)(x + w), (float)(y + h), 0.0f);
+		glVertex3f((float)x, (float)(y + h), 0.0f);
+	}
+
 	batch_quads++;
 	st_fills++;
+}
+
+void zod_gl_hint_atlas(SDL_Surface *s)
+{
+	struct reg_entry *e;
+
+	if(!s || !zod_gl_active) return;
+
+	e = reg_find(s);
+	if(!e) e = reg_add(s);
+	if(e) e->atlas_ok = 1;
 }
 
 void zod_gl_show_surface(SDL_Surface *s)
@@ -1016,6 +1409,10 @@ void zod_gl_report(void)
 	     st_frames, st_batches * 10 / f, st_binds * 10 / f, st_quads * 10 / f, st_fills * 10 / f);
 	ZLOG("GL: map texture: %lu tiles sent, %lu quads drawn (per frame x10: %lu, %lu)\n",
 	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f);
+	ZLOG("GL: binds of own textures (not atlas, not map) per frame x10: %lu\n", st_bind_own * 10 / f);
+	ZLOG("GL: atlas: %d pages, %lu images packed (%lu px), started again %lu times;"
+	     " run-time slots %lu (%lu of them reused)\n",
+	     page_n, st_atlas_in, st_atlas_px, st_atlas_resets, st_dyn_in, st_dyn_reused);
 	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu\n",
 	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused);
 }

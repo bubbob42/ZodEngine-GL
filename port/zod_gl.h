@@ -8,9 +8,10 @@
  * direction, so the path also works on libraries without non-power-of-two
  * textures.
  *
- * Positions are computed on the CPU (no matrix stack per sprite), and quads
- * that follow each other with the same texture and alpha share one
- * glBegin/glEnd. Rotated and scaled sprites are placed exactly where the
+ * Small loaded images are packed into shared atlas pages; the map surface
+ * goes through one wrap-around texture. Positions are computed on the CPU
+ * (no matrix stack per sprite), and quads that follow each other on the same
+ * texture share one glBegin/glEnd, whatever their colour or alpha. Rotated and scaled sprites are placed exactly where the
  * software path puts its rotozoom copy, so a frame drawn either way can be
  * compared.
  *
@@ -44,6 +45,11 @@ void zod_gl_forget(SDL_Surface *s);
 /* the shared palette changed: every texture is made again on its next
  * draw (8-bit surfaces carry no colours of their own) */
 void zod_gl_drop_all(void);
+
+/* s is a loaded image that stays as it is: if it is small, it goes into a
+ * shared atlas page on its first draw, so the quads of different images
+ * share one texture and one batch (ZSDL_Surface::LoadBaseImage calls it) */
+void zod_gl_hint_atlas(SDL_Surface *s);
 
 /* draw the rectangle src (0 = all) of surface s with its top-left at x, y,
  * unscaled; alpha 255 = opaque. hit = the white hit-flash silhouette. */
