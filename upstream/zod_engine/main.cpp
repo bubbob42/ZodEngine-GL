@@ -38,6 +38,9 @@ TCHAR *optarg;
 #include <amiga_audio.h>
 #include <amiga_startup.h>
 #include <zod_census.h>
+#ifndef DISABLE_OPENGL
+#include <zod_gl.h>
+#endif
 #include "fineclock.h"
 #ifdef ZOD_ALLOC_PROBE
 extern "C" void zod_alloc_report(const char *tag);
@@ -690,6 +693,9 @@ void run_single_player()
                     zod_render_sections_report(tframes);
 
                     zod_census_report();
+#ifndef DISABLE_OPENGL
+                    if(zod_gl_active) zod_gl_report();
+#endif
 
                     /* Der Mittelwert kann einen Einbruch nicht zeigen. */
                     zod_worst_report();

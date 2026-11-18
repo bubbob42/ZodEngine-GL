@@ -80,3 +80,7 @@ PROGDIR:*
 # music/ ist das Arbeitsverzeichnis fuer die Laeufe auf der V1200.
 /music/
 /MIDI_Instruments*
+
+# Our FS-UAE autotest machine (gmake autotest): the hardfile and the filled-in
+# profile carry this machine's paths
+fsuae/local/

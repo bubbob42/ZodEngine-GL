@@ -90,9 +90,12 @@ void SDL_Delay(Uint32 ms)
 
 /* ------------------------------------------------------------- OpenGL */
 
-/* OpenGL ist global abgeschaltet (-DDISABLE_OPENGL), aber zplayer.cpp ruft
- * SDL_GL_SwapBuffers in einem Zweig, der nie genommen wird. */
+#ifdef DISABLE_OPENGL
+/* Built without GL (host, shim, ZOD_NO_GL=1): zplayer.cpp still calls
+ * SDL_GL_SwapBuffers in a branch that is never taken. With GL it lives in
+ * sdl_screen.cpp, beside the context. */
 void SDL_GL_SwapBuffers(void) { }
+#endif
 
 /* ------------------------------------------------------------------ BMP */
 

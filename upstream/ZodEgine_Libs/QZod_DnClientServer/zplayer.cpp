@@ -741,10 +741,27 @@ void ZPlayer::InitSDL()
 		else
 			screen = SDL_SetVideoMode(init_w, init_h, 0, SDL_OPENGL | SDL_RESIZABLE | SDL_FULLSCREEN);
 
-		InitOpenGL();
-		ResetOpenGLViewPort(init_w, init_h);
+		if(screen)
+		{
+			InitOpenGL();
+			ResetOpenGLViewPort(init_w, init_h);
+
+			/* The surfaces are made as in the software path (8 bit with the
+			 * shared palette); the screen surface's format decides that, and
+			 * the textures are converted from exactly those pixels. */
+			ZSDL_Surface::SetMainSoftwareSurface(screen);
+		}
+		else
+		{
+			/* no minigl.library, or no screen from it: draw in software.
+			 * Nothing is loaded yet, so the switch is complete here. */
+			ZLOG("GL: not available -- drawing in software\n");
+			use_opengl = false;
+			ZSDL_Surface::SetUseOpenGL(false);
+		}
 	}
-	else
+
+	if(!use_opengl)
 	{
 		//-f laesst SDL_DOUBLEBUF weg. Grund: auf echtem RTG ist das Umschalten
 		//ein echter Pufferwechsel (V2: 136 us gegen 64846 us im Emulator, wo

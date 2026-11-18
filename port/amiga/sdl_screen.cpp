@@ -47,6 +47,12 @@
 #include "ammx.h"
 #include "fineclock.h"
 
+#ifndef DISABLE_OPENGL
+#include <dos/var.h>
+#include <SDL/SDL_opengl.h>
+#include "zod_gl.h"
+#endif
+
 /* port/amiga/sdl_video.cpp -- Schmutzspuren je Zeile */
 extern "C" void zod_dirty_set_target(SDL_Surface *s);
 extern "C" int  zod_dirty_out_runs(int blockzeile, short *x0, short *x1, int max);
@@ -140,6 +146,25 @@ static int warp_roh_x  = 0, warp_roh_y  = 0;
 static int unicode_on = 0;
 static int wheel_pending = 0;     /* +1 hoch, -1 runter */
 
+#ifndef DISABLE_OPENGL
+/* ---- GL: a minigl.library screen instead of the own LUT8 screen ---------
+ *
+ * SDL_SetVideoMode with SDL_OPENGL (zplayer.cpp, unless -o) opens a MiniGL
+ * screen context. The library opens the screen and the window; the window
+ * becomes window_ptr, so the IDCMP input below runs unchanged, and its
+ * screen becomes screen_ptr (the mouse position is read from there).
+ * compose stays: loading and statistics screens are still drawn in
+ * software, and SDL_Flip shows them as one texture. */
+static int mgl_offen  = 0;       /* MiniGLOpen succeeded */
+static int gl_kontext = 0;       /* a context is open */
+static int flip_var_vorher = -1; /* RadeonGLFlip before us: -1 untouched, 0 none, 1 flip_var_text */
+static char flip_var_text[16];
+
+static int  gl_oeffnen(int w, int h);
+static void gl_schliessen(void);
+static void gl_bild_zeigen(void);
+#endif
+
 /* ---- Den ECHTEN Zeiger bewegen ------------------------------------------
  *
  * SDL_WarpMouse muss den Systemzeiger versetzen, nicht nur die gemeldete
@@ -220,6 +245,10 @@ static int zeiger_setzen(int x, int y)
 
 static void close_all(void)
 {
+#ifndef DISABLE_OPENGL
+	if(gl_kontext) gl_schliessen();
+#endif
+
 	if(window_ptr)
 	{
 		ClearPointer(window_ptr);
@@ -263,6 +292,21 @@ void SDL_Quit(void)
 	}
 
 	close_all();
+
+#ifndef DISABLE_OPENGL
+	if(mgl_offen)
+	{
+		MiniGLClose();
+		mgl_offen = 0;
+	}
+
+	if(flip_var_vorher == 1)
+		SetVar((CONST_STRPTR)"RadeonGLFlip", (CONST_STRPTR)flip_var_text, -1, GVF_LOCAL_ONLY);
+	else if(flip_var_vorher == 0)
+		DeleteVar((CONST_STRPTR)"RadeonGLFlip", GVF_LOCAL_ONLY);
+
+	flip_var_vorher = -1;
+#endif
 }
 
 /* --------------------------------------------------------- Schirm oeffnen */
@@ -311,6 +355,10 @@ static void load_palette_now(void)
 void zod_sdl_palette_changed(void)
 {
 	load_palette_now();
+
+#ifndef DISABLE_OPENGL
+	if(gl_kontext) zod_gl_drop_all();
+#endif
 
 	/* Die Tabelle wird auch bei einem 8-Bit-Schirm gebraucht: SDL_rotozoom
 	 * legt intern Echtfarbflaechen an, und der Blitter 8 -> 16 greift darauf
@@ -411,6 +459,15 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	/* Fuer SDL_WarpMouse; scheitert es, bleibt der Korrekturversatz. */
 	input_oeffnen();
 
+#ifndef DISABLE_OPENGL
+	if(flags & SDL_OPENGL)
+	{
+		/* zplayer.cpp falls back to the software path on 0 */
+		if(!gl_oeffnen(w, h)) return 0;
+	}
+	else
+#endif
+	{
 	/* 8 Bit ist das Ziel; wenn der Treiber keinen LUT8-Modus anbietet, 16 Bit. */
 	int want[3];
 	int n = 0;
@@ -488,6 +545,7 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	blank_pointer = (UWORD*)AllocMem(6 * sizeof(UWORD), MEMF_CHIP | MEMF_CLEAR);
 
 	if(blank_pointer) SetPointer(window_ptr, blank_pointer, 1, 16, 0, 0);
+	}
 
 	/* Die Flaeche, in die die Engine zeichnet: immer 8 Bit, wenn eine
 	 * gemeinsame Palette vorliegt. */
@@ -841,6 +899,130 @@ extern "C" void zod_zeiger_setzen(SDL_Surface *bild, int hot_x, int hot_y)
 
 extern "C" void zod_zeiger_keiner(void) { zeig_bild = 0; }
 
+#ifndef DISABLE_OPENGL
+static int gl_oeffnen(int w, int h)
+{
+	char buf[16];
+
+	if(!mgl_offen)
+	{
+		if(!MiniGLOpen())
+		{
+			ZLOG("GL: minigl.library 29.1 did not open -- drawing without it\n");
+			return 0;
+		}
+
+		mgl_offen = 1;
+	}
+
+	/* Three buffers, panned (RadeonGL: no tearing at little cost; PiStorm3D
+	 * flips with ChangeScreenBuffer) -- Doom 64's choice. RadeonGLFlip is
+	 * read when the screen opens; it goes back at SDL_Quit. */
+	if(flip_var_vorher < 0)
+		flip_var_vorher = GetVar((CONST_STRPTR)"RadeonGLFlip", (STRPTR)flip_var_text,
+		                         sizeof(flip_var_text), GVF_LOCAL_ONLY) > 0 ? 1 : 0;
+
+	SetVar((CONST_STRPTR)"RadeonGLFlip", (CONST_STRPTR)"pan", -1, GVF_LOCAL_ONLY);
+
+	mglChooseWindowMode(GL_FALSE);
+	mglChoosePixelDepth(16);
+	mglChooseNumberOfBuffers(3);
+	/* a batch is at most 1000 quads (port/zod_gl.cpp); PiStorm3D's default
+	 * buffer is smaller and refuses longer blocks */
+	mglChooseVertexBufferSize(4096);
+
+	if(!mglCreateContext(0, 0, w, h))
+	{
+		ZLOG("GL: no %dx%d screen from minigl.library -- drawing without it\n", w, h);
+		return 0;
+	}
+
+	gl_kontext = 1;
+
+	window_ptr = (struct Window *)mglGetInputWindowHandle();
+	if(!window_ptr) window_ptr = (struct Window *)mglGetWindowHandle();
+
+	if(!window_ptr)
+	{
+		ZLOG("GL: the context has no window, so no input -- drawing without it\n");
+		gl_schliessen();
+		return 0;
+	}
+
+	screen_ptr = window_ptr->WScreen;
+	screen_bpp = 16;
+	screen_swapped = 0;
+
+	/* The library opens its window without IDCMP: the same messages as the
+	 * own window above, and the right button is the game's, not a menu
+	 * button (Doom 64 does the same). */
+	ModifyIDCMP(window_ptr, IDCMP_MOUSEBUTTONS | IDCMP_RAWKEY |
+	                        IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW);
+	ReportMouse(TRUE, window_ptr);
+	Forbid();
+	window_ptr->Flags |= WFLG_RMBTRAP;
+	Permit();
+
+	/* the engine draws its own pointer (gl_bild_zeigen) */
+	mglSetPointer();
+
+	/* ZOD_GL_SYNC=aus: no wait for the beam (benchmarks); default on */
+	{
+		const char *e = zod_env("ZOD_GL_SYNC", buf, sizeof(buf));
+		const int sync = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
+		                         (e[0] == 'o' && e[1] == 'f')));
+
+		mglEnableSync(sync ? GL_TRUE : GL_FALSE);
+		ZLOG("GL: %s, %dx%d screen, 3 buffers, sync %s\n",
+		     (const char *)glGetString(GL_RENDERER), w, h, sync ? "on" : "off");
+	}
+
+	zod_gl_active = 1;
+	zod_gl_init(w, h);
+
+	return 1;
+}
+
+static void gl_schliessen(void)
+{
+	if(!gl_kontext) return;
+
+	/* the textures with the context that owns them */
+	zod_gl_drop_all();
+	zod_gl_active = 0;
+
+	if(window_ptr)
+	{
+		ModifyIDCMP(window_ptr, 0);
+		mglClearPointer();
+	}
+
+	mglDeleteContext();
+	gl_kontext = 0;
+
+	/* window and screen were the library's */
+	window_ptr = 0;
+	screen_ptr = 0;
+}
+
+static void gl_bild_zeigen(void)
+{
+	/* The pointer last, at the position of now -- what the software path's
+	 * late pointer does (zeiger_einsetzen). */
+	if(zeig_bild && screen_ptr)
+		zod_gl_blit(zeig_bild, 0, screen_ptr->MouseX + warp_dx - zeig_hot_x,
+		            screen_ptr->MouseY + warp_dy - zeig_hot_y, 255, 0);
+
+	zod_gl_flush();
+	mglSwitchDisplay();
+}
+
+void SDL_GL_SwapBuffers(void)
+{
+	if(gl_kontext) gl_bild_zeigen();
+}
+#endif
+
 extern "C" void zod_zeiger_bericht(void)
 {
 	if(!zeig_bilder) return;
@@ -1008,6 +1190,17 @@ static void zeiger_entfernen(SDL_Surface *flaeche)
 
 int SDL_Flip(SDL_Surface *screen)
 {
+#ifndef DISABLE_OPENGL
+	if(gl_kontext)
+	{
+		/* a screen drawn in software (loading, statistics) */
+		if(screen) zod_gl_show_surface(screen);
+
+		gl_bild_zeigen();
+		return 0;
+	}
+#endif
+
 	if(!screen || !screen_ptr) return -1;
 
 	APTR base = 0;

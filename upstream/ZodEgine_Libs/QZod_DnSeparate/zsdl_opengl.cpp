@@ -8,6 +8,9 @@
 #include <zod_palette.h>
 #include <amiga_startup.h>
 #include <zod_census.h>
+#ifndef DISABLE_OPENGL
+#include <zod_gl.h>
+#endif
 #include <utility>
 #include <vector>
 
@@ -46,38 +49,13 @@ static Uint32 zod_read_pixel(SDL_Surface *s, int x, int y)
 
 void InitOpenGL()
 {
-#ifndef DISABLE_OPENGL
-    glEnable(GL_TEXTURE_2D);			// Enable Texture Mapping
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);	// Clear The Background Color To Black 
-    glClearDepth(0.0f);				// Disables(?) Clearing Of The Depth Buffer
-	glDepthFunc( GL_ALWAYS );
-    glEnable(GL_DEPTH_TEST);			// Enables Depth Testing
-    glShadeModel(GL_SMOOTH);			// Enables Smooth Color Shading
-
-	glEnable(GL_ALPHA_TEST);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	//glAlphaFunc(GL_GREATER, 0.5);
-	glDisable(GL_LIGHTING);
-
-    glEnable(GL_BLEND);
-
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);		// Clear The Screen And The Depth Buffer
-	glLoadIdentity();				// Reset The View
-#endif
+	/* the state is set with the viewport (ResetOpenGLViewPort) */
 }
 
 void ResetOpenGLViewPort(int width, int height)
 {
 #ifndef DISABLE_OPENGL
-	glViewport(0, 0, width, height);
-
-	glMatrixMode(GL_PROJECTION);
-    glLoadIdentity(); // Reset The Projection Matrix
-    
-    glOrtho(0.0, width, height, 0.0, 1.0, -1.0);
-    
-    glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
+	zod_gl_init(width, height);
 #endif
 }
 
@@ -596,10 +574,6 @@ void ZSDL_Surface::Unload()
 		zod_big_free(big);
 	}
 	if(sdl_hit) SDL_FreeSurface(sdl_hit);
-#ifndef DISABLE_OPENGL
-	if(gl_texture_loaded) glDeleteTextures(1, &gl_texture);
-#endif
-
     sdl_surface = nullptr; // TODO nullptr;
     sdl_rotozoom = nullptr; // TODO nullptr;
     sdl_hit = nullptr;
@@ -657,7 +631,7 @@ void ZSDL_Surface::LoadNewSurface(int w, int h, bool opaque)
 	 *
 	 * Der Farbschluessel ist Platz 0 -- die Festlegung der ganzen Engine
 	 * (siehe SDL_ModifyBlack, das echtes Schwarz vorher wegschiebt). */
-	if(!use_opengl && screen && screen->format)
+	if(screen && screen->format)
 	{
 		const SDL_PixelFormat *f = screen->format;
 		const int bpp = f->BytesPerPixel;
@@ -720,7 +694,7 @@ void ZSDL_Surface::LoadNewSurface(int w, int h, bool opaque)
 	//Bewusst NICHT ueber UseDisplayFormat: das ruft am Ende SetAlpha(alpha),
 	//und alpha ist laut Konstruktor 127 -- die Flaeche waere danach halb
 	//durchsichtig.
-	if(opaque && sdl_surface && !use_opengl)
+	if(opaque && sdl_surface)
 	{
 		SDL_Surface *conv = SDL_DisplayFormat(sdl_surface);
 
@@ -788,7 +762,7 @@ void ZSDL_Surface::LoadBaseImage(SDL_Surface *sdl_surface_, bool delete_surface)
 	 * den Schluessel dabei. */
 	SDL_Surface *new_ret = 0;
 
-	if(!use_opengl && zod_palette_ready() &&
+	if(zod_palette_ready() &&
 	   sdl_surface->format->BytesPerPixel == 1 &&
 	   (sdl_surface->flags & SDL_SRCCOLORKEY))
 	{
@@ -833,9 +807,6 @@ void ZSDL_Surface::UseDisplayFormat()
 {
 	if(!sdl_surface) return;
 
-	//this is not needed in opengl (?)
-	if(use_opengl) return;
-
 	SDL_Surface *new_ret;
 	new_ret = SDL_DisplayFormat(sdl_surface);
 	SDL_FreeSurface( sdl_surface );
@@ -877,8 +848,6 @@ void ZSDL_Surface::MakeAlphable()
 {
 	if(!sdl_surface) return;
 
-	//this is not needed in opengl (?)
-	if(use_opengl) return;
 
 
     // TODO!!! ZSDL_ModifyBlack in zsdl.h, zsdl.h include zsdl-opengl!
@@ -1009,58 +978,8 @@ bool ZSDL_Surface::LoadRotoZoomSurface()
 
 bool ZSDL_Surface::LoadGLtexture()
 {
-#ifndef DISABLE_OPENGL
-	GLenum texture_format;
-	GLint  nOfColors;
-
-	if(!sdl_surface)
-	{
-		//ZLOG("LoadGLtexture::sdl_surface for %s not loaded\n", image_filename.c_str());
-		return false;
-	}
-
-	//delete texture if it is already loaded
-	if(gl_texture_loaded)
-		glDeleteTextures(1, &gl_texture);
-
-	nOfColors = sdl_surface->format->BytesPerPixel;
-	switch(nOfColors)
-	{
-	case 4:
-		if (sdl_surface->format->Rmask == 0x000000ff) texture_format = GL_RGBA;   
-		else texture_format = GL_BGRA;
-		break;
-	case 3:
-		if (sdl_surface->format->Rmask == 0x000000ff) texture_format = GL_RGB;
-		else texture_format = GL_BGR;
-		break;
-	default:
-		ZLOG("LoadGLtexture::%s does not have proper image format\n", image_filename.c_str());
-		return false;
-        // TODO  break;   will never be executed!
-	}
-
-	// Have OpenGL generate a texture object handle for us
-	glGenTextures( 1, &gl_texture );
- 
-	// Bind the texture object
-	glBindTexture( GL_TEXTURE_2D, gl_texture );
- 
-	// Set the texture's stretching properties
-	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
- 
-	// Edit the texture object's image data using the information SDL_Surface gives us
-    glTexImage2D( GL_TEXTURE_2D, 0, nOfColors, sdl_surface->w,
-                  sdl_surface->h, 0, texture_format, GL_UNSIGNED_BYTE,
-                  sdl_surface->pixels );
-
-	gl_texture_loaded = true;
-
-	return true;
-#else
-	return false;
-#endif
+	/* port/zod_gl.cpp makes the texture when the surface is first drawn */
+	return sdl_surface != 0;
 }
 
 void ZSDL_Surface::SetUseOpenGL(bool use_opengl_)
@@ -1395,14 +1314,6 @@ void ZSDL_Surface::FillRectOnToMe(SDL_Rect *dstrect, Uint8 r, Uint8 g, Uint8 b)
 
 	SDL_FillRect(sdl_surface, dstrect, SDL_MapRGB(sdl_surface->format, r,g,b));
 
-	if(gl_texture_loaded)
-	{
-#ifndef DISABLE_OPENGL
-		glDeleteTextures(1, &gl_texture);
-#endif
-		gl_texture_loaded = false;
-	}
-
 	//unload rotozoom surface?
 	if(!use_opengl)
 		DropRotoZoom();
@@ -1413,14 +1324,6 @@ void ZSDL_Surface::BlitOnToMe(SDL_Rect *srcrect, SDL_Rect *dstrect, SDL_Surface 
 	if(!sdl_surface) return;
 
 	SDL_BlitSurface(src, srcrect, sdl_surface, dstrect);
-
-	if(gl_texture_loaded)
-	{
-#ifndef DISABLE_OPENGL
-		glDeleteTextures(1, &gl_texture);
-#endif
-		gl_texture_loaded = false;
-	}
 
 	//unload rotozoom surface?
 	if(!use_opengl)
@@ -1440,37 +1343,9 @@ void ZSDL_Surface::ZSDL_FillRect(SDL_Rect *dstrect, Uint8 r, Uint8 g, Uint8 b, Z
 	{
 #ifndef DISABLE_OPENGL
 		if(dstrect)
-		{
-
-			glPushMatrix();
-
-			glColor4ub(r,g,b,255);
-			//glColor3f(r,g,b);
-			glBindTexture(GL_TEXTURE_2D, 0);
-
-			glTranslatef(dstrect->x,dstrect->y,0.0f);
-
-			glBegin(GL_QUADS);
-
-			glVertex3f(0.0f, 0.0f, 0.0f);		// Top Left
-			glVertex3f(dstrect->w, 0.0f, 0.0f);		// Top Right
-			glVertex3f(dstrect->w, dstrect->h, 0.0f);		// Bottom Right
-			glVertex3f(0.0f, dstrect->h, 0.0f);		// Bottom Left
-			glEnd();
-
-			glPopMatrix();
-
-			//glColor3f(1,1,1);
-		}
+			zod_gl_fill(dstrect->x, dstrect->y, dstrect->w, dstrect->h, r, g, b);
 		else
-		{
-			//we are supposed to fill the whole screen with this color
-			//this area is not debuged.
-			
-			glClearColor(r / 255.0, g / 255.0, b / 255.0, 0.0f); // Clear The Background Color To Black
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	// Clear The Screen And The Depth Buffer
-			glLoadIdentity(); // Reset The View
-		}
+			zod_gl_clear(r, g, b);
 #endif
 	}
 	else
@@ -1571,54 +1446,53 @@ void ZSDL_Surface::RenderSurface(int x, int y, bool render_hit, bool about_cente
 {
 	if(use_opengl)
 	{
-		//if(!WillRenderOnScreen(x, y, about_center)) return;
+#ifndef DISABLE_OPENGL
+		/* Placed and clipped as the software path below does it: a turned
+		 * or scaled sprite where its rotozoom copy would land (the copy's
+		 * size from rotozoomSurfaceSize, the same function), unturned ones
+		 * cut to the map window by GetMapBlitInfo. */
+		if(!sdl_surface) return;
 
-		if(render_hit)
+		if(!isz(angle) || !is1(size))
 		{
-			SDL_Rect to_rect;
+			int rw = 0, rh = 0;
 
-			to_rect.x = x + map_place_x;
-			to_rect.y = y + map_place_y;
+			rotozoomSurfaceSize(sdl_surface->w, sdl_surface->h, angle, size, &rw, &rh);
 
-            BlitHitSurface(nullptr, &to_rect, nullptr, true);
+			if(about_center)
+			{
+				x -= rw >> 1;
+				y -= rh >> 1;
+			}
+
+			/* only to ask whether the copy's box would be seen at all; a
+			 * turned sprite at the window's edge is drawn uncut */
+			SDL_Surface box;
+			SDL_Rect from_rect, to_rect;
+
+			memset(&box, 0, sizeof(box));
+			box.w = rw;
+			box.h = rh;
+
+			if(!GetMapBlitInfo(&box, x, y, from_rect, to_rect)) return;
+
+			zod_gl_blit_rot(sdl_surface,
+			                map_place_x + x + rw * 0.5f, map_place_y + y + rh * 0.5f,
+			                size, angle, alpha, render_hit);
 			return;
 		}
 
-#ifndef DISABLE_OPENGL
-		if(!gl_texture_loaded && !LoadGLtexture()) return;
+		if(about_center)
+		{
+			x -= sdl_surface->w >> 1;
+			y -= sdl_surface->h >> 1;
+		}
 
-		glPushMatrix();
+		SDL_Rect from_rect, to_rect;
 
-		glTranslatef(x, y, 0.0f);
-
-		//scale
-		glScalef( size, size, 1.0 );
-
-		//rotate about center
-		if(!about_center)
-		glTranslatef((sdl_surface->w >> 1), (sdl_surface->h >> 1), 0.0f);
-		glRotatef(-angle, 0.0f, 0.0f, 1.0f);
-		glTranslatef(-(sdl_surface->w >> 1), -(sdl_surface->h >> 1), 0.0f);
-		
-
-		//we are at the center now, so don't translate back
-		//if(!about_center) glTranslatef(-(sdl_surface->w >> 1), -(sdl_surface->h >> 1), 0.0f);
-
-		//alpha
-		glColor4ub(255,255,255,alpha);
-
-		glBindTexture(GL_TEXTURE_2D, gl_texture);
-
-		glBegin(GL_QUADS);
-
-		glTexCoord2f(0.0f, 1.0f); glVertex3f( 0.0f, sdl_surface->h,  0.0f);	// Bottom Left Of The Texture and Quad
-		glTexCoord2f(1.0f, 1.0f); glVertex3f( sdl_surface->w, sdl_surface->h,  0.0f);	// Bottom Right Of The Texture and Quad
-		glTexCoord2f(1.0f, 0.0f); glVertex3f( sdl_surface->w, 0.0f,  0.0f);	// Top Right Of The Texture and Quad
-		glTexCoord2f(0.0f, 0.0f); glVertex3f( 0.0f, 0.0f,  0.0f);	// Top Left Of The Texture and Quad
-
-		glEnd();
-
-		glPopMatrix();
+		if(GetMapBlitInfo(sdl_surface, x, y, from_rect, to_rect))
+			zod_gl_blit(sdl_surface, &from_rect, to_rect.x + map_place_x,
+			            to_rect.y + map_place_y, alpha, render_hit);
 #endif
 	}
 	else
@@ -1847,54 +1721,10 @@ void ZSDL_Surface::BlitSurface(SDL_Rect *srcrect, SDL_Rect *dstrect, ZSDL_Surfac
 		}
 
 #ifndef DISABLE_OPENGL
-		if(!gl_texture_loaded && !LoadGLtexture()) return;
-
-		glPushMatrix();
-
-		if(dstrect) glTranslatef(dstrect->x, dstrect->y, 0.0f);
-		//else glTranslatef(0.0, 0.0, 0.0f);
-
-		//scale
-		glScalef( size, size, 1.0 );
-
-		//alpha
-		glColor4ub(255,255,255,alpha);
-
-		//rotate about center
-		glTranslatef((sdl_surface->w >> 1), (sdl_surface->h >> 1), 0.0f);
-		glRotatef(angle, 0.0f, 0.0f, 1.0f);
-		glTranslatef(-(sdl_surface->w >> 1), -(sdl_surface->h >> 1), 0.0f);
-
-		glBindTexture(GL_TEXTURE_2D, gl_texture);
-
-		glBegin(GL_QUADS);
-
-		if(!srcrect)
-		{
-			glTexCoord2f(0.0f, 1.0f); glVertex3f( 0.0f, sdl_surface->h,  0.0f);	// Bottom Left Of The Texture and Quad
-			glTexCoord2f(1.0f, 1.0f); glVertex3f( sdl_surface->w, sdl_surface->h,  0.0f);	// Bottom Right Of The Texture and Quad
-			glTexCoord2f(1.0f, 0.0f); glVertex3f( sdl_surface->w, 0.0f,  0.0f);	// Top Right Of The Texture and Quad
-			glTexCoord2f(0.0f, 0.0f); glVertex3f( 0.0f, 0.0f,  0.0f);	// Top Left Of The Texture and Quad
-		}
-		else
-		{
-			if(srcrect->x + srcrect->w > sdl_surface->w) srcrect->w = sdl_surface->w - srcrect->x;
-			if(srcrect->y + srcrect->h > sdl_surface->h) srcrect->h = sdl_surface->h - srcrect->y;
-
-			GLfloat tex_x = (1.0 * srcrect->x) / sdl_surface->w;
-			GLfloat tex_x2 = (1.0 * srcrect->x + srcrect->w) / sdl_surface->w;
-			GLfloat tex_y = (1.0 * srcrect->y) / sdl_surface->h;
-			GLfloat tex_y2 = (1.0 * srcrect->y + srcrect->h) / sdl_surface->h;
-
-			glTexCoord2f(tex_x,  tex_y2); glVertex3f( 0.0f, srcrect->h,  0.0f);	// Bottom Left Of The Texture and Quad
-			glTexCoord2f(tex_x2, tex_y2); glVertex3f( srcrect->w, srcrect->h,  0.0f);	// Bottom Right Of The Texture and Quad
-			glTexCoord2f(tex_x2, tex_y); glVertex3f( srcrect->w, 0.0f,  0.0f);	// Top Right Of The Texture and Quad
-			glTexCoord2f(tex_x,  tex_y); glVertex3f( 0.0f, 0.0f,  0.0f);	// Top Left Of The Texture and Quad
-		}
-
-		glEnd();
-
-		glPopMatrix();
+		/* as the software path: a plain copy at dstrect (size and angle
+		 * play no part in BlitSurface there either) */
+		zod_gl_blit(sdl_surface, srcrect, dstrect ? dstrect->x : 0,
+		            dstrect ? dstrect->y : 0, alpha, 0);
 #endif
 	}
 	else
@@ -2035,6 +1865,16 @@ void ZSDL_Surface::BlitHitSurface(SDL_Rect *srcrect, SDL_Rect *dstrect, ZSDL_Sur
 		BlitSurface(srcrect, dstrect, dst);
 		return;
 	}
+
+#ifndef DISABLE_OPENGL
+	/* GL: the texture drawn white in place (GL_ADD), no silhouette copy */
+	if(use_opengl && !dst)
+	{
+		zod_gl_blit(sdl_surface, srcrect, dstrect ? dstrect->x : 0,
+		            dstrect ? dstrect->y : 0, alpha, 1);
+		return;
+	}
+#endif
 
 	//Dieselbe Flaeche waehlen wie der gewoehnliche Weg. Die alte Fassung nahm
 	//immer sdl_surface, obwohl RenderSurface den Ausschnitt auf der gedrehten

@@ -11,12 +11,13 @@ CPU      ?= 68040
 
 include sources.mk
 
-DEFINES  := -DDISABLE_MYSQL -DDISABLE_OPENGL -DDISABLE_REGCHECK -DDISABLE_BUYREG
+DEFINES  := -DDISABLE_MYSQL -DDISABLE_REGCHECK -DDISABLE_BUYREG
 # Paket-Log fuer Protokoll-Goldens; zur Laufzeit nur aktiv mit Umgebungsvariable ZOD_PACKET_LOG=<datei>
 DEFINES  += -DZOD_PACKET_LOG
 INCLUDES := -Iinclude -Icompat/qt -Iport -Iport/amiga
 
 ifeq ($(PLATFORM),host)
+  DEFINES  += -DDISABLE_OPENGL
   BUILD    := build/host
   CXX      := g++
   CC       := gcc
@@ -36,6 +37,7 @@ else ifeq ($(PLATFORM),shim)
   #
   # Nur der Schirm ist ersetzt (tests/shim/shim_screen.cpp): nichts wird
   # angezeigt, gezeichnet wird trotzdem -- und genau das laesst sich ansehen.
+  DEFINES  += -DDISABLE_OPENGL
   BUILD    := build/shim
   CXX      := g++
   CC       := gcc
@@ -158,6 +160,19 @@ else ifeq ($(PLATFORM),amiga)
                  port/amiga/sdl_video.cpp port/amiga/sdl_screen.cpp \
                  port/amiga/sdl_misc.cpp port/amiga/ammx.cpp \
                  port/amiga/fastcopy.cpp
+  # Drawing through minigl.library 29.1 (RadeonGL, PiStorm3D): chosen at run
+  # time -- without the library, or with -o, the game draws as before.
+  # ZOD_NO_GL=1 builds the old binary without any GL code.
+  # MGL_SDK: the minigl.library 29.1 client SDK (RadeonGL's copy beside this
+  # repository by default).
+  ifeq ($(ZOD_NO_GL),1)
+    DEFINES += -DDISABLE_OPENGL
+  else
+    MGL_SDK  ?= ../RadeonGL/sdk/minigl-29.1
+    INCLUDES += -I$(MGL_SDK)/minigl-shared-library/include
+    LIBS     := -L$(MGL_SDK)/lib -lminigl $(LIBS)
+    ENGINE_SRCS += port/zod_gl.cpp
+  endif
   # Das Assemblermodul laeuft NICHT ueber ENGINE_OBJS: dessen patsubst kennt
   # nur %.cpp und liesse eine .s-Datei unveraendert durch. Eigene Liste,
   # eigene Regel, und $(ENGINE) nimmt sie ueber $^ mit.
@@ -530,3 +545,30 @@ clean:
 	rm -rf build
 
 -include $(ENGINE_OBJS:.o=.d) $(HELLO_OBJS:.o=.d)
+
+# --- FS-UAE autotest: gmake autotest T=<name in tests/auto> -----------------
+# A 68040 + RTG machine that boots fsuae/local/autotest-System-040.hdf (a copy
+# of GLTron's/RadeonGL's autotest disk: S:User-Startup runs DEV:Test/AutoRun)
+# with dist/ as DEV:. tools/stage_dist.sh fills dist/ first (game data from
+# ZOD_DATA, never in the repository). Builds with the separate gcc 6.5
+# toolchain (ZOD_GCC6, bebbo amiga6 with libstdc++).
+ZOD_GCC6       ?= $(HOME)/amiga-gcc6/bin
+KICKSTART_FILE ?= $(HOME)/Developer/AmigaEmu/ROMs/kick32.rom
+AUTOTEST_CONFIG := fsuae/local/ZodEngine-autotest-040.fs-uae
+
+$(AUTOTEST_CONFIG): fsuae/autotest-040.fs-uae.in
+	mkdir -p fsuae/local
+	sed -e 's|@KICKSTART_FILE@|$(KICKSTART_FILE)|g' -e 's|@PROJECT_PATH@|$(CURDIR)|g' \
+	    -e 's|@PROJECT_DIST@|$(CURDIR)/dist|g' -e 's|@PROJECT_NAME@|ZodEngine|g' $< > $@
+
+.PHONY: autotest gl-builds
+gl-builds:
+	PATH=$(ZOD_GCC6):$$PATH $(MAKE) PLATFORM=amiga CPU=68040 BUILD=build/amiga-g6 all
+	PATH=$(ZOD_GCC6):$$PATH $(MAKE) PLATFORM=amiga CPU=68060 BUILD=build/amiga-g6 all
+
+autotest: $(AUTOTEST_CONFIG)
+	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in tests/auto>"; exit 2; }
+	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf (copy GLTron's)"; exit 2; }
+	@if pgrep -x fs-uae >/dev/null; then echo "autotest: FS-UAE is already running"; exit 2; fi
+	tools/stage_dist.sh
+	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)

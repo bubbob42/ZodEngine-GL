@@ -26,6 +26,9 @@
 #include "ammx.h"
 #include "fastcopy.h"
 #include "zod_census.h"
+#ifndef DISABLE_OPENGL
+#include "zod_gl.h"
+#endif
 /* ACHTUNG: HIER STAND `#include <proto/dos.h>`, und zwar UNBEDINGT.
  * Auf dem Host gibt es den Header nicht -- damit liess sich `make shimtest`
  * seit dem 19.09. nicht mehr uebersetzen, ohne dass es jemandem auffiel.
@@ -587,6 +590,11 @@ extern "C" void zod_dirty_clear(void)
 
 extern "C" int zod_dirty_partial_ok(void)
 {
+#ifndef DISABLE_OPENGL
+	/* GL draws every frame whole: nothing of the last frame is left to
+	 * restore in part */
+	if(zod_gl_active) return 0;
+#endif
 	return dirty_an && prev_gueltig;
 }
 
@@ -991,6 +999,10 @@ void SDL_FreeSurface(SDL_Surface *surface)
 
 	if(zod_census_on) zod_census_free(surface);
 
+#ifndef DISABLE_OPENGL
+	zod_gl_forget(surface);
+#endif
+
 	SurfaceExtra *x = extra_of(surface);
 
 	if(x->own_pixels && surface->pixels)
@@ -1365,6 +1377,11 @@ int SDL_UpperBlit(SDL_Surface *src, SDL_Rect *srcrect,
 
 	if(zod_census_on) zod_census_blit(src, dst, w, h);
 
+#ifndef DISABLE_OPENGL
+	/* a surface with a texture changed: GL sends this rectangle again */
+	if(zod_gl_active) zod_gl_changed(dst, dx, dy, w, h);
+#endif
+
 	/* SDL schreibt das Zielrechteck zurueck -- die Engine kennt das
 	 * (zmini_map.cpp) und arbeitet mit einer Kopie. */
 	if(dstrect)
@@ -1611,6 +1628,10 @@ int SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, Uint32 color)
 	dirty_mark(dst, x0, y0, w, h);
 
 	if(zod_census_on) zod_census_fill(dst, w, h);
+
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active) zod_gl_changed(dst, x0, y0, w, h);
+#endif
 
 	const int bpp = dst->format->BytesPerPixel;
 	unsigned char *dp = (unsigned char*)dst->pixels + (size_t)y0 * dst->pitch + (size_t)x0 * bpp;

@@ -1,0 +1,35 @@
+; GLSmoke -- the game draws through minigl.library (M2). FS-UAE with
+; RadeonGL's null card: a 30 s bot match on p02_bb_orig01 drawn by GL
+; (frame 300 dumped for r200view), then the same in software (-o, frame 300
+; saved by ZOD_SHOT) as the picture to compare with. Both logs carry the -B
+; report: frame-time sections, draw census, GL counters.
+; LIMIT 1200
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_CENSUS on
+SetEnv ZOD_GL_SYNC aus
+; the A4000D's screen-context heap: 16 MB, no eviction
+SetEnv RadeonGLHeapMax 16
+SetEnv RadeonGLDump 300
+SetEnv RadeonGLDumpFile DEV:Test/zod-gl-f300.r2d
+Echo "=== GL ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod gl 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-gl.done
+Type DEV:Test/zod-gl.log >>DEV:Test/auto.log
+Type DEV:Test/zod-gl-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo "=== software ===" >>DEV:Test/auto.log
+SetEnv ZOD_SHOT DEV:Test/zod-sw-f300.bmp:300
+Run >NIL: Execute DEV:Test/RunZod sw 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sw.done
+Type DEV:Test/zod-sw.log >>DEV:Test/auto.log
+UnSetEnv ZOD_SHOT
+UnSetEnv ZOD_CENSUS
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

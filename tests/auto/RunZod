@@ -1,0 +1,21 @@
+.KEY tag/A,secs/A,args/F
+.BRA {
+.KET }
+; RunZod -- one benchmark run (-B {secs}) of DEV:Zod/zod_040: the red bot
+; against the blue bot, the player watching (-t null), no start pause, no
+; sound, 640 x 480; {args} adds the map (-m ...) and -o for software.
+; minigl.library from DEV:Libs/RadeonGL is added to LIBS: for this run only
+; (under FS-UAE it runs its null card). The game's log goes to
+; DEV:Test/zod-{tag}.log, the library's to DEV:Test/zod-{tag}-lib.log, and a
+; done marker follows when the run is over.
+FailAt 1000
+Stack 262144
+CD DEV:Zod
+SetEnv RadeonGLLog DEV:Test/zod-{tag}-lib.log
+Assign LIBS: DEV:Libs/RadeonGL ADD
+Version LIBS:minigl.library FULL >DEV:Test/zod-{tag}.log
+DEV:Zod/zod_040 -t null -b red -b blue -e psettings_nopause.txt -r 640x480 -s -u -G zod -F on -B {secs} {args} >>DEV:Test/zod-{tag}.log
+Echo "zod rc=$RC" >>DEV:Test/zod-{tag}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+UnSetEnv RadeonGLLog
+Echo >DEV:Test/zod-{tag}.done done

@@ -261,9 +261,8 @@ private:
 	//wird sie neu erzeugt. Nur Zeigervergleich, nie dereferenziert.
 	SDL_Surface *sdl_hit;
 	SDL_Surface *hit_src;
-#ifndef DISABLE_OPENGL
-	GLuint gl_texture;
-#endif
+	/* GL textures belong to the SDL_Surface (port/zod_gl.cpp finds them by
+	 * its address), not to this object: copies share one surface. */
 	bool gl_texture_loaded;
 	bool rotozoom_loaded;
 
