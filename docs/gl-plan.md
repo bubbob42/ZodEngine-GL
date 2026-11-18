@@ -311,8 +311,26 @@ What the numbers said, and what was done:
   only copies (adc3502, ZOD_GL_565=aus to compare).
 - **Map section in a still view** costs the same in S and GL (~7 ms): the
   game's own work, not drawing.
-- Not yet measured on the A4000D: D (8e069ed + adc3502). Next: still
-  H D D H, tour E D D E (E = D with ZOD_GL_565=aus), with S for reference.
+
+**After a reboot (18:59), D measured (still H D D H, tour E D D E; E = D with
+ZOD_GL_565=aus):**
+
+| run | variant | fps | draw ms | map ms | HUD ms | gui ms |
+|---|---|---|---|---|---|---|
+| orig01 still | H | 23.4 / 22.4 | 28.2 | 4.0 | 8.9 | 1.6 |
+| orig01 still | D | 24.9 / 26.2 | 24.5 | 2.4 | 5.6 | 1.4 |
+| orig04 tour | E | 7.1 / 7.4 | 99.2 | 54.6 | 11.5 | 4.8 |
+| orig04 tour | D | 12.3 / 12.5 | 50.1 | 11.7 | 8.6 | 2.8 |
+
+- The HUD text cache: +11 % in the still view (HUD 8.9 -> 5.6 ms).
+- RGB565 map tiles: +70 % while scrolling (map 54.6 -> 11.7 ms; software
+  25.7 ms). GL now scrolls at 12.4 fps where the software build does 7.1.
+- Against the software build (S, earlier series): still +27 %, scrolling
+  +75 %; against cego's v1.1 release, still +38 %.
+- Left where GL costs more than software: HUD (+3 ms, the full redraw),
+  gui (+1 to +2.4 ms), effects (+1 ms), pre-drawn objects (+0.8 ms). The
+  minimap is rebuilt ~4 times a second in both paths (2.3-3.8 ms each);
+  GL re-sends it whole as RGBA bytes (252 updates a minute).
 
 ## 6. Open questions (recommendation first)
 
