@@ -332,6 +332,35 @@ ZOD_GL_565=aus):**
   minimap is rebuilt ~4 times a second in both paths (2.3-3.8 ms each);
   GL re-sends it whole as RGBA bytes (252 updates a minute).
 
+**Images up to 512 tall in the atlas (3ce97b9; F = D + d2d111d + 3ce97b9,
+still D F F D, 19:30):** batches 10.3 -> 4.2 a frame, HUD 6.0 -> 5.3 ms,
+but fps D 23.7 / 25.7 against F 24.8 / 25.2: within the runs' own spread.
+Batch breaks are cheap on RadeonGL 0.16; their number no longer limits.
+The largest GL extra left is the effects section (2.4-3.4 ms against 0.8).
+
+## 5d. PiStorm3D (M5), 2026-11-18
+
+A1200 PiStorm CM4 (Emu68, reported as a 68040), PiStorm3D 30.0 (MiniGLV3D
+b519) as installed, through the same 29.1-SDK build (040 binaries: cego's
+v1.1 zod_040, ours d2d111d = build/amiga-g6e). 60 s bot matches, 640x480.
+
+| run | R cego v1.1 | S ours, software | G ours, GL |
+|---|---|---|---|
+| orig01 still (R S G G S R) | 220 / 219 fps | 221 / 230 | 229 / 240 |
+| orig04 scrolling (S G G S) | -- | 174 / 174 | 177 / 177 |
+
+- Works at the first try: powers of two, RGBA map tiles (copy565_ok is
+  RadeonGL only), no NULL pixels, 0 textures refused.
+- PiStorm3D lists no GL_EXT_texture_env_add: the hit flash is drawn plain.
+- At ~230 fps the game logic and the server dominate; GL gains 2-4 %.
+  Drawing: map 0.13 vs 0.34 ms, objects 0.27 vs 0.58 ms; the HUD's full
+  redraw 0.40 vs 0.16 ms (this build predates 3ce97b9).
+- Not checked yet: the picture on the PiStorm's own screen (AmiAgent
+  screenshots during GL coincided with hangs elsewhere), and tearing:
+  PiStorm3D has no vsync and no multi-buffering (defect 4). An own present
+  like Doom64's panflip would cure it, at the cost of a bitmap context
+  (defect 3: leaks per context round).
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
