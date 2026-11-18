@@ -80,6 +80,7 @@ static unsigned long ctx_gen = 0;
 static int tile_max = 1024;     /* largest edge */
 static int npot_ok = 0;         /* the library takes any size */
 static int copy565_ok = 0;      /* RGB565 words go into an RGB texture as they are */
+static int copy4444_ok = 0;     /* ARGB4444 words go into an RGBA texture as they are */
 static int add_ok = 0;          /* GL_ADD texture mode (GL_EXT_texture_env_add) */
 static int refused_told = 0;
 
@@ -428,6 +429,65 @@ static int convert565(SDL_Surface *s, int x0, int y0, int w, int h, Uint16 *out)
 	}
 
 	return 1;
+}
+
+/* The rectangle x0, y0, w, h as the bytes to send, rows of *pitch bytes (a
+ * multiple of 4: GL's unpack alignment, which RadeonGL honours). Where the
+ * library keeps RGBA as ARGB4444 and copies such words as they are, an 8-bit
+ * surface goes up as those words -- a 256-entry table, the same rounding as
+ * RadeonGL's own Encode (the top 4 bits), alpha 0 for the colour key --
+ * else as RGBA bytes, which RadeonGL converts texel by texel (A4000D: the
+ * library's Upload was 12.6 % of a GL frame). Returns the GL type.
+ * pack_rows: rows rw texels long (rw >= w; a texture tile wider than the
+ * rectangle), the rest of each row zero. buf holds at least rw * h * 4 bytes. */
+static GLenum pack_rows(SDL_Surface *s, int x0, int y0, int w, int h, int rw,
+                        unsigned char *buf, int *pitch)
+{
+	const SDL_PixelFormat *f = s->format;
+
+	if(copy4444_ok && f->BytesPerPixel == 1 && f->palette)
+	{
+		const int keyed = (s->flags & SDL_SRCCOLORKEY) != 0;
+		const SDL_Palette *p = f->palette;
+		Uint16 tab[256];
+		int i, x, y;
+
+		for(i = 0; i < 256; i++)
+		{
+			if(i < p->ncolors)
+				tab[i] = (Uint16)((15 << 12) | ((p->colors[i].r >> 4) << 8) |
+				                  ((p->colors[i].g >> 4) << 4) | (p->colors[i].b >> 4));
+			else
+				tab[i] = (Uint16)(15 << 12);
+
+			if(keyed && (Uint32)i == f->colorkey) tab[i] &= 0x0fff;
+		}
+
+		*pitch = (rw * 2 + 3) & ~3;
+
+		for(y = 0; y < h; y++)
+		{
+			const Uint8 *src = (const Uint8 *)s->pixels + (size_t)(y0 + y) * s->pitch + x0;
+			Uint16 *d = (Uint16 *)(buf + (size_t)y * *pitch);
+
+			for(x = 0; x < w; x++) d[x] = tab[src[x]];
+			/* the rest of the row: the same bytes every time */
+			for(; x < *pitch / 2; x++) d[x] = 0;
+		}
+
+		return MGL_UNSIGNED_SHORT_4_4_4_4;
+	}
+
+	*pitch = rw * 4;
+	convert(s, x0, y0, w, h, buf, *pitch);
+
+	return GL_UNSIGNED_BYTE;
+}
+
+static GLenum pack(SDL_Surface *s, int x0, int y0, int w, int h,
+                   unsigned char *buf, int *pitch)
+{
+	return pack_rows(s, x0, y0, w, h, w, buf, pitch);
 }
 
 static int gl_refused(void)
@@ -837,10 +897,14 @@ static void atlas_reset(void)
 	ZLOG("GL: atlas full -- starting it again\n");
 }
 
-/* a place for w x h in a page; 0 = no room */
+/* a place for w x h in a page; 0 = no room. Places start at even x and
+ * keep a gap column: 16-bit texels then fill whole longwords, and RadeonGL
+ * writes a row without reading the card's memory first for a half-filled
+ * one (one PCI read a row otherwise). */
 static int atlas_place(int w, int h, int *page, int *x, int *y)
 {
 	const int cls = shelf_class(h);
+	const int rw = (w + 2) & ~1;   /* even, at least w + 1 */
 	int i;
 
 	for(i = 0; i < shelf_n; i++)
@@ -850,7 +914,7 @@ static int atlas_place(int w, int h, int *page, int *x, int *y)
 		if(sh->h == cls && sh->x + w <= ATLAS_W)
 		{
 			*page = sh->page; *x = sh->x; *y = sh->y;
-			sh->x = (short)(sh->x + w + 1);
+			sh->x = (short)(sh->x + rw);
 			return 1;
 		}
 	}
@@ -871,7 +935,7 @@ static int atlas_place(int w, int h, int *page, int *x, int *y)
 			sh->page = (short)pg;
 			sh->y = (short)pages[pg].ycur;
 			sh->h = (short)cls;
-			sh->x = (short)(w + 1);
+			sh->x = (short)rw;
 			pages[pg].ycur += cls + 1;
 			*page = pg; *x = 0; *y = sh->y;
 			return 1;
@@ -884,10 +948,10 @@ static int atlas_place(int w, int h, int *page, int *x, int *y)
 /* s into page pg at x, y */
 static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y);
 static int atlas_take(struct zod_gl_tex *t, int pg, int x, int y);
-static void atlas_send(int pg, int x, int y, int w, int h, const unsigned char *buf);
+static void atlas_send(int pg, int x, int y, int w, int h, GLenum type, const unsigned char *buf);
 
-/* two sums over n RGBA pixels: a multiply hash and a rotate-add, so that
- * one collision would have to fool both */
+/* two sums over n bytes (a multiple of 4: pack's rows), as sent: a multiply
+ * hash and a rotate-add, so that one collision would have to fool both */
 static void content_sums(const unsigned char *buf, long n,
                          unsigned long *s1, unsigned long *s2)
 {
@@ -895,7 +959,7 @@ static void content_sums(const unsigned char *buf, long n,
 	Uint32 a = 2166136261UL, b = 0x9e3779b9UL;
 	long i;
 
-	for(i = 0; i < n; i++)
+	for(i = 0; i < n / 4; i++)
 	{
 		a = (a ^ p[i]) * 16777619UL;
 		b = ((b << 5) | (b >> 27)) + p[i];
@@ -943,9 +1007,10 @@ static int atlas_put(struct zod_gl_tex *t, SDL_Surface *s)
 /* a run-time surface into a slot of its size class */
 static int dyn_put(struct zod_gl_tex *t, SDL_Surface *s)
 {
-	int cw = 16, ch = 8, pg, x, y, i, from_retired = 0;
+	int cw = 16, ch = 8, pg, x, y, i, from_retired = 0, pitch;
 	unsigned long s1, s2;
 	unsigned char *buf;
+	GLenum type;
 	struct dyn_slot *d = 0;
 
 	while(cw < s->w) cw <<= 1;
@@ -954,8 +1019,8 @@ static int dyn_put(struct zod_gl_tex *t, SDL_Surface *s)
 	buf = (unsigned char *)malloc((size_t)s->w * s->h * 4);
 	if(!buf) return 0;
 
-	convert(s, 0, 0, s->w, s->h, buf, s->w * 4);
-	content_sums(buf, (long)s->w * s->h, &s1, &s2);
+	type = pack(s, 0, 0, s->w, s->h, buf, &pitch);
+	content_sums(buf, (long)pitch * s->h, &s1, &s2);
 
 	/* the same pixels in a slot already: no upload */
 	i = dyn_find_same(dyn_retired, dyn_retired_n, cw, ch, s->w, s->h, s1, s2);
@@ -1016,7 +1081,7 @@ static int dyn_put(struct zod_gl_tex *t, SDL_Surface *s)
 			return 0;
 		}
 
-		atlas_send(pg, x, y, s->w, s->h, buf);
+		atlas_send(pg, x, y, s->w, s->h, type, buf);
 		free(buf);
 	}
 
@@ -1047,17 +1112,24 @@ static int atlas_take(struct zod_gl_tex *t, int pg, int x, int y)
 	return 1;
 }
 
-static void atlas_send(int pg, int x, int y, int w, int h, const unsigned char *buf)
+static void atlas_send(int pg, int x, int y, int w, int h, GLenum type, const unsigned char *buf)
 {
+	/* 16-bit texels of an odd width: one column more -- the row's zero
+	 * padding into the place's own gap column -- so the row ends on a whole
+	 * longword too (atlas_place) */
+	const int uw = (type == MGL_UNSIGNED_SHORT_4_4_4_4) ? ((w + 1) & ~1) : w;
+
 	batch_end();
 	glBindTexture(GL_TEXTURE_2D, pages[pg].name);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, uw, h, GL_RGBA, type, buf);
 	cur_name = 0;
 }
 
 static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y)
 {
 	unsigned char *buf;
+	GLenum type;
+	int pitch;
 
 	buf = (unsigned char *)malloc((size_t)s->w * s->h * 4);
 	if(!buf) return 0;
@@ -1068,8 +1140,8 @@ static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y
 		return 0;
 	}
 
-	convert(s, 0, 0, s->w, s->h, buf, s->w * 4);
-	atlas_send(pg, x, y, s->w, s->h, buf);
+	type = pack(s, 0, 0, s->w, s->h, buf, &pitch);
+	atlas_send(pg, x, y, s->w, s->h, type, buf);
 	free(buf);
 
 	return 1;
@@ -1079,7 +1151,8 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 {
 	struct zod_gl_tex *t = (struct zod_gl_tex *)calloc(1, sizeof(*t));
 	unsigned char *buf;
-	int c, r, n;
+	int c, r, n, pitch;
+	GLenum type = GL_UNSIGNED_BYTE;
 
 	if(!t) return 0;
 
@@ -1135,7 +1208,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 
 			if(cw < t->tw || ch < t->th) memset(buf, 0, (size_t)t->tw * t->th * 4);
 
-			convert(s, x0, y0, cw, ch, buf, t->tw * 4);
+			type = pack_rows(s, x0, y0, cw, ch, t->tw, buf, &pitch);
 
 			{
 				GLuint *name = &t->names[r * t->cols + c];
@@ -1152,7 +1225,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 
 					glBindTexture(GL_TEXTURE_2D, *name);
 					glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->tw, t->th,
-					                GL_RGBA, GL_UNSIGNED_BYTE, buf);
+					                GL_RGBA, type, buf);
 					st_reused++;
 				}
 				else
@@ -1164,7 +1237,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, t->tw, t->th, 0,
-					             GL_RGBA, GL_UNSIGNED_BYTE, buf);
+					             GL_RGBA, type, buf);
 				}
 			}
 
@@ -1204,7 +1277,8 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 static void tex_refresh(struct zod_gl_tex *t)
 {
 	unsigned char *buf;
-	int c, r;
+	int c, r, pitch;
+	GLenum type;
 
 	if(t->dx1 <= t->dx0 || t->dy1 <= t->dy0) return;
 
@@ -1224,11 +1298,11 @@ static void tex_refresh(struct zod_gl_tex *t)
 			buf = (unsigned char *)malloc((size_t)(ox1 - ox0) * (oy1 - oy0) * 4);
 			if(!buf) continue;
 
-			convert(t->s, ox0, oy0, ox1 - ox0, oy1 - oy0, buf, (ox1 - ox0) * 4);
+			type = pack(t->s, ox0, oy0, ox1 - ox0, oy1 - oy0, buf, &pitch);
 
 			glBindTexture(GL_TEXTURE_2D, t->names[r * t->cols + c]);
 			glTexSubImage2D(GL_TEXTURE_2D, 0, t->bx + ox0 - x0, t->by + oy0 - y0,
-			                ox1 - ox0, oy1 - oy0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+			                ox1 - ox0, oy1 - oy0, GL_RGBA, type, buf);
 			free(buf);
 
 			st_updates++;
@@ -1385,6 +1459,8 @@ void zod_gl_init(int w, int h)
 		 * rows into it word for word; RGBA bytes it converts texel by
 		 * texel. Other libraries keep the RGBA bytes until tested. */
 		copy565_ok = npot_ok;
+		/* the same for RGBA, which RadeonGL 0.16 keeps as ARGB4444 */
+		copy4444_ok = npot_ok;
 
 		/* ZOD_GL_565=aus: map tiles as RGBA bytes (to measure the
 		 * difference); default on */
@@ -1394,6 +1470,12 @@ void zod_gl_init(int w, int h)
 
 			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
 				copy565_ok = 0;
+
+			/* ZOD_GL_4444=aus: RGBA textures as RGBA bytes (to measure) */
+			e = zod_env("ZOD_GL_4444", buf, sizeof(buf));
+
+			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+				copy4444_ok = 0;
 		}
 
 		/* the hit flash's white silhouette needs GL_ADD. A library without
