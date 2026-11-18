@@ -2,6 +2,7 @@
 #include <zod_video.h>
 #include <zod_schirm.h>
 #include <zod_pack.h>
+#include <zod_census.h>
 #include <stdio.h>
 #ifdef ZOD_ALLOC_PROBE
 extern "C" void zod_alloc_report(const char *tag);
@@ -2620,6 +2621,8 @@ void ZPlayer::RenderScreen()
 
 	if(im_spiel) zod_rsec_spielbilder++;
 
+	if(zod_census_on) zod_census_frame();
+
 	if(use_opengl)
 		SDL_GL_SwapBuffers();
 	else
@@ -3416,12 +3419,73 @@ bool ZPlayer::DoKeyScrollDown()
 	return (!up_down && down_down);
 }
 
+/* ZOD_TOUR=on: the view drives itself across the map like a held arrow key
+ * (the same 400 px/s): left to right, half a screen down, right to left,
+ * and back up at the bottom. A repeatable scrolling load for -B benchmark
+ * runs -- a still view hides the cost of a scroll, which redraws the whole
+ * map. Off unless set; while it is on, keys and mouse do not scroll. */
+static int zod_tour = -1;            /* -1 not read yet, 0 off, 1 on */
+static int tour_dx = 1, tour_dy = 1, tour_step_left = 0;
+static double tour_last = 0, tour_over = 0;
+
+static bool zod_tour_on()
+{
+	if(zod_tour < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_TOUR", buf, sizeof(buf));
+
+		/* any value but "0" and "off" switches it on */
+		zod_tour = (e && *e && !(e[0] == '0' && !e[1]) &&
+		            !(e[0] == 'o' && e[1] == 'f')) ? 1 : 0;
+
+		if(zod_tour) ZLOG("Tour: the view scrolls by itself (ZOD_TOUR)\n");
+	}
+
+	return zod_tour == 1;
+}
+
 void ZPlayer::ProcessScroll()
 {
     double the_time = COMMON::current_time();
 	const double shift_speed = 400;
 	double time_diff;
 	double the_shift;
+
+	/* The tour cancels a camera flight: a watching player (-t null) has no
+	 * fort, so the flight to it would never end and block scrolling. */
+	if(graphics_loaded && zod_tour_on())
+	{
+		do_focus_to = false;
+
+		if(tour_last == 0) tour_last = the_time;
+
+		const double s = (the_time - tour_last) * shift_speed + tour_over;
+		const int amt = (int)s;
+
+		if(amt < 1) return;
+
+		tour_last = the_time;
+		tour_over = s - amt;
+
+		if(tour_step_left > 0)
+		{
+			const int a = amt < tour_step_left ? amt : tour_step_left;
+			const bool ok = tour_dy > 0 ? zmap.ShiftViewDown(a) : zmap.ShiftViewUp(a);
+
+			tour_step_left -= a;
+
+			if(!ok) { tour_dy = -tour_dy; tour_step_left = 0; }
+		}
+		else
+		{
+			const bool ok = tour_dx > 0 ? zmap.ShiftViewRight(amt) : zmap.ShiftViewLeft(amt);
+
+			if(!ok) { tour_dx = -tour_dx; tour_step_left = 240; }
+		}
+
+		return;
+	}
 
 	//no scrolling when we are
 	//currently flying towards a location

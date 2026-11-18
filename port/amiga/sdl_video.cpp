@@ -25,6 +25,7 @@
 #include "amiga_startup.h"
 #include "ammx.h"
 #include "fastcopy.h"
+#include "zod_census.h"
 /* ACHTUNG: HIER STAND `#include <proto/dos.h>`, und zwar UNBEDINGT.
  * Auf dem Host gibt es den Header nicht -- damit liess sich `make shimtest`
  * seit dem 19.09. nicht mehr uebersetzen, ohne dass es jemandem auffiel.
@@ -988,6 +989,8 @@ void SDL_FreeSurface(SDL_Surface *surface)
 
 	if(--surface->refcount > 0) return;
 
+	if(zod_census_on) zod_census_free(surface);
+
 	SurfaceExtra *x = extra_of(surface);
 
 	if(x->own_pixels && surface->pixels)
@@ -1360,6 +1363,8 @@ int SDL_UpperBlit(SDL_Surface *src, SDL_Rect *srcrect,
 
 	dirty_mark(dst, dx, dy, w, h);
 
+	if(zod_census_on) zod_census_blit(src, dst, w, h);
+
 	/* SDL schreibt das Zielrechteck zurueck -- die Engine kennt das
 	 * (zmini_map.cpp) und arbeitet mit einer Kopie. */
 	if(dstrect)
@@ -1604,6 +1609,8 @@ int SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, Uint32 color)
 	if(w <= 0 || h <= 0) return 0;
 
 	dirty_mark(dst, x0, y0, w, h);
+
+	if(zod_census_on) zod_census_fill(dst, w, h);
 
 	const int bpp = dst->format->BytesPerPixel;
 	unsigned char *dp = (unsigned char*)dst->pixels + (size_t)y0 * dst->pitch + (size_t)x0 * bpp;

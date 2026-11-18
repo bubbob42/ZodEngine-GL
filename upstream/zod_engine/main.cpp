@@ -37,6 +37,7 @@ TCHAR *optarg;
 #include <zod_video.h>
 #include <amiga_audio.h>
 #include <amiga_startup.h>
+#include <zod_census.h>
 #include "fineclock.h"
 #ifdef ZOD_ALLOC_PROBE
 extern "C" void zod_alloc_report(const char *tag);
@@ -203,6 +204,8 @@ int main(int argc, char **argv)
     //Logziel aus der Kommandozeile hat Vorrang vor der Umgebung
     if(starting_conditions.read_log_target)
         zod_log_open_name(starting_conditions.log_target.c_str());
+
+    zod_census_init();
 
     /* FEHLT DIE KARTENLISTE, WIRD HIER ABGEBROCHEN -- und zwar VOR dem
      * Bildschirm.
@@ -685,6 +688,8 @@ void run_single_player()
                     //Zeilen muss `zeichnen` ergeben -- fehlt etwas, ist es
                     //nicht eingeklammert und die Suche geht dort weiter.
                     zod_render_sections_report(tframes);
+
+                    zod_census_report();
 
                     /* Der Mittelwert kann einen Einbruch nicht zeigen. */
                     zod_worst_report();

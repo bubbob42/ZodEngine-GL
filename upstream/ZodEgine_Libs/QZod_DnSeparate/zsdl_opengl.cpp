@@ -7,6 +7,7 @@
 #include <zod_pack.h>
 #include <zod_palette.h>
 #include <amiga_startup.h>
+#include <zod_census.h>
 #include <utility>
 #include <vector>
 
@@ -625,6 +626,8 @@ void ZSDL_Surface::LoadBaseImage(string filename)
 	if(!surface) surface = IMG_Load(filename.c_str());
 
 	LoadBaseImage(surface);
+
+	if(zod_census_on) zod_census_image(sdl_surface, filename.c_str());
 }
 
 void ZSDL_Surface::LoadNewSurface(int w, int h, bool opaque)
@@ -990,6 +993,8 @@ bool ZSDL_Surface::LoadRotoZoomSurface()
 
 	sdl_rotozoom = made;
 	rotozoom_loaded = true;
+
+	if(zod_census_on) zod_census_derived(made, sdl_surface, ZOD_CENSUS_ROTO);
 
 	{
 		const unsigned long t0 = zod_fineclock_ticks();
@@ -2017,6 +2022,8 @@ SDL_Surface *ZSDL_Surface::GetHitSurface(SDL_Surface *src)
 
 	sdl_hit = zsdl_make_white_silhouette(src);
 	hit_src = sdl_hit ? src : nullptr;
+
+	if(zod_census_on) zod_census_derived(sdl_hit, src, ZOD_CENSUS_HIT);
 
 	return sdl_hit;
 }
