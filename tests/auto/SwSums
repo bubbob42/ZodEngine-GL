@@ -1,0 +1,25 @@
+; SwSums -- the software path's flip block sums are exact. ZOD_FLIP_SUMS=
+; pruefen sends only the dirty blocks whose sums changed (as on the A4000D)
+; and after every flip reads the whole screen back: it must equal the
+; compose surface byte for byte ("0 differ"). A still view on orig01, then
+; the view scrolling on orig04 (ZOD_TOUR).
+; LIMIT 900
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_FLIP_SUMS pruefen
+Echo "=== software, block sums checked, orig01 still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sus 20 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sus.done
+Type DEV:Test/zod-sus.log >>DEV:Test/auto.log
+Echo "=== software, block sums checked, orig04 scrolling ===" >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Run >NIL: Execute DEV:Test/RunZod sut 20 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sut.done
+Type DEV:Test/zod-sut.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_FLIP_SUMS
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

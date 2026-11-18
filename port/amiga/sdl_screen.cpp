@@ -70,6 +70,16 @@ extern "C" int  zod_dirty_out_zeile(int blockzeile);
 
 static int breit_an = 0;
 
+/* The flip's block sums (see block_sums before SDL_Flip) */
+static int sums_mode = 0;              /* 0 off, 1 skip unchanged blocks */
+static int sums_auto = 0;              /* measure_gap: a byte into the screen is dear */
+static int sums_check = 0;             /* ZOD_FLIP_SUMS=pruefen: compare the screen */
+static ULONG *sums = 0;                /* two per block of the dirty grid */
+static int sums_w = 0, sums_h = 0;     /* the grid it was made for */
+static int sums_fresh = 1;             /* next flip copies all and records */
+static unsigned long long sums_marked = 0, sums_sent = 0;
+static unsigned long long check_bytes = 0, check_differ = 0;
+
 /* ---- Wohin `umschalten` wirklich geht -----------------------------------
  *
  * Auf der V1200 meldete ein Lauf 2407 us fuer 148 429 Byte in 673 Aufrufen.
@@ -252,6 +262,11 @@ static void close_all(void)
 #ifndef DISABLE_OPENGL
 	if(gl_kontext) gl_schliessen();
 #endif
+
+	/* the flip's block sums belong to the screen */
+	free(sums);
+	sums = 0;
+	sums_fresh = 1;
 
 	if(window_ptr)
 	{
@@ -596,6 +611,21 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 		/* the gap from this machine's own prices (ZOD_LUECKE fixes it) */
 		measure_gap(compose);
 
+		/* the block sums: on where a byte into the screen is dear;
+		 * ZOD_FLIP_SUMS=ein / aus / pruefen. A new screen: record all. */
+		sums_mode = sums_auto;
+		sums_fresh = 1;
+
+		if(GetVar((CONST_STRPTR)"ZOD_FLIP_SUMS", (STRPTR)wahl, sizeof(wahl), 0) > 0)
+		{
+			if(wahl[0] == 'e' || wahl[0] == 'E' || wahl[0] == '1') sums_mode = 1;
+			else if(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0') sums_mode = 0;
+			else if(wahl[0] == 'p' || wahl[0] == 'P') { sums_mode = 1; sums_check = 1; }
+		}
+
+		ZLOG("Output: flip block sums %s\n",
+		     sums_mode ? "on (unchanged blocks stay off the bus)" : "off");
+
 		if(GetVar((CONST_STRPTR)"ZOD_COPYBENCH", (STRPTR)wahl, sizeof(wahl), 0) > 0
 		   && (wahl[0] == '1' || wahl[0] == 'j' || wahl[0] == 'J'))
 			copy_bench(compose);
@@ -821,6 +851,10 @@ static void measure_gap(SDL_Surface *surf)
 		if(blocks > MOST) blocks = MOST;
 
 		zod_dirty_set_luecke(blocks);
+
+		/* a byte dearer than ~20 ns (the A4000D's Mediator: 118 ns; the
+		 * V1200 6 ns, FS-UAE 1 ns): summing a block before sending pays */
+		sums_auto = (per_byte * ns >= 20.0);
 
 		ZLOG("Output: gap %ld blocks, measured (a call %ld ns, a byte %ld ns;"
 		     " SetEnv ZOD_LUECKE fixes it)\n",
@@ -1312,6 +1346,70 @@ static void zeiger_entfernen(SDL_Surface *flaeche)
 	zeig_steht = 0;
 }
 
+/* THE FLIP'S BLOCK SUMS. The dirty tracks mark every block something was
+ * drawn into, and in a still view nearly all of them get the same pixels
+ * again -- the background restored under units that stand, and the units
+ * drawn again in the same place. MEASURED on the A4000D: 96 % of the bytes
+ * the flip copied were on the screen already, and each costs ~120 ns there.
+ * A copy of the screen to compare with did not pay (build/hw/flip-shadow.
+ * patch): the 060 reads its own card RAM at ~40 ns a byte, so reading the
+ * compose surface AND a shadow cost about what the saved writes did.
+ *
+ * So each dirty block is summed from the compose surface alone -- two
+ * 32-bit sums of different kinds, so that a change would have to fool both
+ * -- and compared with the sums it had when it was last sent; only blocks
+ * whose sums differ go to the screen. The first flip after SDL_SetVideoMode
+ * copies all and records every block; blocks that are not dirty are copied
+ * nowhere and stay equal on both sides. The pointer is in the compose
+ * surface while it is copied (zeiger_einsetzen), so it is summed too.
+ *
+ * On by itself where measure_gap finds a byte into the screen dear (>= 20
+ * ns); ZOD_FLIP_SUMS=ein / aus overrides, =pruefen reads the whole screen
+ * back after every flip and counts the bytes that differ from the compose
+ * surface (a test; slow on real hardware). */
+static void block_sum(const unsigned char *p, long pitch, int rows, int bw,
+                      ULONG *a, ULONG *b)
+{
+	ULONG x = 0x9e3779b9UL, y = 2166136261UL;
+
+	if(bw == 16 && !((ULONG)p & 3) && !(pitch & 3))
+	{
+		for(int r = 0; r < rows; r++, p += pitch)
+		{
+			const ULONG *q = (const ULONG *)p;
+
+			x = ((x << 1) | (x >> 31)) + q[0]; y = y * 33 + q[0];
+			x = ((x << 1) | (x >> 31)) + q[1]; y = y * 33 + q[1];
+			x = ((x << 1) | (x >> 31)) + q[2]; y = y * 33 + q[2];
+			x = ((x << 1) | (x >> 31)) + q[3]; y = y * 33 + q[3];
+		}
+	}
+	else
+	{
+		for(int r = 0; r < rows; r++, p += pitch)
+			for(int i = 0; i < bw; i++)
+			{
+				x = ((x << 1) | (x >> 31)) + p[i];
+				y = y * 33 + p[i];
+			}
+	}
+
+	*a = x;
+	*b = y;
+}
+
+extern "C" void zod_flip_sums_report(void)
+{
+	if(sums_mode && sums_marked)
+		ZLOG("Flip sums: %lu of %lu marked bytes sent to the screen (%lu %%)\n",
+		     (unsigned long)sums_sent, (unsigned long)sums_marked,
+		     (unsigned long)(sums_sent * 100ULL / sums_marked));
+
+	if(sums_check && check_bytes)
+		ZLOG("Flip sums check: %lu screen bytes compared after the flips, %lu differ from"
+		     " the compose surface\n", (unsigned long)check_bytes, (unsigned long)check_differ);
+}
+
 int SDL_Flip(SDL_Surface *screen)
 {
 #ifndef DISABLE_OPENGL
@@ -1367,6 +1465,19 @@ int SDL_Flip(SDL_Surface *screen)
 		unsigned long gezaehlt = 0;
 		const int schub = zod_dirty_block_shift();
 		const int block = 1 << schub;
+		const int gw = (w + block - 1) >> schub, gh = (h + block - 1) >> schub;
+
+		if(sums_mode && (!sums || sums_w != gw || sums_h != gh))
+		{
+			free(sums);
+			sums = (ULONG *)malloc((size_t)gw * gh * 2 * sizeof(ULONG));
+			sums_w = gw;
+			sums_h = gh;
+			sums_fresh = 1;
+		}
+
+		/* only the runs path keeps the sums (ZOD_BREIT is a measuring aid) */
+		const int sums_use = sums_mode && sums && !breit_an;
 
 		/* DIE KOSTENSTRUKTUR, aus drei Messungen auf der V1200 (19.09.):
 		 *
@@ -1475,6 +1586,63 @@ int SDL_Flip(SDL_Surface *screen)
 
 					int n = x1 - x0 + 1;
 
+					if(sums_use)
+					{
+						/* the run's blocks, summed; spans of changed ones sent */
+						const int bx1 = x1 >> schub;
+						int bx, cb = -1;
+
+						sums_marked += (unsigned long long)n * zeilen;
+
+						for(bx = x0 >> schub; bx <= bx1 + 1; bx++)
+						{
+							int changed = 0;
+
+							if(bx <= bx1)
+							{
+								const int bxa = bx << schub;
+								const int bw = (bxa + block <= w) ? block : w - bxa;
+								ULONG a, b;
+								ULONG *st = sums + ((long)(y0 >> schub) * gw + bx) * 2;
+
+								block_sum(src + (unsigned long)y0 * screen->pitch + bxa,
+								          screen->pitch, zeilen, bw, &a, &b);
+
+								if(sums_fresh || st[0] != a || st[1] != b)
+								{
+									changed = 1;
+									st[0] = a;
+									st[1] = b;
+								}
+							}
+
+							if(changed && cb < 0) cb = bx;
+
+							if(!changed && cb >= 0)
+							{
+								const int cx0 = cb << schub;
+								const int cx1 = (bx << schub) < w ? (bx << schub) : w;
+								unsigned char *dd = dst + (unsigned long)y0 * bpr + cx0;
+								const unsigned char *ss = src + (unsigned long)y0
+								                        * (unsigned long)screen->pitch + cx0;
+
+								for(int r = 0; r < zeilen; r++)
+								{
+									zod_copy_row(dd, ss, cx1 - cx0);
+									dd += bpr;
+									ss += screen->pitch;
+								}
+
+								zod_dirty_calls += (unsigned long)zeilen;
+								sums_sent += (unsigned long long)(cx1 - cx0) * zeilen;
+								gezaehlt += (unsigned long)(cx1 - cx0) * zeilen;
+								cb = -1;
+							}
+						}
+
+						continue;
+					}
+
 					if(gleicher_abstand && (w - n) <= auffuellen)
 					{
 						x0 = 0;
@@ -1508,6 +1676,19 @@ int SDL_Flip(SDL_Surface *screen)
 					}
 				}
 			}
+		}
+
+		/* the first flip after a new screen copied all: the sums hold now */
+		if(sums_use) sums_fresh = 0;
+
+		if(sums_check && gleicher_abstand)
+		{
+			const unsigned long all = (unsigned long)h * bpr;
+
+			for(unsigned long i = 0; i < all; i++)
+				if(dst[i] != src[i]) check_differ++;
+
+			check_bytes += all;
 		}
 
 		zod_dirty_bytes += gezaehlt;

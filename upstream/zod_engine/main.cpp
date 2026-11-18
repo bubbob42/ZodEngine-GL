@@ -125,6 +125,7 @@ extern unsigned long zod_kopf_aus_pool, zod_kopf_neu, zod_kopf_zurueck;
 
 extern "C" void zod_dirty_sweep_report(unsigned long frames);
 extern "C" void zod_flip_report(void);
+extern "C" void zod_flip_sums_report(void);   //the flip's block sums
 /* port/amiga/sdl_video.cpp -- Zaehler des Blitters */
 extern "C" void zod_blit_report(unsigned long *kc, unsigned long long *kp,
                                 unsigned long *fc, unsigned long long *fp,
@@ -852,6 +853,7 @@ void run_single_player()
                         	     zod_rect_rows / (zod_rect_calls ? zod_rect_calls : 1));
 
                         zod_dirty_sweep_report(df);
+                        zod_flip_sums_report();
                     }
                 }
 #endif
