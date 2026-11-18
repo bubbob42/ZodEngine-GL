@@ -171,7 +171,11 @@ else ifeq ($(PLATFORM),amiga)
     MGL_SDK  ?= ../RadeonGL/sdk/minigl-29.1
     INCLUDES += -I$(MGL_SDK)/minigl-shared-library/include
     LIBS     := -L$(MGL_SDK)/lib -lminigl $(LIBS)
-    ENGINE_SRCS += port/zod_gl.cpp
+    ENGINE_SRCS += port/zod_gl.cpp port/amiga/zod_present.cpp
+    # the own present on PiStorm3D opens its screen without a mouse sprite
+    # (Picasso96API, optional at run time); the headers as Doom64 takes them
+    P96_SDK  ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
+    ZOD_PRESENT_INC := -I$(P96_SDK)/Include
   endif
   # Das Assemblermodul laeuft NICHT ueber ENGINE_OBJS: dessen patsubst kennt
   # nur %.cpp und liesse eine .s-Datei unveraendert durch. Eigene Liste,
@@ -241,6 +245,8 @@ $(ENGINE): $(ENGINE_OBJS) $(ASM_OBJS)
 
 $(EDITOR): $(EDITOR_OBJS)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LIBS)
+
+$(OBJDIR)/port/amiga/zod_present.o: INCLUDES += $(ZOD_PRESENT_INC)
 
 $(OBJDIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)

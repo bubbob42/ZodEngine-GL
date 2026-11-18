@@ -51,6 +51,7 @@
 #include <dos/var.h>
 #include <SDL/SDL_opengl.h>
 #include "zod_gl.h"
+#include "zod_present.h"
 #endif
 
 /* port/amiga/sdl_video.cpp -- Schmutzspuren je Zeile */
@@ -156,6 +157,7 @@ static int wheel_pending = 0;     /* +1 hoch, -1 runter */
  * compose stays: loading and statistics screens are still drawn in
  * software, and SDL_Flip shows them as one texture. */
 static int mgl_offen  = 0;       /* MiniGLOpen succeeded */
+static int gl_sync    = 1;       /* wait for the beam (ZOD_GL_SYNC) */
 static int gl_kontext = 0;       /* a context is open */
 static int flip_var_vorher = -1; /* RadeonGLFlip before us: -1 untouched, 0 none, 1 flip_var_text */
 static char flip_var_text[16];
@@ -930,23 +932,34 @@ static int gl_oeffnen(int w, int h)
 
 	SetVar((CONST_STRPTR)"RadeonGLFlip", (CONST_STRPTR)"pan", -1, GVF_LOCAL_ONLY);
 
-	mglChooseWindowMode(GL_FALSE);
-	mglChoosePixelDepth(16);
-	mglChooseNumberOfBuffers(3);
 	/* a batch is at most 1000 quads (port/zod_gl.cpp); PiStorm3D's default
 	 * buffer is smaller and refuses longer blocks */
 	mglChooseVertexBufferSize(4096);
 
-	if(!mglCreateContext(0, 0, w, h))
+	/* PiStorm3D keeps one buffer and no sync below VideoCore.card 2: an own
+	 * screen, panned between two halves (port/amiga/zod_present.cpp) */
+	if(zod_present_wanted() && zod_present_open(w, h))
 	{
-		ZLOG("GL: no %dx%d screen from minigl.library -- drawing without it\n", w, h);
-		return 0;
+		gl_kontext = 1;
+		window_ptr = zod_present_window();
 	}
+	else
+	{
+		mglChooseWindowMode(GL_FALSE);
+		mglChoosePixelDepth(16);
+		mglChooseNumberOfBuffers(3);
 
-	gl_kontext = 1;
+		if(!mglCreateContext(0, 0, w, h))
+		{
+			ZLOG("GL: no %dx%d screen from minigl.library -- drawing without it\n", w, h);
+			return 0;
+		}
 
-	window_ptr = (struct Window *)mglGetInputWindowHandle();
-	if(!window_ptr) window_ptr = (struct Window *)mglGetWindowHandle();
+		gl_kontext = 1;
+
+		window_ptr = (struct Window *)mglGetInputWindowHandle();
+		if(!window_ptr) window_ptr = (struct Window *)mglGetWindowHandle();
+	}
 
 	if(!window_ptr)
 	{
@@ -969,18 +982,22 @@ static int gl_oeffnen(int w, int h)
 	window_ptr->Flags |= WFLG_RMBTRAP;
 	Permit();
 
-	/* the engine draws its own pointer (gl_bild_zeigen) */
-	mglSetPointer();
+	/* the engine draws its own pointer (gl_bild_zeigen); the own present's
+	 * window has a blank one already */
+	if(!zod_present_active()) mglSetPointer();
 
 	/* ZOD_GL_SYNC=aus: no wait for the beam (benchmarks); default on */
 	{
 		const char *e = zod_env("ZOD_GL_SYNC", buf, sizeof(buf));
-		const int sync = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
-		                         (e[0] == 'o' && e[1] == 'f')));
 
-		mglEnableSync(sync ? GL_TRUE : GL_FALSE);
-		ZLOG("GL: %s, %dx%d screen, 3 buffers, sync %s\n",
-		     (const char *)glGetString(GL_RENDERER), w, h, sync ? "on" : "off");
+		gl_sync = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
+		                  (e[0] == 'o' && e[1] == 'f')));
+
+		mglEnableSync(gl_sync ? GL_TRUE : GL_FALSE);
+		ZLOG("GL: %s, %dx%d screen, %s, sync %s\n",
+		     (const char *)glGetString(GL_RENDERER), w, h,
+		     zod_present_active() ? "own present (two halves of one screen)" : "3 buffers",
+		     gl_sync ? "on" : "off");
 	}
 
 	zod_gl_active = 1;
@@ -1000,13 +1017,15 @@ static void gl_schliessen(void)
 	if(window_ptr)
 	{
 		ModifyIDCMP(window_ptr, 0);
-		mglClearPointer();
+		if(!zod_present_active()) mglClearPointer();
 	}
 
 	mglDeleteContext();
 	gl_kontext = 0;
 
-	/* window and screen were the library's */
+	/* window and screen were the library's -- or the own present's, closed
+	 * after the context that drew into its bitmap */
+	zod_present_close();
 	window_ptr = 0;
 	screen_ptr = 0;
 }
@@ -1021,6 +1040,8 @@ static void gl_bild_zeigen(void)
 
 	zod_gl_flush();
 	mglSwitchDisplay();
+
+	if(zod_present_active()) zod_present_show(gl_sync);
 }
 
 void SDL_GL_SwapBuffers(void)
