@@ -59,6 +59,8 @@ extern "C" void zod_dirty_set_target(SDL_Surface *s);
 extern "C" int  zod_dirty_out_runs(int blockzeile, short *x0, short *x1, int max);
 extern "C" int  zod_dirty_block_shift(void);
 extern "C" int  zod_dirty_get_luecke(void);
+extern "C" void zod_dirty_set_luecke(int bloecke);
+extern "C" int  zod_dirty_gap_fixed(void);
 /* Fuer den Mauszeiger: sein Rechteck in die AUSGABEspur vermerken. Die
  * Klammer restore_begin/end haelt es aus der Objektspur heraus. */
 extern "C" void zod_dirty_mark(void *dst, int x, int y, int w, int h);
@@ -386,6 +388,7 @@ extern "C" void zod_sdl_reload_palette(void)
 /* Weiter unten in dieser Datei -- sie liegt im extern "C"-Block, die
  * Vorausdeklaration muss deshalb auch darin stehen. */
 static void copy_bench(SDL_Surface *flaeche);
+static void measure_gap(SDL_Surface *surf);
 
 void zod_flip_report(void)
 {
@@ -590,6 +593,9 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 		     breit_an ? "ganze Blockzeilen (ZOD_BREIT=ein)"
 		              : "Laeufe je Blockzeile (Vorgabe)");
 
+		/* the gap from this machine's own prices (ZOD_LUECKE fixes it) */
+		measure_gap(compose);
+
 		if(GetVar((CONST_STRPTR)"ZOD_COPYBENCH", (STRPTR)wahl, sizeof(wahl), 0) > 0
 		   && (wahl[0] == '1' || wahl[0] == 'j' || wahl[0] == 'J'))
 			copy_bench(compose);
@@ -731,6 +737,97 @@ const SDL_VideoInfo *SDL_GetVideoInfo(void)
  *
  * `SetEnv ZOD_COPYBENCH 1`. Sie schreibt einmal Unsinn in den Schirm -- das
  * naechste Bild ueberschreibt ihn. */
+/* The gap (ZOD_LUECKE): how many unchanged blocks a run may copy across
+ * rather than start a second copy call. The right value is the machine's own
+ * price of a call against a byte into the screen. cego measured it on the
+ * V1200 (350 ns a call, 6.02 ns a byte: ~4 blocks) and the default stands on
+ * that. On the A4000D (a Radeon behind a Mediator) a byte costs 121 ns and a
+ * call nothing measurable (ZOD_COPYBENCH: 8 KB/ms for 16-byte and 300 KB
+ * pieces alike), so every byte of a gap is bus time for nothing: gap 1
+ * instead of 8 took the flip from 13.5 to 10.6 ms there (+8 % fps).
+ *
+ * Measured once per screen unless ZOD_LUECKE is set: the screen's top rows
+ * copied from the compose surface (what the screen shows anyway) in one call
+ * and in 16-byte calls, each repeated until 2000 E-Clock ticks have passed.
+ * gap = call / byte / 16, rounded, 0..8. */
+static void measure_gap(SDL_Surface *surf)
+{
+	enum { ROWS = 32, PIECE = 16, MIN_TICKS = 2000, MOST = 8 };
+
+	const unsigned long f = zod_fineclock_freq();
+
+	if(!f || !screen_ptr || zod_dirty_gap_fixed()) return;
+
+	APTR base = 0;
+	ULONG bpr = 0;
+	struct TagItem lbmi[] = {
+		{ LBMI_BASEADDRESS, (ULONG)&base },
+		{ LBMI_BYTESPERROW, (ULONG)&bpr },
+		{ TAG_DONE, 0 }
+	};
+
+	APTR lock = LockBitMapTagList(screen_ptr->RastPort.BitMap, lbmi);
+
+	if(!lock) return;
+
+	if((int)bpr != surf->pitch || surf->h < ROWS)
+	{
+		UnLockBitMap(lock);
+		return;
+	}
+
+	unsigned char *dst = (unsigned char*)base;
+	const unsigned char *src = (const unsigned char*)surf->pixels;
+	const unsigned long n = (unsigned long)ROWS * bpr;
+	unsigned long passes_one = 1, passes_many = 1, t_one, t_many;
+
+	/* --- until UnLockBitMap: no output, no GetVar --- */
+	for(;;)
+	{
+		const unsigned long t0 = zod_fineclock_ticks();
+
+		for(unsigned long p = 0; p < passes_one; p++) zod_copy_row(dst, src, (int)n);
+
+		t_one = zod_fineclock_ticks() - t0;
+		if(t_one >= MIN_TICKS || passes_one >= 4096) break;
+		passes_one *= 2;
+	}
+
+	for(;;)
+	{
+		const unsigned long t0 = zod_fineclock_ticks();
+
+		for(unsigned long p = 0; p < passes_many; p++)
+			for(unsigned long o = 0; o < n; o += PIECE)
+				zod_copy_row(dst + o, src + o, PIECE);
+
+		t_many = zod_fineclock_ticks() - t0;
+		if(t_many >= MIN_TICKS || passes_many >= 4096) break;
+		passes_many *= 2;
+	}
+
+	UnLockBitMap(lock);
+
+	{
+		const double per_byte = (double)t_one / passes_one / n;
+		const double per_call = ((double)t_many / passes_many - (double)t_one / passes_one)
+		                      / (double)(n / PIECE);
+		const double ns = 1e9 / (double)f;
+		int blocks = 0;
+
+		if(per_byte > 0.0 && per_call > 0.0)
+			blocks = (int)(per_call / per_byte / 16.0 + 0.5);
+
+		if(blocks > MOST) blocks = MOST;
+
+		zod_dirty_set_luecke(blocks);
+
+		ZLOG("Output: gap %ld blocks, measured (a call %ld ns, a byte %ld ns;"
+		     " SetEnv ZOD_LUECKE fixes it)\n",
+		     (long)blocks, (long)(per_call * ns), (long)(per_byte * ns));
+	}
+}
+
 static void copy_bench(SDL_Surface *flaeche)
 {
 	static const long stueck[] = { 16, 32, 64, 128, 256, 640, 1280, 2560,

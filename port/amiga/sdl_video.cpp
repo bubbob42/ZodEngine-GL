@@ -185,6 +185,9 @@ static void grid_alles(unsigned char (*g)[ZOD_GRID_W], unsigned char v)
  * bekommt, um auf die ganze Breite aufgefuellt zu werden. Das ist dieselbe
  * Waehrung: Aufruf gegen Byte. */
 static int luecke = 8;
+static int gap_fixed = 0;   /* 1: ZOD_LUECKE was set -- no measurement */
+
+extern "C" int zod_dirty_gap_fixed(void) { return gap_fixed; }
 
 extern "C" void zod_dirty_set_luecke(int bloecke)
 {
@@ -288,7 +291,11 @@ extern "C" void zod_dirty_set_target(SDL_Surface *s)
 			ziffern++;
 		}
 
-		if(ziffern) zod_dirty_set_luecke(v);
+		if(ziffern)
+		{
+			zod_dirty_set_luecke(v);
+			gap_fixed = 1;
+		}
 	}
 
 	if(zod_env("ZOD_SWEEP", wahl, sizeof(wahl)))
