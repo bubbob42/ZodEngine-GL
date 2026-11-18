@@ -36,6 +36,15 @@ struct zod_gl_tex
 static int screen_w = 0, screen_h = 0;
 static unsigned long ctx_gen = 0;
 
+/* Texture sizes the library takes (read at zod_gl_init). RadeonGL stores a
+ * non-power-of-two texture as one level, a power-of-two one with its whole
+ * mip chain (+33 %) -- so a big surface (the map) goes up at its own size
+ * there. Small ones stay powers of two: freed names of a size are reused,
+ * and text surfaces of every width would not match. */
+static int tile_max = 1024;     /* largest edge */
+static int npot_ok = 0;         /* the library takes any size */
+static int refused_told = 0;
+
 /* the open batch */
 static int in_batch = 0;
 static int batch_quads = 0;
@@ -141,7 +150,7 @@ static int pot(int n)
 {
 	int p = 1;
 
-	while(p < n && p < TILE_MAX) p <<= 1;
+	while(p < n && p < tile_max) p <<= 1;
 
 	return p;
 }
@@ -322,8 +331,8 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s)
 	t->s = s;
 	t->w = s->w;
 	t->h = s->h;
-	t->tw = pot(s->w);
-	t->th = pot(s->h);
+	t->tw = (npot_ok && s->w > 256) ? (s->w < tile_max ? s->w : tile_max) : pot(s->w);
+	t->th = (npot_ok && s->h > 256) ? (s->h < tile_max ? s->h : tile_max) : pot(s->h);
 	t->cols = (s->w + t->tw - 1) / t->tw;
 	t->rows = (s->h + t->th - 1) / t->th;
 	t->gen = ctx_gen;
@@ -388,7 +397,10 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s)
 			{
 				t->failed = 1;
 				st_refused++;
-				ZLOG("GL: texture memory full -- a %dx%d surface stays undrawn\n", s->w, s->h);
+
+				if(refused_told < 3)
+					ZLOG("GL: texture memory full -- a %dx%d surface stays undrawn%s\n",
+					     s->w, s->h, ++refused_told == 3 ? " (no more of these)" : "");
 			}
 
 			st_made_px += (unsigned long)t->tw * t->th;
@@ -398,7 +410,18 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s)
 	free(buf);
 	st_made++;
 
-	if(t->failed) tex_drop_names(t);
+	/* refused: the tiles made so far give their memory back at once
+	 * (nothing has drawn with them), not through the retired list */
+	if(t->failed)
+	{
+		int i;
+
+		for(i = 0; i < n; i++)
+			if(t->names[i]) delete_name(t->names[i]);
+
+		free(t->names);
+		t->names = 0;
+	}
 
 	return t;
 }
@@ -551,6 +574,19 @@ void zod_gl_init(int w, int h)
 	cur_alpha = 255;
 	retired_n = 0;
 	pool_n = 0;
+
+	{
+		const char *ext = (const char *)glGetString(GL_EXTENSIONS);
+		GLint max = 0;
+
+		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max);
+		tile_max = max >= 256 ? (max > 2048 ? 2048 : (int)max) : TILE_MAX;
+		/* RadeonGL (its extensions are GL_RGL_*): any size, one level */
+		npot_ok = ext && strstr(ext, "GL_RGL_") != 0;
+
+		ZLOG("GL: textures up to %d, %s\n", tile_max,
+		     npot_ok ? "any size (large surfaces at their own size)" : "powers of two");
+	}
 
 	glViewport(0, 0, w, h);
 	glMatrixMode(GL_PROJECTION);

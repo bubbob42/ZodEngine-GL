@@ -1,0 +1,43 @@
+; GLTour -- the GL path while the view scrolls (ZOD_TOUR) and debris spins
+; (ZOD_SPIN ein: the rotation path), on the large orig04 map; the same run
+; in software to compare (frame 500 of each). Then p08_bb_p08m01, whose
+; 4096x4096 map is twice the 16 MB heap: the map must fail cleanly
+; (refused, logged), not crash. FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 1800
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_CENSUS on
+SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_TOUR on
+SetEnv ZOD_SPIN ein
+SetEnv RadeonGLHeapMax 16
+SetEnv RadeonGLDump 500
+SetEnv RadeonGLDumpFile DEV:Test/zod-tour-f500.r2d
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod tour 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-tour.done
+Type DEV:Test/zod-tour.log >>DEV:Test/auto.log
+Type DEV:Test/zod-tour-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo "=== software, orig04, tour ===" >>DEV:Test/auto.log
+SetEnv ZOD_SHOT DEV:Test/zod-toursw-f500.bmp:500
+Run >NIL: Execute DEV:Test/RunZod toursw 40 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-toursw.done
+Type DEV:Test/zod-toursw.log >>DEV:Test/auto.log
+UnSetEnv ZOD_SHOT
+UnSetEnv ZOD_TOUR
+Echo "=== GL, p08 (map larger than the heap) ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod big 20 -m Data/Maps/Custom/p08_bb_p08m01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-big.done
+Type DEV:Test/zod-big.log >>DEV:Test/auto.log
+Type DEV:Test/zod-big-lib.log >>DEV:Test/auto.log
+UnSetEnv ZOD_CENSUS
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv ZOD_SPIN
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
