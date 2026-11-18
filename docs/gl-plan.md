@@ -241,6 +241,38 @@ Still open from M1: the A4000D software baseline (cego's `-B` report with
 `ZOD_CENSUS`), and a scrolling benchmark: a still view hides the flip cost
 of scrolling, which is where GL gains most.
 
+## 5b. Progress, 2026-11-18
+
+All in FS-UAE (68040 + RTG) on RadeonGL 0.16's null card. The packet
+checker sees every command; r200view renders the dumped frames.
+
+- **M0 done.**
+  - The private repo bubbob42/ZodEngine-GL, with branch `gl`.
+  - A separate bebbo gcc 6.5 (amiga6 of 31 Oct) with libstdc++ in
+    ~/amiga-gcc6. The shared toolchain has no libstdc++.
+  - cego's shim build links again; it runs in a Linux container.
+- **M1, host part done (5a).** The A4000D baseline is still open.
+- **M2 done:** port/zod_gl.cpp, plus the context in sdl_screen.cpp.
+  - Without the library, without a screen from it, or with -o, the game
+    draws in software as before.
+  - GLSmoke frame equals the software frame; 0 checker errors.
+- **M3, most of it done:**
+  - The map goes through one 1024x1024 RGB565 wrap-around texture of
+    128x128 tiles, so p08's 4096x4096 map now draws.
+  - Images up to 256x256 sit in atlas pages, run-time surfaces up to
+    256x64 in slots, and fills use the white block.
+  - Colour goes per quad, so it never ends a batch.
+  - **Batches per frame: 13-15** (orig01 still 13.0, orig04 scrolling
+    14.6, p08 14.3), down from 70-119 in M2's first state.
+  - Heap about 10 of 16 MB; one atlas page holds every image of a run.
+  - **Not built, and maybe not needed:** the depth-by-draw-order trick.
+    In-order batching already gives 13-15 a frame; the A4000D decides.
+- **Found on the way:**
+  - The HUD frees each text surface right after drawing it, so texture
+    names are retired for three frames and then reused.
+  - RadeonGL gives power-of-two textures a full mip chain. Large surfaces
+    therefore go up at their own size, and atlas pages are 1023 high.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
