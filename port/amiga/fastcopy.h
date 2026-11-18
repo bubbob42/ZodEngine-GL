@@ -61,6 +61,10 @@ static inline void zod_copy_rect_host(unsigned char *d, const unsigned char *s,
 #define zod_copy_rect zod_copy_rect_host
 #define zod_copy_init() ((void)0)
 
+/* sdl_video.cpp counts rectangle copies; on the host (shim build) nobody
+ * reports them, so a private copy per unit is enough. */
+static unsigned long zod_rect_calls, zod_rect_rows, zod_rect_fast;
+
 #endif
 
 #endif

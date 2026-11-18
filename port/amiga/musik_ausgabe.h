@@ -22,7 +22,13 @@
  * stoert: Der Process laeuft weiter, auch wenn die Hauptschleife 350 ms in
  * der Bot-Wegsuche haengt.
  */
+#ifdef __amigaos__
 #include <exec/types.h>
+#else
+/* Host (shim build): no exec/types.h there. The mixer header carries the
+ * same fixed-width typedefs the host tests already use. */
+#include "musik_mischer.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -1370,7 +1370,7 @@ extern "C" void zod_roto_frame_extra_get(unsigned long *frei, unsigned long *ver
  * laufenden Summen; auf dem Host gibt es eine leere Fassung). */
 extern "C" void zod_blit_now(unsigned long *calls, unsigned long *px,
                              unsigned long *rows);
-#ifndef __amigaos__
+#if !defined(__amigaos__) && !defined(ZOD_SHIM)
 /* Auf dem Host gibt es den eigenen Blitter nicht -- die Zahlen bleiben 0.
  * Die Zeile im Bericht steht trotzdem da, damit eine fehlende Zahl nicht mit
  * "kein Blit" verwechselt wird. */

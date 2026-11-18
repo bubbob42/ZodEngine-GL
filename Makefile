@@ -57,6 +57,11 @@ else ifeq ($(PLATFORM),shim)
               -Iport/third_party
   ENGINE_SRCS += port/amiga/sdl_addons.cpp port/amiga/sdl_video.cpp \
                  port/amiga/sdl_misc.cpp tests/shim/shim_screen.cpp
+  # Music: the real mixer (plain C) and a silent output in place of AHI/Paula.
+  ENGINE_C_SRCS += port/amiga/musik_mischer.c tests/shim/shim_musik.c
+  # The engine's own blitter (sdl_video.cpp) is in this build, so the
+  # host-only stand-ins for its counters must stay out (zplayer.cpp).
+  DEFINES += -DZOD_SHIM
   ENGINE   := $(BUILD)/zod
 else ifeq ($(PLATFORM),amiga)
   CXX      := m68k-amigaos-g++
