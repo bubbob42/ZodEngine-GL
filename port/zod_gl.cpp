@@ -61,6 +61,8 @@ struct zod_gl_tex
 	                           * 1 a loaded image, 2 a run-time slot */
 	int bx, by;               /* where the surface starts in its texture */
 	int slot_w, slot_h;       /* a run-time slot's size class */
+	unsigned long sum1, sum2; /* a run-time slot's content as uploaded */
+	int sum_ok;               /* 0: changed since, the sums say nothing */
 };
 
 static int screen_w = 0, screen_h = 0;
@@ -126,12 +128,22 @@ static float white_u = 0.0f, white_v = 0.0f;
  * break the batch wherever they are drawn. Up to DYN_W x DYN_H they get a
  * slot of a size class (powers of two from 16 x 8) in the atlas pages
  * instead, theirs while they live. A freed surface's slot waits
- * RETIRE_FRAMES frames, then serves the next surface of its class. */
+ * RETIRE_FRAMES frames, then serves the next surface of its class.
+ *
+ * The HUD renders the same lines again every frame. Each upload into a page
+ * the frame has drawn from already makes RadeonGL wait for the card to go
+ * idle (its texture hazard rule), so a slot keeps the sums of what it holds:
+ * a new surface with the same size and sums takes that slot, retired or
+ * free, and nothing is sent. Same pixels, so no draw still in flight can
+ * see a difference. */
 enum { DYN_W = 256, DYN_H = 64, DYN_FREE = 1024 };
 
 struct dyn_slot
 {
 	short page, x, y, cw, ch;
+	short w, h;               /* the surface it held */
+	unsigned long sum1, sum2; /* its pixels, valid if sum_ok */
+	short sum_ok;
 	unsigned long frame;      /* when it was retired */
 };
 
@@ -139,7 +151,7 @@ static struct dyn_slot dyn_free[DYN_FREE];      /* ready for a new surface */
 static int dyn_free_n = 0;
 static struct dyn_slot dyn_retired[DYN_FREE];   /* waiting RETIRE_FRAMES */
 static int dyn_retired_n = 0;
-static unsigned long st_dyn_in, st_dyn_reused;
+static unsigned long st_dyn_in, st_dyn_reused, st_dyn_same;
 
 /* ---- texture names of freed surfaces -------------------------------------
  * A surface freed right after it was drawn -- the HUD renders each clock
@@ -430,6 +442,11 @@ static void tex_drop_names(struct zod_gl_tex *t)
 				d->y = (short)t->by;
 				d->cw = (short)t->slot_w;
 				d->ch = (short)t->slot_h;
+				d->w = (short)t->w;
+				d->h = (short)t->h;
+				d->sum1 = t->sum1;
+				d->sum2 = t->sum2;
+				d->sum_ok = (short)t->sum_ok;
 				d->frame = frame_no;
 			}
 		}
@@ -811,6 +828,42 @@ static int atlas_place(int w, int h, int *page, int *x, int *y)
 
 /* s into page pg at x, y */
 static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y);
+static int atlas_take(struct zod_gl_tex *t, int pg, int x, int y);
+static void atlas_send(int pg, int x, int y, int w, int h, const unsigned char *buf);
+
+/* two sums over n RGBA pixels: a multiply hash and a rotate-add, so that
+ * one collision would have to fool both */
+static void content_sums(const unsigned char *buf, long n,
+                         unsigned long *s1, unsigned long *s2)
+{
+	const Uint32 *p = (const Uint32 *)buf;
+	Uint32 a = 2166136261UL, b = 0x9e3779b9UL;
+	long i;
+
+	for(i = 0; i < n; i++)
+	{
+		a = (a ^ p[i]) * 16777619UL;
+		b = ((b << 5) | (b >> 27)) + p[i];
+	}
+
+	*s1 = a;
+	*s2 = b;
+}
+
+/* a slot of class cw x ch that holds exactly these pixels; -1 none */
+static int dyn_find_same(const struct dyn_slot *list, int n, int cw, int ch,
+                         int w, int h, unsigned long s1, unsigned long s2)
+{
+	int i;
+
+	for(i = n - 1; i >= 0; i--)
+		if(list[i].sum_ok && list[i].cw == cw && list[i].ch == ch &&
+		   list[i].w == w && list[i].h == h &&
+		   list[i].sum1 == s1 && list[i].sum2 == s2)
+			return i;
+
+	return -1;
+}
 
 /* s into the atlas; 0 = no room (it then gets a texture of its own) */
 static int atlas_put(struct zod_gl_tex *t, SDL_Surface *s)
@@ -835,60 +888,99 @@ static int atlas_put(struct zod_gl_tex *t, SDL_Surface *s)
 /* a run-time surface into a slot of its size class */
 static int dyn_put(struct zod_gl_tex *t, SDL_Surface *s)
 {
-	int cw = 16, ch = 8, pg, x, y, i;
+	int cw = 16, ch = 8, pg, x, y, i, from_retired = 0;
+	unsigned long s1, s2;
+	unsigned char *buf;
+	struct dyn_slot *d = 0;
 
 	while(cw < s->w) cw <<= 1;
 	while(ch < s->h) ch <<= 1;
 
-	for(i = dyn_free_n - 1; i >= 0; i--)
-		if(dyn_free[i].cw == cw && dyn_free[i].ch == ch) break;
+	buf = (unsigned char *)malloc((size_t)s->w * s->h * 4);
+	if(!buf) return 0;
 
+	convert(s, 0, 0, s->w, s->h, buf, s->w * 4);
+	content_sums(buf, (long)s->w * s->h, &s1, &s2);
+
+	/* the same pixels in a slot already: no upload */
+	i = dyn_find_same(dyn_retired, dyn_retired_n, cw, ch, s->w, s->h, s1, s2);
 	if(i >= 0)
 	{
-		pg = dyn_free[i].page;
-		x = dyn_free[i].x;
-		y = dyn_free[i].y;
-		dyn_free[i] = dyn_free[--dyn_free_n];
-		st_dyn_reused++;
+		d = &dyn_retired[i];
+		from_retired = 1;
 	}
-	else if(!atlas_place(cw, ch, &pg, &x, &y))
+	else
 	{
-		atlas_reset();
-		if(!atlas_place(cw, ch, &pg, &x, &y)) return 0;
+		i = dyn_find_same(dyn_free, dyn_free_n, cw, ch, s->w, s->h, s1, s2);
+		if(i >= 0) d = &dyn_free[i];
 	}
 
-	if(!atlas_fill(t, s, pg, x, y)) return 0;
+	if(d)
+	{
+		pg = d->page;
+		x = d->x;
+		y = d->y;
+
+		if(from_retired)
+			*d = dyn_retired[--dyn_retired_n];
+		else
+			*d = dyn_free[--dyn_free_n];
+
+		free(buf);
+		if(!atlas_take(t, pg, x, y)) return 0;
+		st_dyn_same++;
+	}
+	else
+	{
+		/* the free slot of the class that waited longest: the newer ones
+		 * may still hold lines that come back */
+		for(i = 0; i < dyn_free_n; i++)
+			if(dyn_free[i].cw == cw && dyn_free[i].ch == ch) break;
+
+		if(i < dyn_free_n)
+		{
+			pg = dyn_free[i].page;
+			x = dyn_free[i].x;
+			y = dyn_free[i].y;
+			dyn_free[i] = dyn_free[--dyn_free_n];
+			st_dyn_reused++;
+		}
+		else if(!atlas_place(cw, ch, &pg, &x, &y))
+		{
+			atlas_reset();
+			if(!atlas_place(cw, ch, &pg, &x, &y))
+			{
+				free(buf);
+				return 0;
+			}
+		}
+
+		if(!atlas_take(t, pg, x, y))
+		{
+			free(buf);
+			return 0;
+		}
+
+		atlas_send(pg, x, y, s->w, s->h, buf);
+		free(buf);
+	}
 
 	t->atlas = 2;
 	t->slot_w = cw;
 	t->slot_h = ch;
+	t->sum1 = s1;
+	t->sum2 = s2;
+	t->sum_ok = 1;
 	st_dyn_in++;
 
 	return 1;
 }
 
-static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y)
+/* t's place in page pg at x, y, without sending anything */
+static int atlas_take(struct zod_gl_tex *t, int pg, int x, int y)
 {
-	unsigned char *buf;
-
 	t->names = (GLuint *)malloc(sizeof(GLuint));
-	buf = (unsigned char *)malloc((size_t)s->w * s->h * 4);
-
-	if(!t->names || !buf)
-	{
-		free(t->names);
-		t->names = 0;
-		free(buf);
-		return 0;
-	}
-
-	convert(s, 0, 0, s->w, s->h, buf, s->w * 4);
-
-	batch_end();
-	glBindTexture(GL_TEXTURE_2D, pages[pg].name);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, s->w, s->h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-	cur_name = 0;
-	free(buf);
+	if(!t->names) return 0;
 
 	t->names[0] = pages[pg].name;
 	t->tw = ATLAS_W;
@@ -896,6 +988,34 @@ static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y
 	t->cols = t->rows = 1;
 	t->bx = x;
 	t->by = y;
+
+	return 1;
+}
+
+static void atlas_send(int pg, int x, int y, int w, int h, const unsigned char *buf)
+{
+	batch_end();
+	glBindTexture(GL_TEXTURE_2D, pages[pg].name);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	cur_name = 0;
+}
+
+static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y)
+{
+	unsigned char *buf;
+
+	buf = (unsigned char *)malloc((size_t)s->w * s->h * 4);
+	if(!buf) return 0;
+
+	if(!atlas_take(t, pg, x, y))
+	{
+		free(buf);
+		return 0;
+	}
+
+	convert(s, 0, 0, s->w, s->h, buf, s->w * 4);
+	atlas_send(pg, x, y, s->w, s->h, buf);
+	free(buf);
 
 	return 1;
 }
@@ -1115,6 +1235,8 @@ void zod_gl_changed(SDL_Surface *s, int x, int y, int w, int h)
 
 	e = reg_find(s);
 	if(!e || !(t = e->t)) return;   /* no texture yet: made fresh anyway */
+
+	t->sum_ok = 0;   /* a run-time slot no longer holds what its sums say */
 
 	if(x < 0) x = 0;
 	if(y < 0) y = 0;
@@ -1434,8 +1556,8 @@ void zod_gl_report(void)
 	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f);
 	ZLOG("GL: binds of own textures (not atlas, not map) per frame x10: %lu\n", st_bind_own * 10 / f);
 	ZLOG("GL: atlas: %d pages, %lu images packed (%lu px), started again %lu times;"
-	     " run-time slots %lu (%lu of them reused)\n",
-	     page_n, st_atlas_in, st_atlas_px, st_atlas_resets, st_dyn_in, st_dyn_reused);
+	     " run-time slots %lu (%lu of them reused, %lu found with the same pixels: not sent)\n",
+	     page_n, st_atlas_in, st_atlas_px, st_atlas_resets, st_dyn_in, st_dyn_reused, st_dyn_same);
 	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu\n",
 	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused);
 }
