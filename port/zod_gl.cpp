@@ -77,6 +77,7 @@ static unsigned long ctx_gen = 0;
 static int tile_max = 1024;     /* largest edge */
 static int npot_ok = 0;         /* the library takes any size */
 static int copy565_ok = 0;      /* RGB565 words go into an RGB texture as they are */
+static int add_ok = 0;          /* GL_ADD texture mode (GL_EXT_texture_env_add) */
 static int refused_told = 0;
 
 /* the open batch */
@@ -266,6 +267,8 @@ static void batch_end(void)
 
 static void batch_begin(GLuint name, int mode)
 {
+	if(mode == 1 && !add_ok) mode = 0;
+
 	if(in_batch && mode == cur_mode && batch_quads < BATCH_QUADS &&
 	   (mode == 2 || name == cur_name))
 		return;
@@ -1388,8 +1391,15 @@ void zod_gl_init(int w, int h)
 				copy565_ok = 0;
 		}
 
-		ZLOG("GL: textures up to %d, %s\n", tile_max,
-		     npot_ok ? "any size (large surfaces at their own size)" : "powers of two");
+		/* the hit flash's white silhouette needs GL_ADD. A library without
+		 * it (PiStorm3D draws GL_ADD as MODULATE) gets the plain sprite --
+		 * and never the enum: a refused one would leave GL_INVALID_ENUM
+		 * pending, and gl_refused() would then miss a GL_OUT_OF_MEMORY */
+		add_ok = ext && strstr(ext, "GL_EXT_texture_env_add") != 0;
+
+		ZLOG("GL: textures up to %d, %s; hit flash %s\n", tile_max,
+		     npot_ok ? "any size (large surfaces at their own size)" : "powers of two",
+		     add_ok ? "through GL_ADD" : "drawn plain (no GL_EXT_texture_env_add)");
 	}
 
 	glViewport(0, 0, w, h);
