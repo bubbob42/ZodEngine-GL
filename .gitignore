@@ -84,3 +84,6 @@ PROGDIR:*
 # Our FS-UAE autotest machine (gmake autotest): the hardfile and the filled-in
 # profile carry this machine's paths
 fsuae/local/
+
+# Runners for our own machines (addresses, drawers): not for the repository
+tools/hw/
