@@ -143,7 +143,14 @@ class QZOD_DNOBJECTSSHARED_EXPORT ZHud
 		int max_units;
 		int unit_amount;
 		ZSDL_Surface unit_amount_text;
-		
+		char unit_amount_last[16];   /* the number unit_amount_text shows */
+
+		/* the clock's hours, minutes and seconds as rendered: the GL path
+		 * draws the whole HUD every frame, the font renders only on change */
+		ZSDL_Surface time_text[3];
+		char time_last[3][8];
+		void RenderTimePart(int part, const char *message, SDL_Rect *to_rect);
+
 		ZObject *selected_object;
 		ZPortrait portrait;
 		ZPortrait aportrait;

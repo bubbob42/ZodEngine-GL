@@ -132,6 +132,9 @@ ZHud::ZHud()
 	render_unit_label = nullptr;
 	//render_backdrop = nullptr;
 
+	unit_amount_last[0] = 0;
+	time_last[0][0] = time_last[1][0] = time_last[2][0] = 0;
+
 	terrain = DESERT;
 	team = NULL_TEAM;
 	show_chat = false;
@@ -957,7 +960,13 @@ void ZHud::RenderUnitAmountBar(SDL_Surface *dest, int off_x, int off_y)
 		//unit_amount_text.Unload();
 
 		//unit_amount_text = ZFontEngine::GetFont(SMALL_WHITE_FONT).Render(message);
-		unit_amount_text.LoadBaseImage(ZFontEngine::GetFont(SMALL_WHITE_FONT).Render(message));
+		/* rendered again only when the number changed: the GL path draws
+		 * the whole HUD every frame */
+		if(strcmp(message, unit_amount_last) || !unit_amount_text.GetBaseSurface())
+		{
+			unit_amount_text.LoadBaseImage(ZFontEngine::GetFont(SMALL_WHITE_FONT).Render(message));
+			snprintf(unit_amount_last, sizeof(unit_amount_last), "%s", message);
+		}
 
 		//to_rect.x = off_x + 132 + 3;
 		to_rect.x = 132 + 3;
@@ -1048,7 +1057,6 @@ void ZHud::RenderTime(SDL_Surface *dest, int off_x, int off_y)
 	int seconds, minutes, hours;
 	char message[50];
 	SDL_Rect from_rect, to_rect;
-	ZSDL_Surface surface;
 	const int y_down_shift = 9;
 	const int x_hours_shift = 38;
 	const int x_minutes_shift = x_hours_shift + 14;
@@ -1115,10 +1123,7 @@ void ZHud::RenderTime(SDL_Surface *dest, int off_x, int off_y)
 		//	SDL_BlitSurface(surface, nullptr, dest, &to_rect);
 		//	SDL_FreeSurface(surface);
 		//}
-		surface.LoadBaseImage(ZFontEngine::GetFont(BIG_WHITE_FONT).Render(message));
-		surface.BlitSurface(nullptr, &to_rect);
-		//surface.RenderSurface(to_rect.x, to_rect.y);
-		surface.Unload();
+		RenderTimePart(0, message, &to_rect);
 
 		//render minutes
 		snprintf(message, sizeof(message), "%02d", minutes);
@@ -1130,10 +1135,7 @@ void ZHud::RenderTime(SDL_Surface *dest, int off_x, int off_y)
 		//	SDL_BlitSurface(surface, nullptr, dest, &to_rect);
 		//	SDL_FreeSurface(surface);
 		//}
-		surface.LoadBaseImage(ZFontEngine::GetFont(BIG_WHITE_FONT).Render(message));
-		surface.BlitSurface(nullptr, &to_rect);
-		//surface.RenderSurface(to_rect.x, to_rect.y);
-		surface.Unload();
+		RenderTimePart(1, message, &to_rect);
 
 		//render seconds
 		snprintf(message, sizeof(message), "%02d", seconds);
@@ -1145,13 +1147,23 @@ void ZHud::RenderTime(SDL_Surface *dest, int off_x, int off_y)
 		//	SDL_BlitSurface(surface, nullptr, dest, &to_rect);
 		//	SDL_FreeSurface(surface);
 		//}
-		surface.LoadBaseImage(ZFontEngine::GetFont(BIG_WHITE_FONT).Render(message));
-		surface.BlitSurface(nullptr, &to_rect);
-		//surface.RenderSurface(to_rect.x, to_rect.y);
-		surface.Unload();
+		RenderTimePart(2, message, &to_rect);
 
 		rerender_time = false;
 	}
+}
+
+/* one part of the clock; its surface is rendered again only when the text
+ * changed (the GL path asks for the whole clock every frame) */
+void ZHud::RenderTimePart(int part, const char *message, SDL_Rect *to_rect)
+{
+	if(strcmp(message, time_last[part]) || !time_text[part].GetBaseSurface())
+	{
+		time_text[part].LoadBaseImage(ZFontEngine::GetFont(BIG_WHITE_FONT).Render(message));
+		snprintf(time_last[part], sizeof(time_last[part]), "%s", message);
+	}
+
+	time_text[part].BlitSurface(nullptr, to_rect);
 }
 
 void ZHud::RenderBackdrop(SDL_Surface *dest, int off_x, int off_y)

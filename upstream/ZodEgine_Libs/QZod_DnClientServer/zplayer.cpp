@@ -1456,6 +1456,27 @@ static const char *zod_rsec_name[RSEC_MAX] =
 };
 
 static unsigned long zod_rsec[RSEC_MAX];
+
+/* ZOD_HUD_ALL=on: the software path redraws the whole HUD every frame, as
+ * the GL path must -- a measuring aid (what does the full redraw cost
+ * without GL?) */
+static int zod_hud_all = -1;
+
+static bool zod_hud_all_on()
+{
+	if(zod_hud_all < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_HUD_ALL", buf, sizeof(buf));
+
+		zod_hud_all = (e && *e && !(e[0] == '0' && !e[1]) &&
+		               !(e[0] == 'o' && e[1] == 'f')) ? 1 : 0;
+
+		if(zod_hud_all) ZLOG("HUD: drawn whole every frame (ZOD_HUD_ALL)\n");
+	}
+
+	return zod_hud_all == 1;
+}
 static unsigned long zod_rsec_mark = 0;
 
 static unsigned long zod_rsec_spielbilder = 0;
@@ -2526,7 +2547,7 @@ void ZPlayer::RenderScreen()
 		//render base
 		//we do not keep track if the image is in the map area in opengl
 		//so we just render it all full then put the hud back over it
-		if(use_opengl)
+		if(use_opengl || zod_hud_all_on())
 			zhud.ReRenderAll();
 
 		zod_rsec_end(RSEC_HUD_NEU);

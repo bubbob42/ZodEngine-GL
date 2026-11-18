@@ -1,0 +1,33 @@
+; HudAll -- what the HUD costs when it is drawn whole every frame. The GL
+; path must do that (the screen is cleared each frame); the software path
+; redraws only the parts that changed. Three 30 s bot matches on
+; p02_bb_orig01, no census: software as usual, software with ZOD_HUD_ALL
+; (the whole HUD every frame), then GL. Compare zeichnen.hud.
+; LIMIT 1200
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+; the A4000D's screen-context heap: 16 MB, no eviction
+SetEnv RadeonGLHeapMax 16
+Echo "=== software ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sw 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sw.done
+Type DEV:Test/zod-sw.log >>DEV:Test/auto.log
+Echo "=== software, whole HUD every frame ===" >>DEV:Test/auto.log
+SetEnv ZOD_HUD_ALL on
+Run >NIL: Execute DEV:Test/RunZod swall 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-swall.done
+Type DEV:Test/zod-swall.log >>DEV:Test/auto.log
+UnSetEnv ZOD_HUD_ALL
+Echo "=== GL ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod gl 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-gl.done
+Type DEV:Test/zod-gl.log >>DEV:Test/auto.log
+Type DEV:Test/zod-gl-lib.log >>DEV:Test/auto.log
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
