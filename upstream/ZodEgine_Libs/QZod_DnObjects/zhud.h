@@ -81,6 +81,18 @@ public:
 	unsigned char ot, oid, roid;
 };
 
+/* which parts of ZHud::DoRender drew this frame (zod_hud_parts_drawn) */
+enum
+{
+	ZOD_HUD_MAIN = 1 << 0, ZOD_HUD_ICON = 1 << 1, ZOD_HUD_BACKDROP = 1 << 2,
+	ZOD_HUD_MINIMAP = 1 << 3, ZOD_HUD_BUTTON = 1 << 4, ZOD_HUD_TIME = 1 << 5,
+	ZOD_HUD_HEALTH = 1 << 6, ZOD_HUD_CHAT = 1 << 7, ZOD_HUD_AMOUNT = 1 << 8
+};
+
+/* GL: record which parts drew (zod_gl_draw_count) from now on */
+void zod_hud_track_parts(bool on);
+unsigned zod_hud_parts_drawn(void);
+
 class QZOD_DNOBJECTSSHARED_EXPORT ZHud
 {
 	public:
@@ -91,6 +103,13 @@ class QZOD_DNOBJECTSSHARED_EXPORT ZHud
 		void DoRender(SDL_Surface *dest, int screen_w, int screen_h);
 		void SetZTime(ZTime *ztime_);
 		void ReRenderAll();
+		/* for a kept HUD under GL (ZOD_HUDKEEP, zplayer.cpp): a full
+		 * redraw asked for (ReRenderAll), the portrait's own mark, and the
+		 * two parts that redraw their whole box when told to */
+		bool MainPending() const { return rerender_main; }
+		bool BackdropPending() const { return rerender_backdrop; }
+		void RepeatBackdrop() { rerender_backdrop = true; }
+		void RepeatTime() { rerender_time = true; }
 		void SetTerrainType(planet_type terrain_);
 		void LeftClick(int x, int y, int screen_w, int screen_h, hud_click_response &response);
 		void LeftUnclick(int x, int y, int screen_w, int screen_h, hud_click_response &response);

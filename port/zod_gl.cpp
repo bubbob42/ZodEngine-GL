@@ -186,6 +186,13 @@ static GLuint drawn_name[DRAWN_SLOTS];
 static unsigned long drawn_frame[DRAWN_SLOTS];
 static unsigned long frame_no = 0;
 
+/* The HUD's area for a kept HUD (ZOD_HUDKEEP, zplayer.cpp): x > gx or
+ * y > gy. While on, every vertex there counts -- something other than the
+ * HUD drew over it, so the HUD must be drawn again in that buffer. */
+static int guard_on = 0;
+static float guard_gx = 0.0f, guard_gy = 0.0f;
+static unsigned long guard_hits = 0;
+
 /* ---- atlas uploads held for the next frame (RadeonGL) ----------------------
  * An image that goes into an atlas page this frame has drawn from already
  * would cost an idle wait and a flush in the middle of the frame (see
@@ -2230,6 +2237,23 @@ unsigned long zod_gl_lib_ticks(void)
 	return st_lib_ticks;
 }
 
+void zod_gl_hud_guard(int on, int gx, int gy)
+{
+	guard_on = on;
+	guard_gx = (float)gx;
+	guard_gy = (float)gy;
+}
+
+unsigned long zod_gl_guard_hits(void)
+{
+	return guard_hits;
+}
+
+unsigned long zod_gl_frame_no(void)
+{
+	return frame_no;
+}
+
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b)
 {
 	batch_end();
@@ -2239,6 +2263,8 @@ void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b)
 
 static void vertex(float u, float v, float x, float y)
 {
+	if(guard_on && (x > guard_gx || y > guard_gy)) guard_hits++;
+
 	glTexCoord2f(u, v);
 	glVertex3f(x, y, 0.0f);
 }
@@ -2359,6 +2385,8 @@ void zod_gl_blit_rot_cs(SDL_Surface *s, float cx, float cy, float ca, float sa,
 void zod_gl_fill(int x, int y, int w, int h, Uint8 r, Uint8 g, Uint8 b)
 {
 	if(!zod_gl_active || w <= 0 || h <= 0) return;
+
+	if(guard_on && ((float)(x + w) > guard_gx || (float)(y + h) > guard_gy)) guard_hits++;
 
 	HELD_DUE();
 

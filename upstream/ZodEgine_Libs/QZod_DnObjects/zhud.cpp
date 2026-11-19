@@ -9,6 +9,7 @@ bool zod_time_measuring();
 #ifndef DISABLE_OPENGL
 extern int zod_gl_active;
 unsigned long zod_gl_lib_ticks(void);
+unsigned long zod_gl_draw_count(void);
 #endif
 
 enum { HS_MAIN, HS_ICON, HS_BACKDROP, HS_MINIMAP, HS_BUTTON, HS_TIME,
@@ -33,8 +34,30 @@ static unsigned long zod_hudsec_libnow(void)
 	return 0;
 }
 
+/* which parts drew this frame, for a kept HUD (ZOD_HUDKEEP) */
+static bool hud_track = false;
+static unsigned hud_drawn_mask = 0;
+static unsigned long hud_draw_mark = 0;
+
+void zod_hud_track_parts(bool on) { hud_track = on; }
+unsigned zod_hud_parts_drawn(void) { return hud_drawn_mask; }
+
+static unsigned long hud_draws_now(void)
+{
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active) return zod_gl_draw_count();
+#endif
+	return 0;
+}
+
 static void zod_hudsec_begin(void)
 {
+	if(hud_track)
+	{
+		hud_drawn_mask = 0;
+		hud_draw_mark = hud_draws_now();
+	}
+
 	zod_hudsec_on = zod_time_measuring();
 	if(!zod_hudsec_on) return;
 
@@ -44,6 +67,14 @@ static void zod_hudsec_begin(void)
 
 static void zod_hudsec_end(int part)
 {
+	if(hud_track)
+	{
+		const unsigned long d = hud_draws_now();
+
+		if(d != hud_draw_mark) hud_drawn_mask |= 1u << part;
+		hud_draw_mark = d;
+	}
+
 	if(!zod_hudsec_on) return;
 
 	const unsigned long t = zod_fineclock_ticks();

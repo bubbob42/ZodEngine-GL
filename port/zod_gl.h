@@ -38,6 +38,13 @@ unsigned long zod_gl_draw_count(void);
  * where it draws and waits for the card (never cleared) */
 unsigned long zod_gl_lib_ticks(void);
 
+/* a kept HUD (ZOD_HUDKEEP): count draws into x > gx or y > gy while on */
+void zod_gl_hud_guard(int on, int gx, int gy);
+unsigned long zod_gl_guard_hits(void);
+
+/* frames presented so far (zod_gl_flush): which of the buffers this is */
+unsigned long zod_gl_frame_no(void);
+
 /* clear the frame to a colour */
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b);
 
