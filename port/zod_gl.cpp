@@ -2143,6 +2143,11 @@ void zod_gl_flush(void)
 	dyn_retired_n = j;
 }
 
+unsigned long zod_gl_draw_count(void)
+{
+	return st_quads + st_fills;
+}
+
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b)
 {
 	batch_end();

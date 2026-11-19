@@ -31,6 +31,9 @@ void zod_gl_init(int w, int h);
 /* draw everything pending; the screen layer calls it before the flip */
 void zod_gl_flush(void);
 
+/* quads and fills drawn so far (a census can tell whether a call drew) */
+unsigned long zod_gl_draw_count(void);
+
 /* clear the frame to a colour */
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b);
 

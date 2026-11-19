@@ -1,0 +1,32 @@
+; BandCensus -- how far from its sort key an object that drew in DoRender
+; lay outside the view (ZOD_BANDCENSUS on), per object type: the margins a
+; band over prender_olist would need. GL, orig01 still 60 s, orig04 and p08
+; scrolling (ZOD_TOUR) 60 s each. FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 1500
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv ZOD_BANDCENSUS on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod bcstill 60 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-bcstill.done
+Type DEV:Test/zod-bcstill.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod bctour 60 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-bctour.done
+Type DEV:Test/zod-bctour.log >>DEV:Test/auto.log
+Echo "=== GL, p08, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod bcbig 60 -m Data/Maps/Custom/p08_bb_p08m01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-bcbig.done
+Type DEV:Test/zod-bcbig.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_BANDCENSUS
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

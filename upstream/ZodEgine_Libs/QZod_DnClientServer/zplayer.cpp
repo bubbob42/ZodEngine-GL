@@ -1495,6 +1495,8 @@ static void zod_dirty_force_full(void) { }
 #endif
 
 unsigned long zod_rsec_band_alle = 0, zod_rsec_band_besucht = 0;
+/* the band over prender_olist (RenderObjects): objects in the lists, visited */
+unsigned long zod_band_obj_alle = 0, zod_band_obj_besucht = 0;
 unsigned long zod_steine_gebacken = 0;
 /* orock.cpp -- wie viele Schattenkacheln wirklich gestempelt wurden. */
 extern unsigned long zod_steine_kacheln;
@@ -1881,6 +1883,11 @@ extern "C" void zod_render_sections_report(long frames)
 		     zod_rsec_band_besucht, zod_rsec_band_alle,
 		     100UL * zod_rsec_band_besucht / zod_rsec_band_alle);
 
+	if(zod_band_obj_alle)
+		ZLOG("draw.object band = %lu of %lu visited (%lu %%)\n",
+		     zod_band_obj_besucht, zod_band_obj_alle,
+		     100UL * zod_band_obj_besucht / zod_band_obj_alle);
+
 	/* Was die Aufteilung selbst kostet. Auf der V1200 braucht ein Blick auf
 	 * die E-Clock **9882 ns** -- das 27-fache des Emulators und das
 	 * 580-fache des Hosts. Bei RSEC_MAX+1 Marken steckt das in den Posten
@@ -2147,6 +2154,127 @@ void ZPlayer::PruefeMittelpunkte()
  * alone (~1200 comparisons a frame over the four lists). The order is the
  * same by construction: the same comparisons on the same values.
  * ZOD_SORTKEYS aus: the comparator again. */
+#ifndef DISABLE_OPENGL
+#include "zod_gl.h"
+
+/* ZOD_BANDCENSUS on: for every object that drew in DoRender, how far its sort
+ * key lay ABOVE the view's top (it draws below its key: shadows, bars) or
+ * BELOW the view's bottom (it draws above its key: tall sprites), the most
+ * per object type -- the margins a band over prender_olist would need. */
+static int band_census = -1;
+static int band_above[MAX_MAP_OBJECT_TYPES + 1], band_below[MAX_MAP_OBJECT_TYPES + 1];
+static unsigned long band_drawn[MAX_MAP_OBJECT_TYPES + 1];
+static unsigned long band_missed[MAX_MAP_OBJECT_TYPES + 1];   /* drew, outside the band */
+
+static int band_census_on(void)
+{
+	if(band_census < 0)
+	{
+		band_census = 0;
+#ifdef __amigaos__
+		char wahl[16];
+
+		if(GetVar((CONST_STRPTR)"ZOD_BANDCENSUS", (STRPTR)wahl, sizeof(wahl), 0) > 0)
+			band_census = (wahl[0] == 'o' && wahl[1] == 'n') || wahl[0] == 'e' || wahl[0] == '1';
+#else
+		const char *e = getenv("ZOD_BANDCENSUS");
+
+		band_census = e && ((e[0] == 'o' && e[1] == 'n') || e[0] == 'e' || e[0] == '1');
+#endif
+		for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++)
+			band_above[k] = band_below[k] = -100000;
+	}
+
+	return band_census;
+}
+
+static void band_census_note(ZObject *o, int top, int bottom)
+{
+	unsigned char ot, oid;
+	const int key = o->SortKey();
+
+	o->GetObjectID(ot, oid);
+	if(ot > MAX_MAP_OBJECT_TYPES) ot = MAX_MAP_OBJECT_TYPES;
+
+	band_drawn[ot]++;
+	if(top - key > band_above[ot]) band_above[ot] = top - key;
+	if(key - bottom > band_below[ot]) band_below[ot] = key - bottom;
+}
+
+void zod_band_census_report(void)
+{
+	if(band_census != 1) return;
+
+	ZLOG("Band census (objects that drew; px their sort key lay above the view's top /"
+	     " below its bottom, at most; negative: never outside):\n");
+	for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++)
+		if(band_drawn[k])
+			ZLOG("  type %d: %lu draws, above %d, below %d; outside the band (it would miss them) %lu\n",
+			     k, band_drawn[k], band_above[k], band_below[k], band_missed[k]);
+}
+#else
+void zod_band_census_report(void) {}
+#endif
+
+/* prender_olist's keys as sorted this frame (for the band in RenderObjects);
+ * valid while prender_keys_n equals the list's size */
+static vector<int> prender_keys;
+static size_t prender_keys_n = (size_t)-1;
+
+/* the band over prender_olist in RenderObjects (see there) */
+enum { BAND_ABOVE = 32, BAND_BELOW = 128 };
+static int band_flag = -1;
+
+static int band_on(void)
+{
+	if(band_flag < 0)
+	{
+		band_flag = 1;
+#ifdef __amigaos__
+		char wahl[16];
+
+		if(GetVar((CONST_STRPTR)"ZOD_BAND", (STRPTR)wahl, sizeof(wahl), 0) > 0)
+			band_flag = !(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0' ||
+			              (wahl[0] == 'o' && wahl[1] == 'f'));
+#else
+		const char *e = getenv("ZOD_BAND");
+
+		if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+			band_flag = 0;
+#endif
+		ZLOG("Objects drawn: %s\n", band_flag ? "the band around the view (sort keys)"
+		                                       : "all, each tests itself (ZOD_BAND aus)");
+	}
+
+	return band_flag;
+}
+
+/* the part [*a, *b) of prender_olist whose sort keys lie in the band */
+static void band_range(int top, int bottom, size_t *a, size_t *b)
+{
+	const int lo_key = top - BAND_ABOVE;
+	const int hi_key = bottom + BAND_BELOW;
+	size_t lo = 0, hi = prender_keys_n;
+
+	while(lo < hi)
+	{
+		const size_t m = (lo + hi) / 2;
+
+		if(prender_keys[m] < lo_key) lo = m + 1; else hi = m;
+	}
+	*a = lo;
+
+	hi = prender_keys_n;
+
+	while(lo < hi)
+	{
+		const size_t m = (lo + hi) / 2;
+
+		if(prender_keys[m] <= hi_key) lo = m + 1; else hi = m;
+	}
+	*b = lo;
+}
+
 static int sortkeys = -1;
 
 static int sortkeys_on(void)
@@ -2172,10 +2300,12 @@ static int sortkeys_on(void)
 	return sortkeys;
 }
 
-static void sort_draw_order(vector<ZObject*> &v)
+static void sort_draw_order(vector<ZObject*> &v, vector<int> *keep = 0)
 {
 	static vector<int> keys;
 	const size_t n = v.size();
+
+	if(keep) prender_keys_n = (size_t)-1;
 
 	if(n < 2) return;
 
@@ -2218,6 +2348,12 @@ static void sort_draw_order(vector<ZObject*> &v)
 		v[j] = obj;
 		keys[j] = k;
 	}
+
+	if(keep)
+	{
+		keep->assign(keys.begin(), keys.begin() + n);
+		prender_keys_n = n;
+	}
 }
 
 void ZPlayer::ProcessGame()
@@ -2252,7 +2388,7 @@ void ZPlayer::ProcessGame()
 	 * std::sort darf bei gleichem Schluessel die Reihenfolge von Bild zu Bild
 	 * willkuerlich aendern -- bei gleich hohen Objekten ist das eine
 	 * moegliche Flimmerquelle. */
-	sort_draw_order(ols.prender_olist);
+	sort_draw_order(ols.prender_olist, &prender_keys);
 
 	/* Dieselbe Sortierung fuer die kleine Vorzeichnen-Liste. Sie ist eine
 	 * Teilmenge, und derselbe Schluessel liefert deshalb genau die relative
@@ -4044,6 +4180,67 @@ void ZPlayer::RenderObjects()
 	zod_rsec_end(RSEC_WEGPUNKTE);
 
 	//draw objects
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active && band_census_on())
+	{
+		/* the census for a band over this list: how far from its sort key
+		 * an object that drew anything can lie outside the view */
+		int bx, by, bw, bh;
+
+		size_t a = 0, b = ols.prender_olist.size();
+
+		zmap.GetViewShiftFull(bx, by, bw, bh);
+
+		if(prender_keys_n == ols.prender_olist.size()) band_range(by, by + bh, &a, &b);
+
+		for(size_t i = 0; i < ols.prender_olist.size(); i++)
+		{
+			ZObject *o = ols.prender_olist[i];
+			const unsigned long before = zod_gl_draw_count();
+
+			o->DoRender(zmap, screen);
+
+			if(zod_gl_draw_count() != before)
+			{
+				band_census_note(o, by, by + bh);
+
+				if(i < a || i >= b)
+				{
+					unsigned char ot, oid;
+
+					o->GetObjectID(ot, oid);
+					band_missed[ot < MAX_MAP_OBJECT_TYPES ? ot : MAX_MAP_OBJECT_TYPES]++;
+				}
+			}
+		}
+	}
+	else
+#endif
+	if(band_on() && prender_keys_n == ols.prender_olist.size() && prender_keys_n > 0)
+	{
+		/* THE BAND: only the objects whose sort key (the bottom of the
+		 * footprint) lies near the view. The census (ZOD_BANDCENSUS, orig01
+		 * still, orig04 and p08 scrolling, ~1.4 M draws) found no object that
+		 * drew in DoRender with its key above the view's top, and none more
+		 * than 47 px below its bottom (a rock: 48 tall). The band keeps
+		 * BAND_ABOVE / BAND_BELOW px around that -- also for units that
+		 * moved after the sort (the keys are the sort's). Same order: a
+		 * contiguous part of the same sorted list. ZOD_BAND aus: all. */
+		int bx, by, bw, bh;
+		vector<ZObject*> &pol = ols.prender_olist;
+
+		size_t a, b;
+
+		zmap.GetViewShiftFull(bx, by, bw, bh);
+		band_range(by, by + bh, &a, &b);
+
+		zod_band_obj_alle += (unsigned long)prender_keys_n;
+		zod_band_obj_besucht += (unsigned long)(b - a);
+
+		for(size_t i = a; i < b; i++)
+			pol[i]->DoRender(zmap, screen);
+	}
+	else
 	for(vector<ZObject*>::iterator i=ols.prender_olist.begin(); i!=ols.prender_olist.end(); i++)
 		(*i)->DoRender(zmap, screen);
 

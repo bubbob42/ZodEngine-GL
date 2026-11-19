@@ -127,6 +127,7 @@ extern "C" void zod_dirty_sweep_report(unsigned long frames);
 extern "C" void zod_flip_report(void);
 extern "C" void zod_flip_sums_report(void);   //the flip's block sums
 extern "C" void zod_present_cadence_report(void);   //GL: work between presents
+void zod_band_census_report(void);                    //zplayer.cpp: ZOD_BANDCENSUS
 extern "C" unsigned long zod_cad_server_ticks;
 /* port/amiga/sdl_video.cpp -- Zaehler des Blitters */
 extern "C" void zod_blit_report(unsigned long *kc, unsigned long long *kp,
@@ -860,6 +861,7 @@ void run_single_player()
                     }
 
                     zod_present_cadence_report();   //GL only: nothing without presents
+                    zod_band_census_report();
                 }
 #endif
 
