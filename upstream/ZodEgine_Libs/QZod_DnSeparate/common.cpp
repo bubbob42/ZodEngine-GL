@@ -27,10 +27,66 @@
  * gefuehrt. Ein `unsigned long long` haette hier `___floatundidf` und eine
  * 64-Bit-Division in den heissesten Pfad des Spiels gezogen. */
 #include "fineclock.h"
+#include "amiga_startup.h"   /* zod_env: ZOD_FASTFLOOR, ZOD_FLOORCHECK */
+#else
+#include <stdlib.h>
 #endif
 
 namespace COMMON
 {
+
+/* ifloor (common.h): the switches, read on the first call that is not the
+ * fast path; ZOD_FLOORCHECK counts the calls and the differences. */
+int ifloor_mode = -1;
+static unsigned long ifloor_calls = 0, ifloor_bad = 0, ifloor_down = 0;
+
+static int ifloor_switch(const char *name)
+{
+#ifdef __amigaos__
+	char buf[16];
+	const char *e = zod_env(name, buf, sizeof(buf));
+#else
+	const char *e = getenv(name);
+#endif
+
+	if(!e) return -1;
+	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
+	return 1;
+}
+
+int ifloor_other(double v)
+{
+	if(ifloor_mode < 0)
+	{
+		ifloor_mode = (ifloor_switch("ZOD_FASTFLOOR") == 0) ? 0 : 1;
+		if(ifloor_switch("ZOD_FLOORCHECK") == 1) ifloor_mode = 2;
+	}
+
+	if(ifloor_mode == 0) return (int)floor(v);
+
+	{
+		int i = (int)v;
+
+		if((double)i > v) i--;
+
+		if(ifloor_mode == 2)
+		{
+			ifloor_calls++;
+			if(i != (int)floor(v)) ifloor_bad++;
+			if((double)i != v && v < 0) ifloor_down++;   /* the step down taken */
+		}
+
+		return i;
+	}
+}
+
+void ifloor_report()
+{
+	if(ifloor_mode == 2)
+		ZLOG("ifloor: ZOD_FLOORCHECK %lu calls, %lu differ from (int)floor;"
+		     " %lu of them negative non-integers (one step down)\n",
+		     ifloor_calls, ifloor_bad, ifloor_down);
+}
 
 string map_short_name(const string &pfad)
 {

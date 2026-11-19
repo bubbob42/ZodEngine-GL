@@ -1,0 +1,24 @@
+; FloorCheck -- ifloor (common.h) gives what (int)floor gave: ZOD_FLOORCHECK on
+; works out both at every call (SmoothMove, ProcessMove, the hut animals)
+; and counts the calls where they differ ("0 differ"). A still view on
+; orig01, then the view scrolling on orig04 (ZOD_TOUR), software path.
+; LIMIT 900
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_FLOORCHECK on
+Echo "=== software, floor checked, orig01 still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod fls 20 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-fls.done
+Type DEV:Test/zod-fls.log >>DEV:Test/auto.log
+Echo "=== software, floor checked, orig04 scrolling ===" >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Run >NIL: Execute DEV:Test/RunZod flt 20 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-flt.done
+Type DEV:Test/zod-flt.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_FLOORCHECK
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

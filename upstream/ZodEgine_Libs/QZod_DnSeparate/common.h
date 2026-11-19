@@ -59,6 +59,29 @@ namespace COMMON
     inline bool isz(float num) { return (num < 0.00001f && num > -0.00001f); };
 	inline bool isz(double num) { return (num < 0.00001 && num > -0.00001); };
 
+	/* floor() as an int, for values in int range: (int) cuts toward zero
+	 * (one fintrz on the 060), one step down for negative non-integers --
+	 * the same result as (int)floor(v). libm's floor is a call into a
+	 * bit-by-bit ___fpu_round_to_integer on the 060: _floor and it were
+	 * 1.4 % of the A4000D's tour samples (SmoothMove, ProcessMove, the hut
+	 * animals). ZOD_FASTFLOOR aus: libm's floor again; ZOD_FLOORCHECK on:
+	 * both, the differences counted (ifloor_report). */
+	extern int ifloor_mode;            /* -1 not read yet, 1 fast, 0 libm, 2 check */
+	extern int ifloor_other(double v);
+	extern void ifloor_report();
+	inline int ifloor(double v)
+	{
+		if(ifloor_mode == 1)
+		{
+			int i = (int)v;
+
+			if((double)i > v) i--;
+			return i;
+		}
+
+		return ifloor_other(v);
+	}
+
     inline bool is1(float num) { return (num < 1.00001f && num > 0.99999f); };
 	inline bool is1(double num) { return (num < 1.00001 && num > 0.99999); };
 
