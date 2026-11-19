@@ -5,6 +5,7 @@
 #include <zod_census.h>
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 #ifdef ZOD_ALLOC_PROBE
 extern "C" void zod_alloc_report(const char *tag);
 #endif
@@ -1506,6 +1507,12 @@ static unsigned long zod_sortfix_read = 0, zod_sortfix_skip = 0;
 static unsigned long zod_sortfix_full = 0, zod_sortfix_bad = 0;
 static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
 
+/* the draw order's split views (ZOD_SORTSPLIT, see split_frame) */
+static unsigned long zod_split_rebuilds = 0, zod_split_dynkeys = 0, zod_split_frames = 0;
+static unsigned long zod_splitcheck_frames = 0, zod_splitcheck_rockties = 0;
+static unsigned long zod_splitcheck_otherties = 0, zod_splitcheck_bad = 0;
+static unsigned long zod_splitcheck_size = 0, zod_splitcheck_late = 0;
+
 /* E clock in the four sorts, the Process pass and the pre-render's rest
  * loop, while the frame times are measured: what the fixed keys buy, by
  * the clock instead of the frame rate (a 60 s bot match varies by ~5 %) */
@@ -1987,6 +1994,15 @@ extern "C" void zod_render_sections_report(long frames)
 		     (zod_ord_pre / zod_ord_frames) * 1000UL / f,
 		     sortfix_on() ? "ZOD_SORTFIX on" : "ZOD_SORTFIX aus");
 	}
+
+	if(zod_split_frames)
+		ZLOG("draw.order views = %lu frames, %lu made again, %lu moving keys read;"
+		     " ZOD_SPLITCHECK: %lu frames (%lu made again late, %lu of another band size),"
+		     " merge out of key order %lu, rocks or others in another order %lu,"
+		     " places where only a rock/other tie differs %lu\n",
+		     zod_split_frames, zod_split_rebuilds, zod_split_dynkeys,
+		     zod_splitcheck_frames, zod_splitcheck_late, zod_splitcheck_size,
+		     zod_splitcheck_bad, zod_splitcheck_otherties, zod_splitcheck_rockties);
 
 	if(zod_sortfix_read || zod_sortfix_skip)
 		ZLOG("draw.order keys = %lu read, %lu fixed not read, %lu lists read in full;"
@@ -2599,6 +2615,224 @@ static void sort_draw_order(vector<ZObject*> &v, vector<int> *keep = 0)
 	}
 }
 
+/* ---- The draw order as two views per list (ZOD_SORTSPLIT, default on) -----
+ *
+ * Measured on the A4000D (t23, scrolling): the four sorts still cost ~3 ms
+ * a frame with the rocks' keys kept (ZOD_SORTFIX) -- every pass over a list
+ * of ~1900 pointers reads 7.6 KB of card RAM at ~40 ns a byte, and the sort
+ * made several. Rocks never move, so they need sorting only when the lists
+ * change (ZOLists::gen); the others (~500 on orig04) are re-keyed and
+ * sorted every frame. Each list becomes two sorted views, `fix` (rocks) and
+ * `dyn`, and the lists themselves are no longer sorted.
+ *
+ * The drawing walks both views in key order (a merge). For EQUAL keys a
+ * rock comes first -- the one order that can differ from one sorted list,
+ * whose ties followed its history (cego's std::sort left them arbitrary).
+ * Made again when ZOLists::gen moved: the objects still there keep their
+ * order, new ones follow in list order -- as in the list sorted in place.
+ *
+ * ZOD_SPLITCHECK on: the old sort runs as well, and the band's draw sequence
+ * is compared with it (differences counted, ties between a rock and another
+ * object apart). */
+struct split_view
+{
+	vector<ZObject*> fix, dyn;
+	vector<int> fix_keys, dyn_keys;
+};
+
+enum { SV_RENDER, SV_PRE, SV_AFTER, SV_BAND, SV_MAX };
+static struct split_view split_views[SV_MAX];
+static unsigned long split_gen = 0;
+static bool split_ready = false;
+static bool split_sync_late = false;   /* made again after this frame's sort */
+
+static int sortsplit = -1, splitcheck = -1;
+
+static int sortsplit_on(void)
+{
+	if(sortsplit < 0)
+	{
+		sortsplit = zod_switch("ZOD_SORTSPLIT", 1);
+		ZLOG("Draw order: %s\n", sortsplit ? "two views, rocks sorted when the lists change"
+		                                    : "one sorted list (ZOD_SORTSPLIT aus)");
+	}
+
+	return sortsplit;
+}
+
+static int splitcheck_on(void)
+{
+	if(splitcheck < 0) splitcheck = zod_switch("ZOD_SPLITCHECK", 0);
+
+	return splitcheck;
+}
+
+/* the views are in use this frame (the band census needs the sorted list) */
+static bool split_active(void)
+{
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active && band_census_on()) return false;
+#endif
+	return sortsplit_on() != 0;
+}
+
+/* stable insertion sort of v by k (moved together) */
+static void split_sort(vector<ZObject*> &v, vector<int> &k)
+{
+	const size_t n = v.size();
+
+	for(size_t i = 1; i < n; i++)
+	{
+		ZObject *o = v[i];
+		const int key = k[i];
+		size_t j = i;
+
+		while(j > 0 && key < k[j - 1])
+		{
+			v[j] = v[j - 1];
+			k[j] = k[j - 1];
+			j--;
+		}
+
+		v[j] = o;
+		k[j] = key;
+	}
+}
+
+/* view := its entries still in cur (their order kept), then cur's new ones
+ * in cur's order */
+static void split_carry(vector<ZObject*> &view, const vector<ZObject*> &cur)
+{
+	vector<ZObject*> cs(cur), vs(view), out;
+
+	std::sort(cs.begin(), cs.end());
+	std::sort(vs.begin(), vs.end());
+	out.reserve(cur.size());
+
+	for(size_t i = 0; i < view.size(); i++)
+		if(std::binary_search(cs.begin(), cs.end(), view[i])) out.push_back(view[i]);
+
+	for(size_t i = 0; i < cur.size(); i++)
+		if(!std::binary_search(vs.begin(), vs.end(), cur[i])) out.push_back(cur[i]);
+
+	view.swap(out);
+}
+
+static void split_rekey(vector<ZObject*> &v, vector<int> &k)
+{
+	k.resize(v.size());
+
+	for(size_t i = 0; i < v.size(); i++) k[i] = v[i]->SortKey();
+}
+
+static void split_rebuild(struct split_view *sv, const vector<ZObject*> &list)
+{
+	vector<ZObject*> cf, cd;
+
+	for(size_t i = 0; i < list.size(); i++)
+		(sort_key_fixed(list[i]) ? cf : cd).push_back(list[i]);
+
+	split_carry(sv->fix, cf);
+	split_carry(sv->dyn, cd);
+	split_rekey(sv->fix, sv->fix_keys);
+	split_rekey(sv->dyn, sv->dyn_keys);
+	split_sort(sv->fix, sv->fix_keys);
+	split_sort(sv->dyn, sv->dyn_keys);
+}
+
+/* once a frame, where the lists were sorted before */
+static void split_frame(ZOLists &ols)
+{
+	const vector<ZObject*> *lists[SV_MAX] = { &ols.prender_olist, &ols.prerender_olist,
+	                                          &ols.aftereffect_olist, &ols.prerender_band_olist };
+
+	zod_split_frames++;
+	split_sync_late = false;
+
+	if(!split_ready || ols.gen != split_gen)
+	{
+		for(int i = 0; i < SV_MAX; i++) split_rebuild(&split_views[i], *lists[i]);
+
+		split_gen = ols.gen;
+		split_ready = true;
+		zod_split_rebuilds++;
+		return;
+	}
+
+	for(int i = 0; i < SV_MAX; i++)
+	{
+		struct split_view *sv = &split_views[i];
+
+		split_rekey(sv->dyn, sv->dyn_keys);
+		split_sort(sv->dyn, sv->dyn_keys);
+		zod_split_dynkeys += (unsigned long)sv->dyn.size();
+	}
+}
+
+/* before every use: the lists may have changed since split_frame (objects
+ * removed and freed by the events between the game and the drawing) */
+static void split_sync(ZOLists &ols)
+{
+	if(split_ready && ols.gen == split_gen) return;
+
+	split_sync_late = true;
+
+	const vector<ZObject*> *lists[SV_MAX] = { &ols.prender_olist, &ols.prerender_olist,
+	                                          &ols.aftereffect_olist, &ols.prerender_band_olist };
+
+	for(int i = 0; i < SV_MAX; i++) split_rebuild(&split_views[i], *lists[i]);
+
+	split_gen = ols.gen;
+	split_ready = true;
+	zod_split_rebuilds++;
+}
+
+/* [*a, *b) of keys k with lo <= key <= hi */
+static void split_range(const vector<int> &k, int lo_key, int hi_key, size_t *a, size_t *b)
+{
+	size_t lo = 0, hi = k.size();
+
+	while(lo < hi)
+	{
+		const size_t m = (lo + hi) / 2;
+
+		if(k[m] < lo_key) lo = m + 1; else hi = m;
+	}
+	*a = lo;
+
+	hi = k.size();
+
+	while(lo < hi)
+	{
+		const size_t m = (lo + hi) / 2;
+
+		if(k[m] <= hi_key) lo = m + 1; else hi = m;
+	}
+	*b = lo;
+}
+
+/* the merged order of fix[fa, fb) and dyn[da, db) into out (a rock first
+ * on equal keys) */
+static void split_merge(const struct split_view *sv, size_t fa, size_t fb, size_t da, size_t db,
+                        vector<ZObject*> &out)
+{
+	out.clear();
+
+	while(fa < fb || da < db)
+	{
+		if(da >= db || (fa < fb && sv->fix_keys[fa] <= sv->dyn_keys[da]))
+			out.push_back(sv->fix[fa++]);
+		else
+			out.push_back(sv->dyn[da++]);
+	}
+}
+
+/* the whole view in merged order */
+static void split_all(const struct split_view *sv, vector<ZObject*> &out)
+{
+	split_merge(sv, 0, sv->fix.size(), 0, sv->dyn.size(), out);
+}
+
 void ZPlayer::ProcessGame()
 {
 	double &the_time = ztime.ztime;
@@ -2633,6 +2867,13 @@ void ZPlayer::ProcessGame()
 	 * moegliche Flimmerquelle. */
 	const unsigned long ord_t0 = zod_time_measure ? zod_fineclock_ticks() : 0;
 
+	if(split_active())
+		split_frame(ols);
+
+	/* the one sorted list: without the views, and under ZOD_SPLITCHECK as
+	 * the reference the views are compared with */
+	if(!split_active() || splitcheck_on())
+	{
 	sort_draw_order(ols.prender_olist, &prender_keys);
 
 	/* Dieselbe Sortierung fuer die kleine Vorzeichnen-Liste. Sie ist eine
@@ -2645,6 +2886,7 @@ void ZPlayer::ProcessGame()
 
 		for(int k = 0; k < 3; k++)
 			sort_draw_order(*klein[k]);
+	}
 	}
 
 	if(zod_time_measure)
@@ -2685,9 +2927,20 @@ void ZPlayer::ProcessGame()
 	 * not touched -- the same calls in the same order otherwise. */
 	{
 		const unsigned long t0 = zod_time_measure ? zod_fineclock_ticks() : 0;
-		const vector<unsigned char> *fx = sortfix_on() ? sort_fixed_flags(ols.prender_olist) : 0;
+		const vector<unsigned char> *fx = (!split_active() && sortfix_on()) ? sort_fixed_flags(ols.prender_olist) : 0;
 
-		if(fx)
+		if(split_active())
+		{
+			/* the others in their sorted order; rocks' Process is empty */
+			split_sync(ols);
+
+			const vector<ZObject*> &dyn = split_views[SV_RENDER].dyn;
+
+			for(size_t k = 0; k < dyn.size(); k++) dyn[k]->Process();
+
+			zod_sortfix_procskip += (unsigned long)split_views[SV_RENDER].fix.size();
+		}
+		else if(fx)
 		{
 			for(size_t k = 0; k < ols.prender_olist.size(); k++)
 				if(!(*fx)[k]) ols.prender_olist[k]->Process();
@@ -4379,8 +4632,10 @@ void ZPlayer::RenderObjects()
 		zod_dirty_force_full();
 	}
 
+	if(split_active()) split_sync(ols);
+
 	{
-		vector<ZObject*> &band = ols.prerender_band_olist;
+		vector<ZObject*> &band = split_active() ? split_views[SV_BAND].fix : ols.prerender_band_olist;
 		int bx, by, bw, bh;
 
 		zmap.GetViewShiftFull(bx, by, bw, bh);
@@ -4431,6 +4686,11 @@ void ZPlayer::RenderObjects()
 
 		for(size_t i = a; i < b; i++)
 			band[i]->DoPreRender(zmap, screen);
+
+		/* banded ones that are no rocks (none today: only ORock is banded) */
+		if(split_active())
+			for(size_t i = 0; i < split_views[SV_BAND].dyn.size(); i++)
+				split_views[SV_BAND].dyn[i]->DoPreRender(zmap, screen);
 	}
 
 	//draw objects pre stuff -- nur die Klassen, die eines haben
@@ -4440,9 +4700,19 @@ void ZPlayer::RenderObjects()
 	 * cost a cache miss and a virtual call apiece (ZOD_SORTFIX). */
 	{
 		const unsigned long pre_t0 = zod_time_measure ? zod_fineclock_ticks() : 0;
-		const vector<unsigned char> *fx = sortfix_on() ? sort_fixed_flags(ols.prerender_olist) : 0;
+		const vector<unsigned char> *fx = (!split_active() && sortfix_on()) ? sort_fixed_flags(ols.prerender_olist) : 0;
 
-		if(fx)
+		if(split_active())
+		{
+			/* the view's rocks are all banded: only the others are asked */
+			const vector<ZObject*> &dyn = split_views[SV_PRE].dyn;
+
+			for(size_t k = 0; k < dyn.size(); k++)
+				if(!dyn[k]->PreRenderBanded()) dyn[k]->DoPreRender(zmap, screen);
+
+			zod_sortfix_preskip += (unsigned long)split_views[SV_PRE].fix.size();
+		}
+		else if(fx)
 		{
 			for(size_t k = 0; k < ols.prerender_olist.size(); k++)
 			{
@@ -4511,6 +4781,73 @@ void ZPlayer::RenderObjects()
 	}
 	else
 #endif
+	if(split_active())
+	{
+		/* the two views merged in key order: the band's part of each, or all
+		 * of both with ZOD_BAND aus (see the band below for the margins) */
+		static vector<ZObject*> seq;
+		struct split_view *sv = &split_views[SV_RENDER];
+		int bx, by, bw, bh;
+
+		split_sync(ols);
+		zmap.GetViewShiftFull(bx, by, bw, bh);
+
+		if(band_on())
+		{
+			size_t fa, fb, da, db;
+
+			split_range(sv->fix_keys, by - BAND_ABOVE, by + bh + BAND_BELOW, &fa, &fb);
+			split_range(sv->dyn_keys, by - BAND_ABOVE, by + bh + BAND_BELOW, &da, &db);
+			split_merge(sv, fa, fb, da, db, seq);
+
+			zod_band_obj_alle += (unsigned long)(sv->fix.size() + sv->dyn.size());
+			zod_band_obj_besucht += (unsigned long)seq.size();
+		}
+		else
+			split_all(sv, seq);
+
+		/* ZOD_SPLITCHECK: the same band of the one sorted list (sorted as
+		 * well this frame), element by element */
+		if(splitcheck_on() && band_on() && prender_keys_n == ols.prender_olist.size())
+		{
+			size_t a, b;
+
+			band_range(by, by + bh, &a, &b);
+			zod_splitcheck_frames++;
+
+			/* the views were made again after the sort (objects removed in
+			 * between): their keys are newer -- not comparable this frame */
+			if(split_sync_late) zod_splitcheck_late++;
+			else if(b - a != seq.size()) zod_splitcheck_size++;
+			else
+			{
+				/* same objects, the merge sorted by key, and the rocks and the
+				 * others each in the same relative order: then the merge can
+				 * differ from the one list only where a rock and another
+				 * object have equal keys */
+				vector<ZObject*> old_f, old_d, new_f, new_d;
+				bool order_ok = true;
+
+				for(size_t i = 0; i < seq.size(); i++)
+				{
+					ZObject *o = ols.prender_olist[a + i];
+
+					(sort_key_fixed(o) ? old_f : old_d).push_back(o);
+					(sort_key_fixed(seq[i]) ? new_f : new_d).push_back(seq[i]);
+
+					if(i > 0 && seq[i]->SortKey() < seq[i - 1]->SortKey()) order_ok = false;
+					if(o != seq[i]) zod_splitcheck_rockties++;
+				}
+
+				if(!order_ok) zod_splitcheck_bad++;
+				if(old_f != new_f || old_d != new_d) zod_splitcheck_otherties++;
+			}
+		}
+
+		for(size_t i = 0; i < seq.size(); i++)
+			seq[i]->DoRender(zmap, screen);
+	}
+	else
 	if(band_on() && prender_keys_n == ols.prender_olist.size() && prender_keys_n > 0)
 	{
 		/* THE BAND: only the objects whose sort key (the bottom of the
@@ -4542,6 +4879,17 @@ void ZPlayer::RenderObjects()
 	zod_rsec_end(RSEC_OBJEKTE);
 
 	//draw after effects -- nur die Klassen, die eines haben
+	if(split_active())
+	{
+		static vector<ZObject*> nach;
+
+		split_sync(ols);
+		split_all(&split_views[SV_AFTER], nach);
+
+		for(size_t i = 0; i < nach.size(); i++)
+			nach[i]->DoAfterEffects(zmap, screen);
+	}
+	else
 	for(vector<ZObject*>::iterator i=ols.aftereffect_olist.begin(); i!=ols.aftereffect_olist.end(); i++)
 		(*i)->DoAfterEffects(zmap, screen);
 

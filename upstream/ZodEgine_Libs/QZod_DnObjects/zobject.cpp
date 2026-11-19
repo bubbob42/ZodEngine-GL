@@ -4937,10 +4937,13 @@ bool sort_objects_func (ZObject *a, ZObject *b)
 ZOLists::ZOLists()
 {
     object_list = nullptr;
+    gen = 0;
 }
 
 void ZOLists::DeleteAllObjects()
 {
+    gen++;
+
     for(vector<ZObject*>::iterator o=object_list->begin(); o!=object_list->end(); o++)
         delete *o;
 
@@ -4963,6 +4966,7 @@ void ZOLists::DeleteAllObjects()
 
 void ZOLists::RemoveObject(ZObject *obj)
 {
+    gen++;
     RemoveObjectFromList(obj, object_list);
     RemoveObjectFromList(obj, &flag_olist);
     RemoveObjectFromList(obj, &cannon_olist);
@@ -5053,6 +5057,8 @@ extern "C" void zod_objart_report(void)
 
 void ZOLists::AddObject(ZObject *obj)
 {
+    gen++;
+
     //already exist?
     zod_lauf_add++;
     zod_lauf_elem += (unsigned long)object_list->size();

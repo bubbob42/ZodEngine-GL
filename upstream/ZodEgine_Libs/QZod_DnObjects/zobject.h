@@ -686,6 +686,11 @@ public:
      * over it touches several cache lines of its object: orig04 has 1412
      * rocks among ~1900 objects. ZOD_ROCKS_IDLE=off: all objects again. */
     vector<ZObject*> server_olist;
+    /* Moves on every AddObject, RemoveObject and DeleteAllObjects -- the only
+     * places these lists change. The draw order's split views (zplayer.cpp,
+     * ZOD_SORTSPLIT) are made again when it moved, without a pass over the
+     * lists to find out. */
+    unsigned long gen;
 };
 
 /* ZOD_ROCKS_IDLE (zserver.cpp): 1 = objects that cannot change left out of
