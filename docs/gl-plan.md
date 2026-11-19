@@ -731,6 +731,15 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   (pansample, n2, w1 w0 w0 w1, tour): map effects 3267 / 3255 against
   3612 / 3483 us; 26.9 / 25.9 against 26.6 / 26.1 fps (the 25.9 run: server
   9.0 ms).
+- **REJECTED: zod_gl_blit's texture coordinates kept per texture**
+  (ZOD_UVCACHE, n3, not committed): the last four UVs and their source
+  rectangle, place and page size kept in the texture's struct, to skip the
+  four single divisions a quad. Bit-identical (FS-UAE UVCheck: 0 of ~3.9
+  million kept uses differ; kept 91 % on the still view, 66 % scrolling).
+  But A4000D (pansample, u1 u0 u0 u1, tour): 26.3 / 25.9 against 27.3 /
+  26.5 fps, HUD 2740 / 2643 against 2466 / 2530 us -- writing twelve fields
+  to the struct on every miss (card memory) costs more than the divisions.
+  Reverted. Divisions are not the cost; memory traffic is.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
