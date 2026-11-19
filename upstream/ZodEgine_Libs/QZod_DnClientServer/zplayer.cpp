@@ -1809,6 +1809,13 @@ extern "C" void zod_worst_report(void)
 	}
 }
 
+/* GL: quads and fills each section drew (zod_gl_draw_count), beside its time */
+#ifndef DISABLE_OPENGL
+extern int zod_gl_active;
+unsigned long zod_gl_draw_count(void);
+#endif
+static unsigned long zod_rsec_draws[RSEC_MAX], zod_rsec_draw_mark = 0;
+
 static inline void zod_rsec_begin(void)
 {
 	if(!zod_time_measure) return;
@@ -1816,6 +1823,9 @@ static inline void zod_rsec_begin(void)
 	for(int i = 0; i < RSEC_MAX; i++) zod_rsec_prev[i] = zod_rsec[i];
 
 	zod_rsec_mark = zod_fineclock_ticks();
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active) zod_rsec_draw_mark = zod_gl_draw_count();
+#endif
 }
 
 static inline void zod_rsec_end(int slot)
@@ -1826,6 +1836,16 @@ static inline void zod_rsec_end(int slot)
 
 	zod_rsec[slot] += jetzt - zod_rsec_mark;
 	zod_rsec_mark = jetzt;
+
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active)
+	{
+		const unsigned long d = zod_gl_draw_count();
+
+		zod_rsec_draws[slot] += d - zod_rsec_draw_mark;
+		zod_rsec_draw_mark = d;
+	}
+#endif
 }
 
 extern "C" void zod_render_sections_report(long frames)
@@ -1848,7 +1868,11 @@ extern "C" void zod_render_sections_report(long frames)
 
 		summe += us;
 
-		ZLOG("  zeichnen.%s = %ld us\n", zod_rsec_name[i], (long)us);
+		if(zod_rsec_draws[i])
+			ZLOG("  zeichnen.%s = %ld us, %lu quads/fills a frame x10\n", zod_rsec_name[i], (long)us,
+			     zod_rsec_draws[i] * 10UL / (unsigned long)frames);
+		else
+			ZLOG("  zeichnen.%s = %ld us\n", zod_rsec_name[i], (long)us);
 	}
 
 	/* Die Summe gehoert ins Protokoll, nicht in meinen Kopf: Weicht sie vom
