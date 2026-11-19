@@ -721,7 +721,25 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   the HUD drawn only where it changed or something drew over it, three
   frames for RadeonGL's three buffers. A4000D: scrolling 24.5 / 25.1
   against 23.0 / 23.8 fps, still 45.1 / 45.7 against 37.3 / 41.9; the eye
-  test ran 21:17 (t29, 120 s scrolling, 26.3 fps).
+  test ran 21:17 (t29, 120 s scrolling, 26.3 fps). **The user's verdict,
+  19.11 ~23:40** (merged gl 8e5091a: kept HUD on, the white-box fix, the
+  load bar; orig01, 150 s, the user scrolling by hand with the pointer
+  over the HUD's edges): "no problems detected, looking good" -- no stale
+  or garbled parts, no pointer trails, no white boxes, and the load bar's
+  look accepted. The run's counters: 4712 of 5709 frames kept the HUD, 996
+  drew it whole (812 of them because something drew over it first, 111
+  after, 6 a part changed, 67 asked for); HUD quads 10.4 a frame against ~31 drawn
+  whole. Default stays off until the user says otherwise.
+- **The load bar on the A4000D** (same run): all steps 22.7 s; the
+  longest EFFECTS 3.1 s, PORTRAITS 3.0 s, VEHICLES 2.7 s, UNITS 2.3 s,
+  ANIMALS 2.3 s, BUILDINGS 2.1 s -- the numbers a faster start would work
+  from.
+- **The A4000D stopped answering at ~23:28** (no ping, no amiagent) while
+  zod_run.py set up the second run of a floor A/B (t38, ZOD_FASTFLOOR=aus):
+  its blanker check answered, the data check did not; no game had started,
+  the first run (t38, fast floor) had ended normally a minute before. The
+  user rebooted it. Cause unknown; nothing in our logs (the run's log
+  stays in RAM: until the end). The floor A/B is to be run again.
 - Where the A4000D stands (pansample): orig01 still 38..43 fps, orig04
   scrolling 24 fps (this morning 32..34 / 19.0; at last night's tip ~24 /
   12.4). The scrolling frame (~41 ms): server ~8.8, game ~4.8, net ~1.6,
