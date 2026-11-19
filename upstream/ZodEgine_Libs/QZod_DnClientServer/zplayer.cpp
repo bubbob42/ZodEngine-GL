@@ -2368,7 +2368,7 @@ void ZPlayer::PruefeMittelpunkte()
 #ifndef DISABLE_OPENGL
 #include "zod_gl.h"
 
-/* ---- A kept HUD under GL (ZOD_HUDKEEP, default OFF until seen by eye) ------
+/* ---- A kept HUD under GL (ZOD_HUDKEEP, default on; aus/off: drawn whole) ---
  *
  * GL draws the whole HUD every frame (~30 quads, 3..4 ms on the A4000D),
  * because the buffer it draws into holds a frame three presents old
@@ -2387,7 +2387,9 @@ void ZPlayer::PruefeMittelpunkte()
  *    of theirs is told again for the next two frames; the minimap draws
  *    every frame anyway.
  * Only with RadeonGL's three panned buffers (not PiStorm3D's own present).
- * A frame dump cannot show a kept buffer, so this needs the eye. */
+ * A frame dump cannot show a kept buffer, so this needed the eye: the
+ * user's eye test on the A4000D, 19.11 ~23:40 (scrolled by hand, the pointer
+ * over the HUD): "no problems detected"; then "yes, hud on by default". */
 enum { HK_SLOTS = 3 };
 static int hudkeep = -1;
 static int hk_left = 0, hk_rep_backdrop = 0, hk_rep_time = 0;
@@ -2402,7 +2404,7 @@ static bool hudkeep_on(void)
 {
 	if(hudkeep < 0)
 	{
-		hudkeep = zod_switch("ZOD_HUDKEEP", 0);
+		hudkeep = zod_switch("ZOD_HUDKEEP", 1);
 
 		if(hudkeep && zod_present_active())
 		{

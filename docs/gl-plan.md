@@ -717,7 +717,8 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   on checks every bind: 378 of 71 492 failed before, 0 after (FS-UAE), 0
   of 37 297 on the A4000D. My first answer (the hit flash, from mapping
   the time to a software run) was wrong: the log line was the clue.
-- **A kept HUD under GL** (ZOD_HUDKEEP, default off until the user's eye):
+- **A kept HUD under GL** (ZOD_HUDKEEP, on by default since the user's eye
+  test):
   the HUD drawn only where it changed or something drew over it, three
   frames for RadeonGL's three buffers. A4000D: scrolling 24.5 / 25.1
   against 23.0 / 23.8 fps, still 45.1 / 45.7 against 37.3 / 41.9; the eye
@@ -729,7 +730,8 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   look accepted. The run's counters: 4712 of 5709 frames kept the HUD, 996
   drew it whole (812 of them because something drew over it first, 111
   after, 6 a part changed, 67 asked for); HUD quads 10.4 a frame against ~31 drawn
-  whole. Default stays off until the user says otherwise.
+  whole. The user, right after: "yes, hud on by default" -- on by default
+  since then (ZOD_HUDKEEP=aus draws the HUD whole every frame, for A/Bs).
 - **The load bar on the A4000D** (same run): all steps 22.7 s; the
   longest EFFECTS 3.1 s, PORTRAITS 3.0 s, VEHICLES 2.7 s, UNITS 2.3 s,
   ANIMALS 2.3 s, BUILDINGS 2.1 s -- the numbers a faster start would work
@@ -780,7 +782,8 @@ Backlog (not started):
   Prisma cluster), the flavour choosing the program map and the reset sent
   at the start (GM System On, or the MT-32 reset). A ZodLaunch "Music"
   choice: Mixer (AHI/Paula) / General MIDI / MT-32.
-- **Retained HUD under GL**: draw the HUD only when it changed or something
+- **Retained HUD under GL** -- DONE: the kept HUD (ZOD_HUDKEEP), on by
+  default since the user's eye test on 19.11. Was: draw the HUD only when it changed or something
   drew over it, for as many frames as the swap chain has buffers; needs the
   map and objects clipped to the view (glScissor on RadeonGL). ~1.7 ms a
   frame, both views; a picture change that needs the user's eye.

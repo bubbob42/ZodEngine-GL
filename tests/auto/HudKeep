@@ -1,4 +1,5 @@
-; HudKeep -- the HUD kept between frames under GL (ZOD_HUDKEEP on): how many
+; HudKeep -- the HUD kept between frames under GL (ZOD_HUDKEEP, on by
+; default since 19.11; set here anyway): how many
 ; frames keep it, how many draw it whole and why (drawn over before or after
 ; it, a part changed, the game asked). GL on orig01 still and orig04
 ; scrolling. The null card renders no pixels: the picture needs the eye on
