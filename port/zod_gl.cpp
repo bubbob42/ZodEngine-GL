@@ -2237,6 +2237,44 @@ unsigned long zod_gl_lib_ticks(void)
 	return st_lib_ticks;
 }
 
+/* Pages are taken lowest first (atlas_place: a new shelf goes into the
+ * first page with room), so a page made early is used exactly when it
+ * would have been made: the images land where they did. Only the moment of
+ * the clearing moves -- from mid-game (orig04's second page: 16 strips of
+ * ~19 ms, 22 s into a tour) to the loading screen. */
+int zod_gl_atlas_prepare(void)
+{
+	char buf[16];
+	const char *e;
+	int want = 2;
+	const unsigned long t0 = zod_fineclock_ticks();
+	const int before = page_n;
+
+	if(!zod_gl_active || !npot_ok) return page_n;
+
+	e = zod_env("ZOD_GL_PREPAGES", buf, sizeof(buf));
+	if(e)
+	{
+		if(e[0] == 'a' || e[0] == 'A' || (e[0] == 'o' && e[1] == 'f')) want = 0;
+		else if(e[0] >= '0' && e[0] <= '9') want = e[0] - '0';
+	}
+
+	if(want > ATLAS_PAGES) want = ATLAS_PAGES;
+
+	while(page_n < want)
+		if(atlas_page_new() < 0) break;
+
+	if(page_n != before)
+	{
+		const unsigned long f = zod_fineclock_freq();
+
+		ZLOG("GL: atlas pages %d..%d made while loading (ZOD_GL_PREPAGES), %lu ms\n",
+		     before, page_n - 1, f >= 1000 ? (zod_fineclock_ticks() - t0) / (f / 1000UL) : 0UL);
+	}
+
+	return page_n;
+}
+
 void zod_gl_hud_guard(int on, int gx, int gy)
 {
 	guard_on = on;

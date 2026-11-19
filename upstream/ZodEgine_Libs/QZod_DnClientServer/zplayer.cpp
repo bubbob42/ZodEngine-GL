@@ -4,7 +4,10 @@
 
 /* the load progress bar's steps (zod_schirm.h): five before Load_Graphics,
  * then its 80 */
-#define ZOD_LADE_SCHRITTE (5 + 80)
+#define ZOD_LADE_SCHRITTE (5 + 80 + 1)   /* + TEXTURES (GL: atlas pages) */
+#ifndef DISABLE_OPENGL
+int zod_gl_atlas_prepare(void);   /* zod_gl.h, included further down */
+#endif
 #include <zod_pack.h>
 #include <zod_census.h>
 #include <stdio.h>
@@ -637,6 +640,14 @@ void ZPlayer::Setup()
 	//synchron laden: unter AmigaOS soll das Spiel in einem Task laufen
 	Load_Graphics(this);
 	ZLOG("Start: Load_Graphics fertig\n");
+#ifndef DISABLE_OPENGL
+	/* the atlas pages now, behind the load bar, not mid-game (zod_gl.cpp) */
+	if(use_opengl)
+	{
+		zod_gl_atlas_prepare();
+		zod_lade_schritt("TEXTURES", ZOD_LADE_SCHRITTE, ZOD_LADE_SCHRITTE);
+	}
+#endif
 	zod_lade_schritt("READY", ZOD_LADE_SCHRITTE, ZOD_LADE_SCHRITTE);
 	zod_lade_ende();
 

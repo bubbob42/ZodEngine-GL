@@ -709,6 +709,18 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   fps; game 4448 / 4598 against 5177 / 5069 us (the Process pass 2002 /
   2033 against 2239 / 2306: the hut animals), bots' SmoothMove 503 / 534
   against 693 / 699 us.
+- **The atlas pages made while loading** (fps-night2, ZOD_GL_PREPAGES,
+  default 2): a page is cleared in 16 strips of ~19 ms; on an orig04 tour
+  the second page came mid-game (a ~0.3 s hitch). Now both are made in a
+  load step of their own ("TEXTURES", behind the load bar, RadeonGL
+  only); pages are taken lowest first, so every image lands where it did.
+  FS-UAE LoadBar, GLSmoke, GLTour pass (pages 0..1 made in 86..99 ms
+  there). A4000D (pansample, n1, p1 p0 p0 p1, tour): 26.7 / 27.6 against
+  25.0 / 25.5 fps, frames over 100 ms 9 / 10 against 14 / 14, over 50 ms
+  104 / 62 against 119 / 114; the load step takes ~745 ms instead of 84 ms
+  (page clears 640 ms). Part of the fps gap is likely the fights (server
+  time differs too: 7.8 / 7.5 against 8.9 / 9.1 ms) -- the hitch is what
+  it removes for sure.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
