@@ -1926,6 +1926,8 @@ void zod_time_report(double &render, double &flip, double &process, double &sock
 	frames  = zod_acc_frames;
 }
 
+extern "C" unsigned long zod_cad_game_ticks;
+
 void ZPlayer::Tick()
 {
 	unsigned long process_time = 0;
@@ -1958,6 +1960,7 @@ void ZPlayer::Tick()
 		if(zod_time_measure) process_time = zod_fineclock_ticks();
 		ProcessGame();
 		if(zod_time_measure) process_time = zod_fineclock_ticks() - process_time;
+		zod_cad_game_ticks = process_time;   /* the present's cadence (sdl_screen.cpp) */
 
 		//render
 		if(zod_time_measure) render_time = zod_fineclock_ticks();

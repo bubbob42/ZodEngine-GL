@@ -1166,18 +1166,147 @@ static void gl_schliessen(void)
 	screen_ptr = 0;
 }
 
+/* ---- the present's cadence ---------------------------------------------------
+ * RadeonGL pans at most once a refresh: a present that follows the last one
+ * by less than a refresh (17.35 ms at 640x480) waits for the blank (its log:
+ * "pans held for the last pan's blank"). On the A4000D that was 43 % of the
+ * frames, ~4 ms a frame -- so the work between two presents must come in
+ * short and long frames. Counted here: the work between the end of one
+ * present and the start of the next, the time inside the present, and that
+ * frame's server tick and client game (main.cpp, zplayer.cpp), as histograms
+ * and 48 consecutive frames from frame 600 on. */
+extern "C" { unsigned long zod_cad_server_ticks = 0, zod_cad_game_ticks = 0; }
+extern "C" unsigned long zod_gl_upload_ticks;   /* zod_gl.cpp: time in uploads */
+enum { CAD_B = 11, CAD_RAW = 48, CAD_RAW_FROM = 600 };
+static const unsigned short cad_edge_ms[CAD_B - 1] = { 8, 13, 17, 21, 25, 33, 42, 50, 67, 100 };
+static unsigned long cad_work[CAD_B], cad_in[CAD_B], cad_gap[CAD_B];
+static unsigned long cad_t1 = 0, cad_t0_prev = 0, cad_frames = 0;
+static unsigned long cad_short_n = 0, cad_short_server = 0, cad_short_game = 0, cad_short_up = 0;
+static unsigned long cad_long_n = 0, cad_long_server = 0, cad_long_game = 0, cad_long_up = 0;
+static unsigned short cad_raw[CAD_RAW][5];
+/* presents of 8 ms and more (a pan held for the blank) by 200-frame block:
+ * RadeonGL's refresh rule needs a trusted line model first (MiniGL) */
+enum { CAD_BLOCKS = 10, CAD_BLOCK = 200 };
+static unsigned long cad_held_blk[CAD_BLOCKS + 1];
+static int cad_raw_n = 0;
+
+static unsigned long cad_us(unsigned long ticks)
+{
+	const unsigned long f = zod_fineclock_freq();
+
+	if(f < 1000) return 0;
+
+	return ticks > 4000000UL ? 0xFFFFFFFFUL : ticks * 1000UL / (f / 1000UL);
+}
+
+static int cad_bucket(unsigned long us)
+{
+	int i;
+
+	for(i = 0; i < CAD_B - 1; i++)
+		if(us < (unsigned long)cad_edge_ms[i] * 1000UL) return i;
+
+	return CAD_B - 1;
+}
+
 static void gl_bild_zeigen(void)
 {
+	unsigned long t0;
+
 	/* The pointer last, at the position of now -- what the software path's
 	 * late pointer does (zeiger_einsetzen). */
 	if(zeig_bild && screen_ptr)
 		zod_gl_blit(zeig_bild, 0, screen_ptr->MouseX + warp_dx - zeig_hot_x,
 		            screen_ptr->MouseY + warp_dy - zeig_hot_y, 255, 0);
 
+	t0 = zod_fineclock_ticks();
+
 	zod_gl_flush();
 	mglSwitchDisplay();
 
 	if(zod_present_active()) zod_present_show(gl_sync);
+
+	{
+		const unsigned long t1 = zod_fineclock_ticks();
+
+		if(cad_frames > 0)
+		{
+			const unsigned long work = cad_us(t0 - cad_t1);
+			const unsigned long in = cad_us(t1 - t0);
+			const unsigned long gap = cad_us(t0 - cad_t0_prev);
+			const unsigned long sv = cad_us(zod_cad_server_ticks);
+			const unsigned long gm = cad_us(zod_cad_game_ticks);
+			const unsigned long up = cad_us(zod_gl_upload_ticks);
+
+			cad_work[cad_bucket(work)]++;
+			cad_in[cad_bucket(in)]++;
+
+			if(in >= 8000UL)
+				cad_held_blk[cad_frames / CAD_BLOCK < CAD_BLOCKS ? cad_frames / CAD_BLOCK : CAD_BLOCKS]++;
+			cad_gap[cad_bucket(gap)]++;
+
+			if(work < 17350UL)
+			{
+				cad_short_n++;
+				cad_short_server += sv;
+				cad_short_game += gm;
+				cad_short_up += up;
+			}
+			else
+			{
+				cad_long_n++;
+				cad_long_server += sv;
+				cad_long_game += gm;
+				cad_long_up += up;
+			}
+
+			if(cad_frames >= CAD_RAW_FROM && cad_raw_n < CAD_RAW)
+			{
+				cad_raw[cad_raw_n][0] = (unsigned short)(work > 65535UL ? 65535UL : work);
+				cad_raw[cad_raw_n][1] = (unsigned short)(in > 65535UL ? 65535UL : in);
+				cad_raw[cad_raw_n][2] = (unsigned short)(sv > 65535UL ? 65535UL : sv);
+				cad_raw[cad_raw_n][3] = (unsigned short)(gm > 65535UL ? 65535UL : gm);
+				cad_raw[cad_raw_n][4] = (unsigned short)(up > 65535UL ? 65535UL : up);
+				cad_raw_n++;
+			}
+		}
+
+		cad_frames++;
+		zod_gl_upload_ticks = 0;
+		cad_t1 = t1;
+		cad_t0_prev = t0;
+	}
+}
+
+extern "C" void zod_present_cadence_report(void)
+{
+	int i;
+
+	if(cad_frames < 2) return;
+
+	ZLOG("GL present cadence (%lu presents), ms bucket upper edges:", cad_frames);
+	for(i = 0; i < CAD_B - 1; i++) ZLOG(" %u", cad_edge_ms[i]);
+	ZLOG(" more\n  work between presents:");
+	for(i = 0; i < CAD_B; i++) ZLOG(" %lu", cad_work[i]);
+	ZLOG("\n  present to present:   ");
+	for(i = 0; i < CAD_B; i++) ZLOG(" %lu", cad_gap[i]);
+	ZLOG("\n  inside the present:   ");
+	for(i = 0; i < CAD_B; i++) ZLOG(" %lu", cad_in[i]);
+	ZLOG("\n  work under 17.35 ms: %lu frames, server %lu us, game %lu us, uploads %lu us on average;"
+	     " the others: %lu frames, server %lu us, game %lu us, uploads %lu us\n",
+	     cad_short_n, cad_short_n ? cad_short_server / cad_short_n : 0UL,
+	     cad_short_n ? cad_short_game / cad_short_n : 0UL,
+	     cad_short_n ? cad_short_up / cad_short_n : 0UL,
+	     cad_long_n, cad_long_n ? cad_long_server / cad_long_n : 0UL,
+	     cad_long_n ? cad_long_game / cad_long_n : 0UL,
+	     cad_long_n ? cad_long_up / cad_long_n : 0UL);
+	ZLOG("  presents of 8 ms and more by %d-frame block from the first:", CAD_BLOCK);
+	for(i = 0; i <= CAD_BLOCKS; i++) ZLOG(" %lu", cad_held_blk[i]);
+	ZLOG(" (the last: all later frames)\n");
+	ZLOG("  frames %d.. (us: work, inside the present, server, game, uploads):\n", CAD_RAW_FROM);
+	for(i = 0; i < cad_raw_n; i++)
+		ZLOG("    %5u %5u %5u %5u %5u\n", cad_raw[i][0], cad_raw[i][1], cad_raw[i][2],
+		     cad_raw[i][3], cad_raw[i][4]);
 }
 
 void SDL_GL_SwapBuffers(void)

@@ -73,4 +73,9 @@ Uint8 SDL_GetMouseState(int *x, int *y) { if(x) *x = 0; if(y) *y = 0; return 0; 
 void SDL_WM_SetCaption(const char *t, const char *i) { (void)t; (void)i; }
 void SDL_WM_SetIcon(SDL_Surface *icon, Uint8 *mask)  { (void)icon; (void)mask; }
 
+/* main.cpp's reports and counters of the Amiga screen (sdl_screen.cpp) */
+void zod_flip_sums_report(void)        { }
+void zod_present_cadence_report(void)  { }
+unsigned long zod_cad_server_ticks = 0, zod_cad_game_ticks = 0;
+
 } /* extern "C" */

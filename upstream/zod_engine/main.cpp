@@ -126,6 +126,8 @@ extern unsigned long zod_kopf_aus_pool, zod_kopf_neu, zod_kopf_zurueck;
 extern "C" void zod_dirty_sweep_report(unsigned long frames);
 extern "C" void zod_flip_report(void);
 extern "C" void zod_flip_sums_report(void);   //the flip's block sums
+extern "C" void zod_present_cadence_report(void);   //GL: work between presents
+extern "C" unsigned long zod_cad_server_ticks;
 /* port/amiga/sdl_video.cpp -- Zaehler des Blitters */
 extern "C" void zod_blit_report(unsigned long *kc, unsigned long long *kp,
                                 unsigned long *fc, unsigned long long *fp,
@@ -650,7 +652,8 @@ void run_single_player()
 
         zserver.Tick();
 
-        if(measure) acc_server += zod_fineclock_ticks() - t_mark;
+        zod_cad_server_ticks = zod_fineclock_ticks() - t_mark;
+        if(measure) acc_server += zod_cad_server_ticks;
 
         zplayer.Tick();
         frames++;
@@ -855,6 +858,8 @@ void run_single_player()
                         zod_dirty_sweep_report(df);
                         zod_flip_sums_report();
                     }
+
+                    zod_present_cadence_report();   //GL only: nothing without presents
                 }
 #endif
 
