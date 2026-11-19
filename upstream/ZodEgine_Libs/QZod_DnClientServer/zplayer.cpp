@@ -1540,6 +1540,10 @@ static int zod_switch(const char *name, int dflt)
 	return dflt;
 }
 
+/* ZOD_SNDLIST / ZOD_SNDCHECK, see building_sound_flags */
+static int sndlist = -1, sndcheck = -1;
+static unsigned long zod_snd_frames = 0, zod_snd_bad = 0, zod_snd_radar = 0, zod_snd_robot = 0;
+
 static int sortfix = -1, sortcheck = -1;
 
 static int sortfix_on(void)
@@ -2015,6 +2019,12 @@ extern "C" void zod_render_sections_report(long frames)
 			     " ZOD_HUTCHECK: %lu skipped ones drawn anyway, %lu of them passed a view test\n",
 			     hd, hc, hn, hb);
 	}
+
+	if(zod_snd_frames)
+		ZLOG("building sounds: ZOD_SNDCHECK %lu frames, %lu differ (%s);"
+		     " radar heard in %lu, a factory in %lu\n",
+		     zod_snd_frames, zod_snd_bad, sndlist ? "ZOD_SNDLIST on" : "ZOD_SNDLIST aus",
+		     zod_snd_radar, zod_snd_robot);
 
 #ifndef DISABLE_OPENGL
 	if(zod_trig_hits || zod_trig_calls)
@@ -3195,13 +3205,18 @@ void ZPlayer::ProcessVerbalWarnings()
 	}
 }
 
-void ZPlayer::PlayBuildingSounds()
-{
-	bool do_play_radar = false;
-	bool do_play_robot = false;
-	bool do_play_vehicle = false;
+/* ZOD_SNDLIST: the buildings' sounds are looked for in ols.building_olist
+ * (~36 on orig04) instead of every object (~1900 with the rocks; 0.6 ms a
+ * frame on the A4000D). ols.AddObject fills both lists in parallel, and the
+ * loop keeps only two flags, so the order does not matter. ZOD_SNDCHECK on:
+ * both ways every frame, the frames where they differ counted (the
+ * switches and counters sit by zod_switch, the report reads them). */
 
-	for(vector<ZObject*>::iterator i=object_list.begin(); i!=object_list.end(); i++)
+static int building_sound_flags(vector<ZObject*> &list, ZMap &zmap)
+{
+	int flags = 0;
+
+	for(vector<ZObject*>::iterator i=list.begin(); i!=list.end(); i++)
 	{
 		unsigned char ot, oid;
 		int x, y, w, h;
@@ -3217,7 +3232,7 @@ void ZPlayer::PlayBuildingSounds()
 			(*i)->GetCords(x, y);
 			(*i)->GetDimensionsPixel(w, h);
 
-			if(zmap.WithinView(x, y, w, h)) do_play_radar = true;
+			if(zmap.WithinView(x, y, w, h)) flags |= 1;
 		}
 
 		//robot factory
@@ -3229,12 +3244,39 @@ void ZPlayer::PlayBuildingSounds()
 			if(zmap.WithinView(x, y, w, h))
 				if((*i)->GetBuildState() != BUILDING_SELECT)
 					if((*i)->GetOwner() != NULL_TEAM)
-						do_play_robot = true;
+						flags |= 2;
 		}
 
 		//vehicle factory
 
 	}
+
+	return flags;
+}
+
+void ZPlayer::PlayBuildingSounds()
+{
+	int flags;
+
+	if(sndlist < 0)
+	{
+		sndlist = zod_switch("ZOD_SNDLIST", 1);
+		sndcheck = zod_switch("ZOD_SNDCHECK", 0);
+	}
+
+	flags = building_sound_flags(sndlist ? ols.building_olist : object_list, zmap);
+
+	if(sndcheck)
+	{
+		zod_snd_frames++;
+		if(flags & 1) zod_snd_radar++;
+		if(flags & 2) zod_snd_robot++;
+		if(flags != building_sound_flags(sndlist ? object_list : ols.building_olist, zmap))
+			zod_snd_bad++;
+	}
+
+	const bool do_play_radar = (flags & 1) != 0;
+	const bool do_play_robot = (flags & 2) != 0;
 
 	if(do_play_radar)
 		ZSoundEngine::RepeatWav(RADAR_SND);

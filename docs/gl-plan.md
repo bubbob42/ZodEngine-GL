@@ -673,6 +673,39 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   A4000D (pansample, t32, 5 6 6 5): server.loeschen 80 / 83 against 533 /
   551 us; scrolling 24.3 / 24.3 against 24.3 / 23.2 fps, frame 41.0 / 41.0
   against 41.1 / 42.9 ms.
+- **The after-effects drawn from a band around the view** (fps-night,
+  ZOD_AFTERBAND): the after-effects list walked whole for a handful in
+  view; now from the sort keys' band (32 above, 256 below the view) -- a
+  census of the after-effects first (ZOD_BANDCENSUS) gave the band's edges.
+  FS-UAE GLCheck: 0 failed binds; 21..34 thousand of 53..65 thousand
+  visited. A4000D (pansample, t34): obj_nach tour 1049 / 1069 against
+  1414 / 1517 us, still 716 / 785 / 696 / 717 against 860 / 830 / 700 /
+  822 us. The frame rates swap sides between the two still series (7887:
+  40.7 / 36.9 against 42.2 / 43.0; 8778: 44.4 / 40.6 against 40.3 / 39.9;
+  tour 24.5 / 24.8 against 24.9 / 24.5) -- the slow runs lost their time in
+  the map's library time, effects and zones, which the band does not
+  touch. Kept: the section it changes is lower in every pair.
+- **The buildings' sounds looked for among the buildings** (fps-night,
+  ZOD_SNDLIST): PlayBuildingSounds walked every object (~1900 with the
+  rocks) each frame for two flags; ols.building_olist (~50) gives the same
+  (ols.AddObject fills both; the order does not matter). FS-UAE SndCheck
+  (ZOD_SNDCHECK, both ways every frame): 0 of 11 108 frames differ, radar
+  heard in 3467, a factory in 259. A4000D (pansample, t37, z 0 0 z):
+  zeichnen.klaenge 105 / 126 against 572 / 592 us; 24.8 / 24.6 against
+  24.0 / 25.4 fps.
+- **Where the bots' 1.8 ms go** (census, t37, A4000D tour): socket 0.94
+  ms a frame (the loopback packets and their handlers), SmoothMove 0.60 ms
+  (43 objects a tick, two bots, ~2 ticks a frame: ~7 us an object -- the
+  two floor() calls go through ___fpu_round_to_integer on the 060), AI
+  0.03 ms (once a second).
+- **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
+  mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
+  samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
+  all samples, _Upload 2.5 %, most of them with no program caller on the
+  stack, i.e. inside mglSwitchDisplay. ~156 quads a frame at ~120 ns a
+  byte into card memory: ~24 us a quad at the present alone, on top of the
+  vertex calls. Fewer quads is the lever (per frame: objects 61, map
+  effects 35, HUD 31, zones 15).
 - **The user's white boxes** (videos 21:03..21:07, the fort's countdown,
   the snakes, any new animation frame: a white box of the image's size
   for 1-2 frames): held_take made a new image's temporary texture inside
