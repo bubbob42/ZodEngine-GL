@@ -1511,6 +1511,10 @@ extern "C" void zod_hut_report(unsigned long *culled, unsigned long *drawn,
                                unsigned long *checked, unsigned long *bad);   /* ohut.cpp */
 extern unsigned long zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad;  /* qzod_map.cpp */
 
+/* a kept HUD under GL (ZOD_HUDKEEP, see hudkeep_before) */
+static unsigned long zod_hk_full = 0, zod_hk_kept = 0, zod_hk_touch = 0;
+static unsigned long zod_hk_after = 0, zod_hk_change = 0, zod_hk_ask = 0;
+
 /* the draw order's split views (ZOD_SORTSPLIT, see split_frame) */
 static unsigned long zod_split_rebuilds = 0, zod_split_dynkeys = 0, zod_split_frames = 0;
 static unsigned long zod_splitcheck_frames = 0, zod_splitcheck_rockties = 0;
@@ -2010,6 +2014,13 @@ extern "C" void zod_render_sections_report(long frames)
 			     hd, hc, hn, hb);
 	}
 
+#ifndef DISABLE_OPENGL
+	if(zod_hk_full || zod_hk_kept)
+		ZLOG("HUD kept: %lu frames kept, %lu whole (drawn over before it %lu, after it %lu,"
+		     " a part changed %lu, asked %lu)\n",
+		     zod_hk_kept, zod_hk_full, zod_hk_touch, zod_hk_after, zod_hk_change, zod_hk_ask);
+#endif
+
 	if(zod_effpos_skipped || zod_effcheck_n)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
@@ -2300,6 +2311,145 @@ void ZPlayer::PruefeMittelpunkte()
  * ZOD_SORTKEYS aus: the comparator again. */
 #ifndef DISABLE_OPENGL
 #include "zod_gl.h"
+
+/* ---- A kept HUD under GL (ZOD_HUDKEEP, default OFF until seen by eye) ------
+ *
+ * GL draws the whole HUD every frame (~30 quads, 3..4 ms on the A4000D),
+ * because the buffer it draws into holds a frame three presents old
+ * (RadeonGL pans three buffers in turn) and anything may have drawn over
+ * the HUD's area since. Kept instead:
+ *  - the HUD's area is x > 548+off_x or y > 448+off_y; zod_gl counts every
+ *    vertex there drawn by anything but the HUD itself (the guard);
+ *  - a buffer gets the whole HUD when something drew over it this frame
+ *    before the HUD, or after the HUD the last time this buffer was drawn
+ *    (the pointer), or when the game asked for it (ReRenderAll), or a
+ *    part other than the portrait, the clock and the minimap changed last
+ *    frame -- and then the next two frames as well, so all three buffers
+ *    get it;
+ *  - otherwise only what changed is drawn, as on the software path; the
+ *    portrait and the clock redraw their whole box when told, so a change
+ *    of theirs is told again for the next two frames; the minimap draws
+ *    every frame anyway.
+ * Only with RadeonGL's three panned buffers (not PiStorm3D's own present).
+ * A frame dump cannot show a kept buffer, so this needs the eye. */
+enum { HK_SLOTS = 3 };
+static int hudkeep = -1;
+static int hk_left = 0, hk_rep_backdrop = 0, hk_rep_time = 0;
+static bool hk_trigger_next = false, hk_was_full = false, hk_have_last = false;
+static bool hk_backdrop_game = false, hk_set_time = false;
+static unsigned char hk_dirty[HK_SLOTS] = { 1, 1, 1 };
+static unsigned long hk_last_frame = 0, hk_hits_mark = 0, hk_hits_after = 0;
+
+extern "C" int zod_present_active(void);
+
+static bool hudkeep_on(void)
+{
+	if(hudkeep < 0)
+	{
+		hudkeep = zod_switch("ZOD_HUDKEEP", 0);
+
+		if(hudkeep && zod_present_active())
+		{
+			hudkeep = 0;
+			ZLOG("HUD: drawn whole every frame (ZOD_HUDKEEP needs RadeonGL's three buffers)\n");
+		}
+		else
+			ZLOG("HUD: %s\n", hudkeep ? "kept between frames (ZOD_HUDKEEP)"
+			                         : "drawn whole every frame");
+	}
+
+	return hudkeep == 1;
+}
+
+/* where the full redraw used to be asked for: the frame's drawing starts */
+static void hudkeep_frame_start(int gx, int gy)
+{
+	const unsigned long fno = zod_gl_frame_no();
+
+	if(hk_have_last)
+	{
+		const unsigned long slot = hk_last_frame % HK_SLOTS;
+
+		/* drawn over the HUD after it, last frame (the pointer) */
+		if(zod_gl_guard_hits() != hk_hits_after)
+		{
+			hk_dirty[slot] = 1;
+			zod_hk_after++;
+		}
+		else if(hk_was_full)
+			hk_dirty[slot] = 0;
+
+		/* a present without a HUD in between: no buffer's HUD is known */
+		if(fno != hk_last_frame + 1)
+			for(int i = 0; i < HK_SLOTS; i++) hk_dirty[i] = 1;
+	}
+
+	zod_gl_hud_guard(1, gx, gy);
+	hk_hits_mark = zod_gl_guard_hits();
+}
+
+/* right before ZHud::DoRender: the whole HUD, or only what changed */
+static void hudkeep_before(ZHud &hud)
+{
+	const unsigned long slot = zod_gl_frame_no() % HK_SLOTS;
+	const bool touched = zod_gl_guard_hits() != hk_hits_mark;
+	const bool asked = hud.MainPending();
+	const bool trigger = touched || hk_dirty[slot] || hk_trigger_next || asked || !hk_have_last;
+	const bool full = trigger || hk_left > 0;
+
+	if(touched) zod_hk_touch++;
+	if(asked) zod_hk_ask++;
+
+	hk_trigger_next = false;
+
+	if(trigger) hk_left = HK_SLOTS - 1;
+	else if(hk_left > 0) hk_left--;
+
+	hk_backdrop_game = hud.BackdropPending();
+	hk_set_time = false;
+
+	if(full)
+	{
+		hud.ReRenderAll();
+		hk_rep_backdrop = 0;
+		hk_rep_time = 0;
+		zod_hk_full++;
+	}
+	else
+	{
+		if(hk_rep_backdrop > 0) { hud.RepeatBackdrop(); hk_rep_backdrop--; }
+		if(hk_rep_time > 0) { hud.RepeatTime(); hk_rep_time--; hk_set_time = true; }
+		zod_hk_kept++;
+	}
+
+	hk_was_full = full;
+
+	/* the HUD's own drawing does not count */
+	zod_gl_hud_guard(0, 0, 0);
+	zod_hud_track_parts(true);
+}
+
+static void hudkeep_after(int gx, int gy)
+{
+	const unsigned mask = zod_hud_parts_drawn();
+
+	if(!hk_was_full)
+	{
+		if(mask & ~(unsigned)(ZOD_HUD_MINIMAP | ZOD_HUD_BACKDROP | ZOD_HUD_TIME))
+		{
+			hk_trigger_next = true;
+			zod_hk_change++;
+		}
+
+		if((mask & ZOD_HUD_BACKDROP) && hk_backdrop_game) hk_rep_backdrop = HK_SLOTS - 1;
+		if((mask & ZOD_HUD_TIME) && !hk_set_time) hk_rep_time = HK_SLOTS - 1;
+	}
+
+	zod_gl_hud_guard(1, gx, gy);
+	hk_hits_after = zod_gl_guard_hits();
+	hk_last_frame = zod_gl_frame_no();
+	hk_have_last = true;
+}
 
 /* ZOD_BANDCENSUS on: for every object that drew in DoRender, how far its sort
  * key lay ABOVE the view's top (it draws below its key: shadows, bars) or
@@ -3277,6 +3427,11 @@ void ZPlayer::RenderScreen()
 		//render base
 		//we do not keep track if the image is in the map area in opengl
 		//so we just render it all full then put the hud back over it
+#ifndef DISABLE_OPENGL
+		if(use_opengl && hudkeep_on())
+			hudkeep_frame_start(init_w - 100, init_h - 36);
+		else
+#endif
 		if(use_opengl || zod_hud_all_on())
 			zhud.ReRenderAll();
 
@@ -3338,7 +3493,15 @@ void ZPlayer::RenderScreen()
 		zod_rsec_end(RSEC_GUI);
 
 		//(almost)last because opengl uses it to render over overflows
+#ifndef DISABLE_OPENGL
+		const bool hk = use_opengl && hudkeep_on();
+
+		if(hk) hudkeep_before(zhud);
+#endif
 		zhud.DoRender(screen, init_w, init_h);
+#ifndef DISABLE_OPENGL
+		if(hk) hudkeep_after(init_w - 100, init_h - 36);
+#endif
 
 		zod_rsec_end(RSEC_HUD);
 
