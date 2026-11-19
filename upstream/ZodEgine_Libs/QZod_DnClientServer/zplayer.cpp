@@ -1553,6 +1553,7 @@ static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
 extern "C" void zod_hut_report(unsigned long *culled, unsigned long *drawn,
                                unsigned long *checked, unsigned long *bad);   /* ohut.cpp */
 extern unsigned long zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad;  /* qzod_map.cpp */
+extern unsigned long zod_waterdue_rebuilt, zod_waterdue_frames, zod_waterdue_bad;  /* qzod_map.cpp */
 #ifndef DISABLE_OPENGL
 extern unsigned long zod_trig_hits, zod_trig_calls;   /* zsdl_opengl.cpp, ZOD_TRIGCACHE */
 #endif
@@ -2085,6 +2086,11 @@ extern "C" void zod_render_sections_report(long frames)
 		ZLOG("turned sprites: sin/cos %lu times worked out, %lu times kept (ZOD_TRIGCACHE)\n",
 		     zod_trig_calls, zod_trig_hits);
 #endif
+
+	if(zod_waterdue_frames)
+		ZLOG("map water: start timers walked in the compact array in %lu frames,"
+		     " rebuilt %lu times (ZOD_WATERDUE); ZOD_EFFCHECK: %lu differ\n",
+		     zod_waterdue_frames, zod_waterdue_rebuilt, zod_waterdue_bad);
 
 	if(zod_effpos_skipped || zod_effcheck_n)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"

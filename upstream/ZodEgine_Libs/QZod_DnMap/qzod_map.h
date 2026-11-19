@@ -227,6 +227,10 @@ class QZOD_DNMAPSHARED_EXPORT ZMap
         //effect stuff
         vector<map_effect_info> map_effect_list;
         vector<map_effect_info> map_water_list;
+        /* ZOD_WATERDUE: map_water_list's due times in one array, the same
+         * order (DoEffects); water_gen counts the list's changes */
+        vector<double> water_due;
+        unsigned long water_gen, water_due_gen;
         static vector<unsigned int> map_water_plist[MAX_PLANET_TYPES];
         static vector<unsigned int> map_water_effect_plist[MAX_PLANET_TYPES];
 

@@ -721,6 +721,16 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   (page clears 640 ms). Part of the fps gap is likely the fights (server
   time differs too: 7.8 / 7.5 against 8.9 / 9.1 ms) -- the hitch is what
   it removes for sure.
+- **The water tiles' start timers in a compact array** (fps-night2,
+  ZOD_WATERDUE): DoEffects walked all water tiles' 20-byte records (734 on
+  orig04) every frame for their start timers -- a third of DoEffects in the
+  tour profile, the load of each record's time. Now the times sit in one
+  array in the list's order (rebuilt when the list changes, once a run),
+  the record is touched only when due. FS-UAE EffCheck (the copy against
+  the records every frame): 0 differ; SwSums, NoGL, GLSmoke pass. A4000D
+  (pansample, n2, w1 w0 w0 w1, tour): map effects 3267 / 3255 against
+  3612 / 3483 us; 26.9 / 25.9 against 26.6 / 26.1 fps (the 25.9 run: server
+  9.0 ms).
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
