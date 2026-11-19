@@ -1454,6 +1454,60 @@ void ZSDL_Surface::ZSDL_FillDots(const SDL_Rect *dots, int count, Uint8 r, Uint8
  * an effect with two pairs of them, 666 effects a frame in a big fight -- so
  * they are worked out once, and not at all at angle 0 (scaled effects,
  * unturned debris), where the result is the same to the bit. */
+/* ZOD_TRIGCACHE (default on): sin and cos of an angle kept. Angles are
+ * quantized (zod_quantize_angle, ZOD_ANGLE_STEPS steps), so a few hundred
+ * values recur every frame -- the 14 birds of orig04 alone cost ~1 ms a
+ * frame on the A4000D, a fight's turned effects far more. The same calls
+ * on the same angle, once: the results are the same to the bit. */
+enum { TRIG_SLOTS = 512 };
+static struct { Uint32 bits; int ok; double s, c; } trig_cache[TRIG_SLOTS];
+static int trigcache = -1;
+unsigned long zod_trig_hits = 0, zod_trig_calls = 0;
+
+static void zod_sincos(float angle, double *s, double *c)
+{
+	const double rad = angle * (3.14159265358979323846 / 180.0);
+
+	if(trigcache < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_TRIGCACHE", buf, sizeof(buf));
+
+		trigcache = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
+		                   (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
+	}
+
+	if(trigcache)
+	{
+		Uint32 bits;
+
+		memcpy(&bits, &angle, sizeof(bits));
+
+		const unsigned i = (unsigned)((bits ^ (bits >> 9) ^ (bits >> 17)) & (TRIG_SLOTS - 1));
+
+		if(trig_cache[i].ok && trig_cache[i].bits == bits)
+		{
+			*s = trig_cache[i].s;
+			*c = trig_cache[i].c;
+			zod_trig_hits++;
+			return;
+		}
+
+		trig_cache[i].s = sin(rad);
+		trig_cache[i].c = cos(rad);
+		trig_cache[i].bits = bits;
+		trig_cache[i].ok = 1;
+		*s = trig_cache[i].s;
+		*c = trig_cache[i].c;
+		zod_trig_calls++;
+		return;
+	}
+
+	*s = sin(rad);
+	*c = cos(rad);
+	zod_trig_calls++;
+}
+
 static void zod_rot_size(int w, int h, float angle, float size,
                          int *rw, int *rh, float *ca, float *sa)
 {
@@ -1463,10 +1517,11 @@ static void zod_rot_size(int w, int h, float angle, float size,
 
 	if(angle != 0.0f)
 	{
-		const double rad = angle * (3.14159265358979323846 / 180.0);
+		double sn, cs;
 
-		s = sin(rad) * size;
-		c = cos(rad) * size;
+		zod_sincos(angle, &sn, &cs);
+		s = sn * size;
+		c = cs * size;
 	}
 
 	cx = c * x;

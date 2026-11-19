@@ -1542,6 +1542,12 @@ static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
 extern "C" void zod_hut_report(unsigned long *culled, unsigned long *drawn,
                                unsigned long *checked, unsigned long *bad);   /* ohut.cpp */
 extern unsigned long zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad;  /* qzod_map.cpp */
+#ifndef DISABLE_OPENGL
+extern unsigned long zod_trig_hits, zod_trig_calls;   /* zsdl_opengl.cpp, ZOD_TRIGCACHE */
+#endif
+
+/* the after effects' band (ZOD_AFTERBAND): objects in the list, visited */
+static unsigned long zod_after_alle = 0, zod_after_besucht = 0;
 
 /* a kept HUD under GL (ZOD_HUDKEEP, see hudkeep_before) */
 static unsigned long zod_hk_full = 0, zod_hk_kept = 0, zod_hk_touch = 0;
@@ -1569,6 +1575,10 @@ static int zod_switch(const char *name, int dflt)
 
 	return dflt;
 }
+
+/* ZOD_SNDLIST / ZOD_SNDCHECK, see building_sound_flags */
+static int sndlist = -1, sndcheck = -1;
+static unsigned long zod_snd_frames = 0, zod_snd_bad = 0, zod_snd_radar = 0, zod_snd_robot = 0;
 
 static int sortfix = -1, sortcheck = -1;
 
@@ -2046,17 +2056,31 @@ extern "C" void zod_render_sections_report(long frames)
 			     hd, hc, hn, hb);
 	}
 
+	if(zod_snd_frames)
+		ZLOG("building sounds: ZOD_SNDCHECK %lu frames, %lu differ (%s);"
+		     " radar heard in %lu, a factory in %lu\n",
+		     zod_snd_frames, zod_snd_bad, sndlist ? "ZOD_SNDLIST on" : "ZOD_SNDLIST aus",
+		     zod_snd_radar, zod_snd_robot);
+
 #ifndef DISABLE_OPENGL
 	if(zod_hk_full || zod_hk_kept)
 		ZLOG("HUD kept: %lu frames kept, %lu whole (drawn over before it %lu, after it %lu,"
 		     " a part changed %lu, asked %lu)\n",
 		     zod_hk_kept, zod_hk_full, zod_hk_touch, zod_hk_after, zod_hk_change, zod_hk_ask);
+
+	if(zod_trig_hits || zod_trig_calls)
+		ZLOG("turned sprites: sin/cos %lu times worked out, %lu times kept (ZOD_TRIGCACHE)\n",
+		     zod_trig_calls, zod_trig_hits);
 #endif
 
 	if(zod_effpos_skipped || zod_effcheck_n)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
 		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
+
+	if(zod_after_alle)
+		ZLOG("draw.after effects band = %lu of %lu visited (ZOD_AFTERBAND)\n",
+		     zod_after_besucht, zod_after_alle);
 
 	if(zod_split_frames)
 		ZLOG("draw.order views = %lu frames, %lu made again, %lu moving keys read;"
@@ -2527,9 +2551,39 @@ static void band_census_note(ZObject *o, int top, int bottom)
 	if(key - bottom > band_below[ot]) band_below[ot] = key - bottom;
 }
 
+/* the same for DoAfterEffects (health bars, countdowns over buildings):
+ * the margins a band over the after-effects list would need */
+static int after_above[MAX_MAP_OBJECT_TYPES + 1], after_below[MAX_MAP_OBJECT_TYPES + 1];
+static unsigned long after_drawn[MAX_MAP_OBJECT_TYPES + 1];
+
+static void after_census_note(ZObject *o, int top, int bottom)
+{
+	unsigned char ot, oid;
+	const int key = o->SortKey();
+	static int init = 0;
+
+	if(!init)
+	{
+		for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++) after_above[k] = after_below[k] = -100000;
+		init = 1;
+	}
+
+	o->GetObjectID(ot, oid);
+	if(ot > MAX_MAP_OBJECT_TYPES) ot = MAX_MAP_OBJECT_TYPES;
+
+	after_drawn[ot]++;
+	if(top - key > after_above[ot]) after_above[ot] = top - key;
+	if(key - bottom > after_below[ot]) after_below[ot] = key - bottom;
+}
+
 void zod_band_census_report(void)
 {
 	if(band_census != 1) return;
+
+	for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++)
+		if(after_drawn[k])
+			ZLOG("  after effects, type %d: %lu draws, key above the view's top %d, below its bottom %d (px, at most)\n",
+			     k, after_drawn[k], after_above[k], after_below[k]);
 
 	ZLOG("Band census (objects that drew; px their sort key lay above the view's top /"
 	     " below its bottom, at most; negative: never outside):\n");
@@ -3331,13 +3385,18 @@ void ZPlayer::ProcessVerbalWarnings()
 	}
 }
 
-void ZPlayer::PlayBuildingSounds()
-{
-	bool do_play_radar = false;
-	bool do_play_robot = false;
-	bool do_play_vehicle = false;
+/* ZOD_SNDLIST: the buildings' sounds are looked for in ols.building_olist
+ * (~36 on orig04) instead of every object (~1900 with the rocks; 0.6 ms a
+ * frame on the A4000D). ols.AddObject fills both lists in parallel, and the
+ * loop keeps only two flags, so the order does not matter. ZOD_SNDCHECK on:
+ * both ways every frame, the frames where they differ counted (the
+ * switches and counters sit by zod_switch, the report reads them). */
 
-	for(vector<ZObject*>::iterator i=object_list.begin(); i!=object_list.end(); i++)
+static int building_sound_flags(vector<ZObject*> &list, ZMap &zmap)
+{
+	int flags = 0;
+
+	for(vector<ZObject*>::iterator i=list.begin(); i!=list.end(); i++)
 	{
 		unsigned char ot, oid;
 		int x, y, w, h;
@@ -3353,7 +3412,7 @@ void ZPlayer::PlayBuildingSounds()
 			(*i)->GetCords(x, y);
 			(*i)->GetDimensionsPixel(w, h);
 
-			if(zmap.WithinView(x, y, w, h)) do_play_radar = true;
+			if(zmap.WithinView(x, y, w, h)) flags |= 1;
 		}
 
 		//robot factory
@@ -3365,12 +3424,39 @@ void ZPlayer::PlayBuildingSounds()
 			if(zmap.WithinView(x, y, w, h))
 				if((*i)->GetBuildState() != BUILDING_SELECT)
 					if((*i)->GetOwner() != NULL_TEAM)
-						do_play_robot = true;
+						flags |= 2;
 		}
 
 		//vehicle factory
 
 	}
+
+	return flags;
+}
+
+void ZPlayer::PlayBuildingSounds()
+{
+	int flags;
+
+	if(sndlist < 0)
+	{
+		sndlist = zod_switch("ZOD_SNDLIST", 1);
+		sndcheck = zod_switch("ZOD_SNDCHECK", 0);
+	}
+
+	flags = building_sound_flags(sndlist ? ols.building_olist : object_list, zmap);
+
+	if(sndcheck)
+	{
+		zod_snd_frames++;
+		if(flags & 1) zod_snd_radar++;
+		if(flags & 2) zod_snd_robot++;
+		if(flags != building_sound_flags(sndlist ? object_list : ols.building_olist, zmap))
+			zod_snd_bad++;
+	}
+
+	const bool do_play_radar = (flags & 1) != 0;
+	const bool do_play_robot = (flags & 2) != 0;
 
 	if(do_play_radar)
 		ZSoundEngine::RepeatWav(RADAR_SND);
@@ -5096,15 +5182,59 @@ void ZPlayer::RenderObjects()
 	//draw after effects -- nur die Klassen, die eines haben
 	if(split_active())
 	{
+		/* ZOD_AFTERBAND (default on): only the band around the view, as for
+		 * the objects. The census (ZOD_BANDCENSUS, after_census_note) over
+		 * orig01 still, orig04 and p08 scrolling: only buildings draw here,
+		 * their keys never above the view's top and at most 157 px below
+		 * its bottom (a fort's countdown and flags over a tall building);
+		 * the band keeps 32 above and 256 below. The calls only draw. */
+		enum { AFTER_ABOVE = 32, AFTER_BELOW = 256 };
 		static vector<ZObject*> nach;
+		struct split_view *sv = &split_views[SV_AFTER];
 
 		split_sync(ols);
-		split_all(&split_views[SV_AFTER], nach);
+
+		static int afterband = -1;
+
+		if(afterband < 0) afterband = zod_switch("ZOD_AFTERBAND", 1);
+
+		if(afterband)
+		{
+			int bx, by, bw, bh;
+			size_t fa, fb, da, db;
+
+			zmap.GetViewShiftFull(bx, by, bw, bh);
+			split_range(sv->fix_keys, by - AFTER_ABOVE, by + bh + AFTER_BELOW, &fa, &fb);
+			split_range(sv->dyn_keys, by - AFTER_ABOVE, by + bh + AFTER_BELOW, &da, &db);
+			split_merge(sv, fa, fb, da, db, nach);
+			zod_after_alle += (unsigned long)(sv->fix.size() + sv->dyn.size());
+			zod_after_besucht += (unsigned long)nach.size();
+		}
+		else
+			split_all(sv, nach);
 
 		for(size_t i = 0; i < nach.size(); i++)
 			nach[i]->DoAfterEffects(zmap, screen);
 	}
 	else
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active && band_census_on())
+	{
+		int bx, by, bw, bh;
+
+		zmap.GetViewShiftFull(bx, by, bw, bh);
+
+		for(vector<ZObject*>::iterator i=ols.aftereffect_olist.begin(); i!=ols.aftereffect_olist.end(); i++)
+		{
+			const unsigned long before = zod_gl_draw_count();
+
+			(*i)->DoAfterEffects(zmap, screen);
+
+			if(zod_gl_draw_count() != before) after_census_note(*i, by, by + bh);
+		}
+	}
+	else
+#endif
 	for(vector<ZObject*>::iterator i=ols.aftereffect_olist.begin(); i!=ols.aftereffect_olist.end(); i++)
 		(*i)->DoAfterEffects(zmap, screen);
 

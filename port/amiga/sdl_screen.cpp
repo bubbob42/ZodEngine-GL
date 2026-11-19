@@ -1188,6 +1188,9 @@ static unsigned short cad_raw[CAD_RAW][5];
  * RadeonGL's refresh rule needs a trusted line model first (MiniGL) */
 enum { CAD_BLOCKS = 10, CAD_BLOCK = 200 };
 static unsigned long cad_held_blk[CAD_BLOCKS + 1];
+/* Inside the present by its parts, whole-run E clock ticks: the last
+ * batch's flush, mglSwitchDisplay, zod_present_show. */
+static unsigned long cad_in_flush = 0, cad_in_switch = 0, cad_in_show = 0;
 static int cad_raw_n = 0;
 
 static unsigned long cad_us(unsigned long ticks)
@@ -1211,7 +1214,7 @@ static int cad_bucket(unsigned long us)
 
 static void gl_bild_zeigen(void)
 {
-	unsigned long t0;
+	unsigned long t0, ta, tb;
 
 	/* The pointer last, at the position of now -- what the software path's
 	 * late pointer does (zeiger_einsetzen). */
@@ -1222,12 +1225,18 @@ static void gl_bild_zeigen(void)
 	t0 = zod_fineclock_ticks();
 
 	zod_gl_flush();
+	ta = zod_fineclock_ticks();
 	mglSwitchDisplay();
+	tb = zod_fineclock_ticks();
 
 	if(zod_present_active()) zod_present_show(gl_sync);
 
 	{
 		const unsigned long t1 = zod_fineclock_ticks();
+
+		cad_in_flush += ta - t0;
+		cad_in_switch += tb - ta;
+		cad_in_show += t1 - tb;
 
 		if(cad_frames > 0)
 		{
@@ -1300,6 +1309,9 @@ extern "C" void zod_present_cadence_report(void)
 	     cad_long_n, cad_long_n ? cad_long_server / cad_long_n : 0UL,
 	     cad_long_n ? cad_long_game / cad_long_n : 0UL,
 	     cad_long_n ? cad_long_up / cad_long_n : 0UL);
+	ZLOG("  inside the present by its parts, us a present: flush %lu, mglSwitchDisplay %lu,"
+	     " present_show %lu\n", cad_us(cad_in_flush / cad_frames),
+	     cad_us(cad_in_switch / cad_frames), cad_us(cad_in_show / cad_frames));
 	ZLOG("  presents of 8 ms and more by %d-frame block from the first:", CAD_BLOCK);
 	for(i = 0; i <= CAD_BLOCKS; i++) ZLOG(" %lu", cad_held_blk[i]);
 	ZLOG(" (the last: all later frames)\n");

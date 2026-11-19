@@ -107,12 +107,17 @@ ZObject::ZObject(ZTime *ztime_, ZSettings *zsettings_)
 	//needed for when an object needs to be removed after some time
 	killme = false;
 	killme_time = 0;
+	kill_counted = false;
 
 	ClearGroupInfo();
 }
 
+unsigned long zod_killme_pending = 0;   /* see DoKillMe */
+
 ZObject::~ZObject()
 {
+	if(kill_counted && zod_killme_pending) zod_killme_pending--;
+
 	//kill any pathfinding threads
 	if(zmap) cur_wp_info.clear_and_kill(*zmap);
 
@@ -263,6 +268,12 @@ void ZObject::FireMissile(int x_, int y_)
 }
 
 
+/* Objects set to die (DoKillMe) and not yet deleted. ZServer::ProcessObjects
+ * asks every object KillMe() each tick -- ~1900 on orig04, a pass over card
+ * RAM on the A4000D; while this is 0 none can answer true, and the pass is
+ * left out (ZOD_KILLFAST). Only DoKillMe sets `killme` in the object
+ * hierarchy (hut animals and GUI windows set their own, outside the
+ * server's lists). */
 void ZObject::DoKillMe(double killtime)
 {
 	//they were already set to die
@@ -271,6 +282,12 @@ void ZObject::DoKillMe(double killtime)
 
 	killme = true;
 	killme_time = killtime;
+
+	if(!kill_counted)
+	{
+		kill_counted = true;
+		zod_killme_pending++;
+	}
 }
 
 

@@ -653,6 +653,59 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   pansample): _ToVram 5.4 % (the vertex stream copied into the card's ring
   over the bus), the vertex hook 3.4 %, texture uploads 2.6 % -- per vertex,
   no cheaper entry; on Zod's side the lever is fewer quads.
+- **sin/cos of turned sprites kept** (fps-night, ZOD_TRIGCACHE): birds
+  and turned effects called sin and cos (software on the 060, ~23 us a
+  pair) for every turned sprite every frame; angles are quantized, so the
+  pairs are kept (99 % reused). A4000D (pansample, 1 2 2 1): birds 0.43
+  against 1.1 ms scrolling, 0.27 against 0.76 ms still; still 42.6 / 42.3
+  against 40.2 / 39.4 fps; scrolling 24.3 / 22.1 against 24.0 / 24.1 (the
+  22.1 run had a big fight: effects 1.8 ms, server 9.5 ms).
+- **Held atlas uploads re-measured** after the white-box fix (now two real
+  uploads per new image: the temporary texture and the page copy): A4000D
+  (pansample, t30, 3 4 4 3) scrolling 23.8 / 23.6 held against 24.0 / 24.8
+  not held, still 41.9 / 43.7 against 40.8 / 41.1 -- a wash (not held:
+  fewer uploads, but ~550 idle waits a run). The default stays (held).
+- **The server's deletion pass left out while nothing is set to die**
+  (fps-night, ZOD_KILLFAST): ZServer::ProcessObjects asked every object
+  KillMe() each tick (~1900 on orig04, one pass over card RAM); a counter
+  of objects set to die (DoKillMe up, the destructor down) lets it skip the
+  pass while that is 0 -- on the tour it ran 14..17 of ~1460 ticks.
+  A4000D (pansample, t32, 5 6 6 5): server.loeschen 80 / 83 against 533 /
+  551 us; scrolling 24.3 / 24.3 against 24.3 / 23.2 fps, frame 41.0 / 41.0
+  against 41.1 / 42.9 ms.
+- **The after-effects drawn from a band around the view** (fps-night,
+  ZOD_AFTERBAND): the after-effects list walked whole for a handful in
+  view; now from the sort keys' band (32 above, 256 below the view) -- a
+  census of the after-effects first (ZOD_BANDCENSUS) gave the band's edges.
+  FS-UAE GLCheck: 0 failed binds; 21..34 thousand of 53..65 thousand
+  visited. A4000D (pansample, t34): obj_nach tour 1049 / 1069 against
+  1414 / 1517 us, still 716 / 785 / 696 / 717 against 860 / 830 / 700 /
+  822 us. The frame rates swap sides between the two still series (7887:
+  40.7 / 36.9 against 42.2 / 43.0; 8778: 44.4 / 40.6 against 40.3 / 39.9;
+  tour 24.5 / 24.8 against 24.9 / 24.5) -- the slow runs lost their time in
+  the map's library time, effects and zones, which the band does not
+  touch. Kept: the section it changes is lower in every pair.
+- **The buildings' sounds looked for among the buildings** (fps-night,
+  ZOD_SNDLIST): PlayBuildingSounds walked every object (~1900 with the
+  rocks) each frame for two flags; ols.building_olist (~50) gives the same
+  (ols.AddObject fills both; the order does not matter). FS-UAE SndCheck
+  (ZOD_SNDCHECK, both ways every frame): 0 of 11 108 frames differ, radar
+  heard in 3467, a factory in 259. A4000D (pansample, t37, z 0 0 z):
+  zeichnen.klaenge 105 / 126 against 572 / 592 us; 24.8 / 24.6 against
+  24.0 / 25.4 fps.
+- **Where the bots' 1.8 ms go** (census, t37, A4000D tour): socket 0.94
+  ms a frame (the loopback packets and their handlers), SmoothMove 0.60 ms
+  (43 objects a tick, two bots, ~2 ticks a frame: ~7 us an object -- the
+  two floor() calls go through ___fpu_round_to_integer on the 060), AI
+  0.03 ms (once a second).
+- **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
+  mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
+  samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
+  all samples, _Upload 2.5 %, most of them with no program caller on the
+  stack, i.e. inside mglSwitchDisplay. ~156 quads a frame at ~120 ns a
+  byte into card memory: ~24 us a quad at the present alone, on top of the
+  vertex calls. Fewer quads is the lever (per frame: objects 61, map
+  effects 35, HUD 31, zones 15).
 - **The user's white boxes** (videos 21:03..21:07, the fort's countdown,
   the snakes, any new animation frame: a white box of the image's size
   for 1-2 frames): held_take made a new image's temporary texture inside
@@ -695,8 +748,12 @@ Backlog (not started):
     channel 10). From the Prisma session: the cluster is "prisma.out.0", a
     normal camd GM output; on camd 37 the unit must be in
     ENV:sys/midi.prefs (PrismaMIDI PREFS writes it, camd 40 loads DEVS:Midi
-    itself); the driver takes the card on the first byte (~0.5..0.8 s), so
-    GM System On goes out a second ahead of the music.
+    itself). Update from the Prisma session (branch midi-m6): the driver
+    takes the card when a client links to "prisma.out.0" and shows a public
+    port "PrismaSynth" while the synth runs (~0.7 s after the link); before
+    the first notes wait for it (Forbid; FindPort("PrismaSynth"); Permit;
+    poll every tick, give up after ~3 s -- the card may be busy), then send
+    GM System On and play.
   - **MT-32** for the mt32-pi (the user's, in MT-32 mode; also a real MT-32
     on the PiStorm's serial port through camd 37's internal driver). Needs an
     MT-32 patch map, or the song's own MT-32 setup if the original XMI
@@ -709,6 +766,57 @@ Backlog (not started):
   drew over it, for as many frames as the swap chain has buffers; needs the
   map and objects clipped to the view (glScissor on RadeonGL). ~1.7 ms a
   frame, both views; a picture change that needs the user's eye.
+- **AGA: PAL HiRes Laced** (the user, 19.11 night). cego's README: "AGA is
+  NOT supported yet ... Everything the engine draws already goes through
+  one shared 256 colour palette, which is the hard part. What is missing is
+  an AGA screen and the copy path to it. The video player already supports
+  AGA." What it would take:
+  - A screen of 640x512 interlaced, 8 bitplanes (OpenScreenTags with
+    PAL_MONITOR_ID|HIRESLACE_KEY, depth 8), the shared palette loaded
+    with LoadRGB32. The engine lays out from the screen size (HUD at
+    w-648 / h-484), so 640x512 gives 32 more map rows; or 640x480 centred.
+  - The copy path: the software renderer already draws 8-bit chunky into
+    its compose surface and copies only the changed blocks (dirty blocks
+    with sums, 685dc7d). For AGA those blocks go through chunky-to-planar
+    (c2p) into the bitplanes instead of a byte copy to RTG VRAM. Two
+    buffers in chip RAM (2 x 320 KB) and ChangeScreenBuffer or a pan.
+  - The cost: AGA chip RAM takes ~7..14 MB/s from an 040/060 (16/32-bit
+    writes, the chipset's slots), so a FULL 640x512 frame is 320 KB =
+    ~25..45 ms -- full redraws (scrolling) stay slow; the still view
+    changes ~6 % of its bytes a frame (A4000T measure) -> ~2..3 ms. A
+    fast c2p (Kalms-style, 060: ~1 cycle a pixel) adds ~0.3 ms a still
+    frame. Scrolling would want a copper-free hardware scroll of a larger
+    planar map buffer -- a renderer of its own, out of scope at first.
+  - Laced flicker: the HUD's thin lines flicker at 25 Hz; an option for
+    640x256 non-laced (every second line) or a flicker fixer.
+  - The pointer: a hardware sprite (the system pointer) instead of the
+    drawn one, so it costs no c2p.
+  - Parts that change: port/amiga/sdl_screen.cpp (screen open, the copy
+    path, the palette), zod_schirm (mode choice), ZodLaunch (an "AGA"
+    entry). Not the engine, not the GL path.
+- **Vsync while scrolling under RadeonGL** (the user, 19.11 night).
+  How our RadeonGL GLQuake does it (gl_vidamiga.c, menu.c "Display sync"):
+  one chooser for the four ways a frame reaches the screen -- off (copied
+  at once, tears), vsync (copied behind the beam, slower: 29.9 against
+  32.2 fps at 720p), ScrollVPort (three buffers panned, fast; RadeonGL
+  0.15's cure B waits for the beam before the first frame into a left
+  third, tear-free by a blind eye test), ChangeScreenBuffer (slow); vsync
+  is the default since 1.5.1. Zod today: three buffers panned
+  (sdl_screen.cpp, mglEnableSync on, ZOD_GL_SYNC aus for benchmarks).
+  What Zod would need:
+  - the same "Display sync" choice in ZodLaunch (off / vsync / panned),
+    panned as the default on RadeonGL 0.15+, vsync on older libraries;
+  - MiniGL's PanPace fix (branch pan-sample, measured here: 68..702 held
+    pans -> 2) so the panned path paces at most one pan per refresh
+    without the early holds;
+  - even motion: the view scrolls by time (StartMouseScrolling and the
+    tour use the clock), so frames that alternate between two and three
+    refreshes show as judder at 22..26 fps. A frame cap at a divisor of
+    the refresh (30 fps at 60 Hz, 25 at 50 Hz) when the frame rate stays
+    above it, presented on the beam (the library's line model knows when),
+    would give even steps; below it, presenting every frame is better;
+  - a tearing eye test on the A4000D while scrolling (MiniGL waits for
+    one anyway before merging pan-sample).
 - **Atlas page clears**: 32 a minute while scrolling, ~20 ms each (the
   atlas holds fewer images than the scrolling view keeps needing).
 - **Map effect tiles** (ZMap::DoEffects): every effect tile of the whole

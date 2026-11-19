@@ -35,6 +35,28 @@ static int rocks_idle_on(void)
 	return rocks_idle;
 }
 
+extern unsigned long zod_killme_pending;   /* zobject.cpp */
+unsigned long zod_killpass_run = 0, zod_killpass_skip = 0;
+static int killfast = -1;
+
+static bool killfast_on()
+{
+	if(killfast < 0)
+	{
+#ifdef __amigaos__
+		char buf[16];
+		const char *e = zod_env("ZOD_KILLFAST", buf, sizeof(buf));
+#else
+		const char *e = getenv("ZOD_KILLFAST");
+#endif
+
+		killfast = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
+		                  (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
+	}
+
+	return killfast == 1;
+}
+
 bool zod_rocks_idle()
 {
 	return rocks_idle_on() != 0;
@@ -123,6 +145,8 @@ static inline void zod_ssec_end(int slot)
 	zod_ssec_mark = jetzt;
 }
 
+extern "C" void zod_bot_sections_report(long frames);   /* zbot.cpp */
+
 extern "C" void zod_server_sections_report(long frames)
 {
 	const unsigned long freq = zod_fineclock_freq();
@@ -154,6 +178,10 @@ extern "C" void zod_server_sections_report(long frames)
 	ZLOG("  server.SUMME = %ld us (muss `server` oben entsprechen)\n", (long)summe);
 	ZLOG("  server.Takte = %ld bei %ld Bildern\n",
 	     (long)zod_ssec_takte, (long)frames);
+	ZLOG("  server.deletion pass: run %lu times, left out %lu (ZOD_KILLFAST);"
+	     " objects set to die now %lu\n",
+	     zod_killpass_run, zod_killpass_skip, zod_killme_pending);
+	zod_bot_sections_report(frames);
 }
 
 
@@ -1352,6 +1380,13 @@ void ZServer::ProcessObjects()
 	vector<ZObject*>::iterator obj;
 
 	//kill all those that need to die
+	/* ZOD_KILLFAST: no object is set to die (zod_killme_pending, zobject.cpp)
+	 * -- then none can answer KillMe() true, and the pass over every object
+	 * is left out; otherwise it runs as before, in the same order. */
+	if(!killfast_on() || zod_killme_pending)
+	{
+		zod_killpass_run++;
+
 	for(obj=object_list.begin(); obj!=object_list.end();)
 	{
 		if((*obj)->KillMe(the_time))
@@ -1359,6 +1394,9 @@ void ZServer::ProcessObjects()
 		else
 			obj++;
 	}
+	}
+	else
+		zod_killpass_skip++;
 
 	zod_ssec_end(SSEC_LOESCHEN);
 

@@ -618,6 +618,7 @@ class QZOD_DNOBJECTSSHARED_EXPORT ZObject
 		//server only stuff
 		bool killme;
 		double killme_time;
+		bool kill_counted;   /* counted in zod_killme_pending (DoKillMe) */
 		waypoint last_wp;
 
 		//group stuff
