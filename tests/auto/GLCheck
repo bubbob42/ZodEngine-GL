@@ -1,0 +1,29 @@
+; GLCheck -- every glBindTexture followed by glGetError (ZOD_GLCHECK on): the
+; first failing binds logged with the line, the name and what it is to us.
+; GL on orig01 still and orig04 scrolling, 30 s each; "0 of them raised an
+; error" expected (the held uploads' batch fixed). FS-UAE + RadeonGL 0.16's
+; null card.
+; LIMIT 600
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_GLCHECK on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod still 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-still.done
+Type DEV:Test/zod-still.log >>DEV:Test/auto.log
+Type DEV:Test/zod-still-lib.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod tour 30 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-tour.done
+Type DEV:Test/zod-tour.log >>DEV:Test/auto.log
+Type DEV:Test/zod-tour-lib.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_GLCHECK
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

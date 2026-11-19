@@ -358,6 +358,65 @@ static int retired_n = 0;
 static struct old_name pool[POOL_MAX];
 static int pool_n = 0;
 
+/* ZOD_GLCHECK on: every glBindTexture followed by glGetError; the first
+ * failing ones are logged with the line that bound, the name and what the
+ * name is to us (a quad drawn after a failed bind has no texture: it comes
+ * out in its plain colour, white) */
+static int glcheck = -1;
+static unsigned long glcheck_binds = 0, glcheck_bad = 0;
+static int glcheck_told = 0;
+
+static int glcheck_on(void)
+{
+	if(glcheck < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_GLCHECK", buf, sizeof(buf));
+
+		glcheck = (e && (e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'))) ? 1 : 0;
+	}
+
+	return glcheck;
+}
+
+static const char *name_kind(GLuint name)
+{
+	int i;
+
+	if(name == 0) return "0";
+
+	for(i = 0; i < page_n; i++) if(pages[i].name == name) return "an atlas page";
+	for(i = 0; i < held_old_n; i++) if(held_old[i].name == name) return "a held one's temporary, retired";
+	for(i = 0; i < retired_n; i++) if(retired[i].name == name) return "retired";
+	for(i = 0; i < pool_n; i++) if(pool[i].name == name) return "pooled";
+
+	return "none of ours (an own texture or the map's)";
+}
+
+static void bind_tex(int where, GLuint name)
+{
+	glBindTexture(GL_TEXTURE_2D, name);
+
+	if(glcheck_on())
+	{
+		const GLenum e = glGetError();
+
+		glcheck_binds++;
+
+		if(e != GL_NO_ERROR)
+		{
+			glcheck_bad++;
+
+			if(glcheck_told < 16)
+			{
+				glcheck_told++;
+				ZLOG("GL check: the bind at zod_gl.cpp:%d of name %lu (%s) raised 0x%x, frame %lu\n",
+				     where, (unsigned long)name, name_kind(name), (unsigned)e, frame_no);
+			}
+		}
+	}
+}
+
 static void batch_end(void);
 
 static void delete_name(GLuint name)
@@ -473,7 +532,7 @@ static void batch_begin(GLuint name, int mode)
 
 	if(mode != 2 && name != cur_name)
 	{
-		glBindTexture(GL_TEXTURE_2D, name);
+		bind_tex(__LINE__, name);
 		cur_name = name;
 		st_binds++;
 		if(bind_is_own) st_bind_own++;
@@ -798,7 +857,7 @@ static int torus_texture(struct torus *tr, int W, int H)
 		unsigned char *zero = npot_ok ? 0 : (unsigned char *)calloc((size_t)W * H, 3);
 
 		glGenTextures(1, &tr->name);
-		glBindTexture(GL_TEXTURE_2D, tr->name);
+		bind_tex(__LINE__, tr->name);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -899,7 +958,7 @@ static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
 		if(strip)
 		{
 			batch_end();
-			glBindTexture(GL_TEXTURE_2D, tr->name);
+			bind_tex(__LINE__, tr->name);
 
 			for(my = 0; my < tr->mty; my++)
 			{
@@ -949,7 +1008,7 @@ static int torus_tile(struct zod_gl_tex *t, int mx, int my)
 	if(tr->slot_tile[slot] == tile && !tr->stale[slot]) return 0;
 
 	batch_end();
-	glBindTexture(GL_TEXTURE_2D, tr->name);
+	bind_tex(__LINE__, tr->name);
 
 	/* the tile is in its slot, only a part of it changed: that part alone
 	 * (a crater or a zone marker is a few hundred texels of the 16384),
@@ -1121,7 +1180,7 @@ static int atlas_page_new(void)
 
 	batch_end();
 	glGenTextures(1, &p->name);
-	glBindTexture(GL_TEXTURE_2D, p->name);
+	bind_tex(__LINE__, p->name);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -1501,8 +1560,17 @@ static int held_take(struct zod_gl_tex *t, int pg, int x, int y, int uw, int h,
 	if(!e->buf) return 0;
 	memcpy(e->buf, buf, (size_t)bytes);
 
+	/* THE BATCH FIRST. Without this a new image that turned up while a batch
+	 * was open (glBegin) made its temporary texture inside glBegin/glEnd:
+	 * RadeonGL rejects the bind (GL_INVALID_OPERATION), the parameters and
+	 * glTexImage2D, so the texture had no image and the image's first frame
+	 * came out as a white box (the user's fort countdown and snakes, 19.11;
+	 * "first GL error raised by glBindTexture" in every run since 3e5c455).
+	 * held_send ends the batch, so from the next frame on it was right. */
+	batch_end();
+
 	glGenTextures(1, &name);
-	glBindTexture(GL_TEXTURE_2D, name);
+	bind_tex(__LINE__, name);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -1547,7 +1615,7 @@ static void held_send(int i)
 	struct zod_gl_tex *t = e->t;
 
 	batch_end();
-	glBindTexture(GL_TEXTURE_2D, pages[e->pg].name);
+	bind_tex(__LINE__, pages[e->pg].name);
 	upload_note(pages[e->pg].name, UP_HELD);
 	{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, e->x, e->y, e->uw, e->h, GL_RGBA, e->type, e->buf); up_end(); }
 	cur_name = 0;
@@ -1625,7 +1693,7 @@ static void atlas_send(struct zod_gl_tex *t, int pg, int x, int y, int w, int h,
 	}
 
 	batch_end();
-	glBindTexture(GL_TEXTURE_2D, pages[pg].name);
+	bind_tex(__LINE__, pages[pg].name);
 	upload_note(pages[pg].name, up_kind);
 	up_kind = UP_ATLAS_IMG;
 	{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, uw, h, GL_RGBA, type, buf); up_end(); }
@@ -1740,7 +1808,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 					*name = pool[i].name;
 					pool[i] = pool[--pool_n];
 
-					glBindTexture(GL_TEXTURE_2D, *name);
+					bind_tex(__LINE__, *name);
 					upload_note(*name, UP_POOL);
 					{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->tw, t->th,
 					                GL_RGBA, type, buf); up_end(); }
@@ -1749,7 +1817,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 				else
 				{
 					glGenTextures(1, name);
-					glBindTexture(GL_TEXTURE_2D, *name);
+					bind_tex(__LINE__, *name);
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
@@ -1831,7 +1899,7 @@ static void tex_refresh(struct zod_gl_tex *t)
 
 			type = pack(t->s, ox0, oy0, ox1 - ox0, oy1 - oy0, buf, &pitch);
 
-			glBindTexture(GL_TEXTURE_2D, t->names[r * t->cols + c]);
+			bind_tex(__LINE__, t->names[r * t->cols + c]);
 			upload_note(t->names[r * t->cols + c], t->atlas ? UP_REFRESH_ATLAS : UP_REFRESH_OWN);
 			{
 				const unsigned long z0 = zod_fineclock_ticks();
@@ -2353,6 +2421,9 @@ void zod_gl_report(void)
 	ZLOG("GL: atlas: %d pages, %lu images packed (%lu px), started again %lu times;"
 	     " run-time slots %lu (%lu of them reused, %lu found with the same pixels: not sent)\n",
 	     page_n, st_atlas_in, st_atlas_px, st_atlas_resets, st_dyn_in, st_dyn_reused, st_dyn_same);
+	if(glcheck == 1)
+		ZLOG("GL check: %lu binds, %lu of them raised an error\n", glcheck_binds, glcheck_bad);
+
 	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu\n",
 	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused);
 	{
