@@ -1,0 +1,36 @@
+; HitCheck -- what each hit flash is drawn from (ZOD_HITCHECK on): a source
+; without a colour key would flash as a white rectangle, a cached silhouette
+; of another size as the wrong outline. GL and software, orig01 still and
+; orig04 scrolling, 60 s each. FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 1500
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv ZOD_HITCHECK on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hcgl 60 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hcgl.done
+Type DEV:Test/zod-hcgl.log >>DEV:Test/auto.log
+Echo "=== software, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hcsw 60 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hcsw.done
+Type DEV:Test/zod-hcsw.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hcglt 60 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hcglt.done
+Type DEV:Test/zod-hcglt.log >>DEV:Test/auto.log
+Echo "=== software, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hcswt 60 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hcswt.done
+Type DEV:Test/zod-hcswt.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_HITCHECK
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

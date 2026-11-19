@@ -1885,11 +1885,70 @@ static SDL_Surface *zsdl_make_white_silhouette(SDL_Surface *src)
 static long zod_hit_silhouettes = 0;
 static long zod_hit_blits = 0;
 
+/* ZOD_HITCHECK on: what each hit flash was drawn from. A source without a
+ * colour key flashes as a white RECTANGLE (software: its silhouette is all
+ * white; GL: GL_ADD turns its opaque background white). A cached silhouette
+ * whose size differs from its source (the source freed and another surface
+ * made at the same address -- rotozoom copies come and go) flashes the old
+ * outline. Counted, the first few logged with their sizes. */
+static int zod_hitcheck = -1;
+static long zod_hit_unkeyed = 0, zod_hit_stale = 0, zod_hit_checked = 0;
+static int zod_hit_told = 0;
+
+static bool zod_hitcheck_on()
+{
+	if(zod_hitcheck < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_HITCHECK", buf, sizeof(buf));
+
+		zod_hitcheck = (e && ((e[0] == 'o' && e[1] == 'n') || e[0] == 'e' || e[0] == '1')) ? 1 : 0;
+	}
+
+	return zod_hitcheck == 1;
+}
+
+static void zod_hitcheck_note(const SDL_Surface *src, const SDL_Surface *hit, const char *path)
+{
+	if(!src) return;
+
+	zod_hit_checked++;
+
+	if(!(src->flags & SDL_SRCCOLORKEY) && !(src->flags & SDL_SRCALPHA))
+	{
+		zod_hit_unkeyed++;
+
+		if(zod_hit_told < 12)
+		{
+			zod_hit_told++;
+			ZLOG("Hit check (%s): a %dx%d source of %d byte(s) a pixel without a colour key\n",
+			     path, src->w, src->h, src->format ? src->format->BytesPerPixel : 0);
+		}
+	}
+
+	if(hit && (hit->w != src->w || hit->h != src->h))
+	{
+		zod_hit_stale++;
+
+		if(zod_hit_told < 12)
+		{
+			zod_hit_told++;
+			ZLOG("Hit check (%s): the cached silhouette is %dx%d, its source %dx%d\n",
+			     path, hit->w, hit->h, src->w, src->h);
+		}
+	}
+}
+
 void zod_hit_report()
 {
 	if(zod_hit_blits)
 		ZLOG("Treffer-Aufblitzen: %ld Blits, %ld Silhouetten erzeugt\n",
 		     zod_hit_blits, zod_hit_silhouettes);
+
+	if(zod_hitcheck == 1)
+		ZLOG("Hit check: %ld flashes checked, %ld from a source without a colour key,"
+		     " %ld with a silhouette of another size\n",
+		     zod_hit_checked, zod_hit_unkeyed, zod_hit_stale);
 }
 
 SDL_Surface *ZSDL_Surface::GetHitSurface(SDL_Surface *src)
@@ -1922,6 +1981,8 @@ void ZSDL_Surface::BlitHitSurface(SDL_Rect *srcrect, SDL_Rect *dstrect, ZSDL_Sur
 	/* GL: the texture drawn white in place (GL_ADD), no silhouette copy */
 	if(use_opengl && !dst)
 	{
+		if(zod_hitcheck_on()) zod_hitcheck_note(sdl_surface, nullptr, "GL");
+
 		zod_gl_blit(sdl_surface, srcrect, dstrect ? dstrect->x : 0,
 		            dstrect ? dstrect->y : 0, alpha, 1);
 		return;
@@ -1952,6 +2013,8 @@ void ZSDL_Surface::BlitHitSurface(SDL_Rect *srcrect, SDL_Rect *dstrect, ZSDL_Sur
 	}
 
 	zod_hit_blits++;
+
+	if(zod_hitcheck_on()) zod_hitcheck_note(src, hit, "software");
 
 	if(dst)
 		dst->BlitOnToMe(srcrect, dstrect, hit);
