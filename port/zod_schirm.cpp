@@ -4,12 +4,15 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <SDL/SDL.h>
 
 #include "zod_pack.h"
 #include "zod_log.h"
 #include "zod_palette.h"
+#include "fineclock.h"
+#include "amiga_startup.h"   /* zod_env */
 
 #ifdef __amigaos__
 /* aus port/amiga/sdl_screen.cpp -- die Schirmpalette wirklich setzen
@@ -36,6 +39,15 @@ extern "C" void zod_dirty_force_full(void);
 
 /* aus port/amiga/sdl_screen.cpp -- Systemzeiger zeigen/verstecken. */
 extern "C" void zod_schirm_zeiger_amiga(int an);
+
+/* the shared palette's colours (sdl_video.cpp): a SHARED8 glyph's surface
+ * points at them -- and while a picture stands they are the picture's */
+extern "C" const SDL_Color *zod_sdl_shared_palette(void);
+
+/* one rectangle of the screen changed (sdl_video.cpp: the software path's
+ * block copy; sdl_screen.cpp: GL re-uploads only that part) */
+extern "C" void zod_dirty_mark(void *dstv, int x, int y, int w, int h);
+extern "C" void zod_sdl_flip_teil(int x, int y, int w, int h);
 #else
 static void zod_dirty_force_full(void) {}
 #endif
@@ -201,6 +213,22 @@ int naechster_platz(const SDL_Palette *p, int r, int g, int b)
 	}
 
 	return best;
+}
+
+/* A glyph's colour i. SHARED8 glyphs (font19, green_building: format 4
+ * of the archive) index the ENGINE's base palette. On the Amiga their
+ * surface points at the shared palette -- and while a full screen stands,
+ * that holds the PICTURE's colours (zod_schirm_zeigen sets them), so the
+ * surface's own colours say nothing about the glyph. The base palette does. */
+const SDL_Color &glyph_farbe(const SDL_Surface *g, int i)
+{
+#ifdef __amigaos__
+	const SDL_Color *basis = zod_palette_colors();
+
+	if(basis && g->format->palette && g->format->palette->colors == zod_sdl_shared_palette())
+		return basis[i];
+#endif
+	return g->format->palette->colors[i];
 }
 
 void glyphen_weg(void)
@@ -391,11 +419,12 @@ void zod_schirm_hell(int an)
 	schrift_hell = an ? 1 : 0;
 }
 
+static int zeigen_bild(SDL_Surface *bild, const char *name);
+
 int zod_schirm_zeigen(const char *name)
 {
 	SDL_Surface *bild;
 	SDL_Surface *schirm = SDL_GetVideoSurface();
-	int fx, fy, f, zx, zy, x, y;
 
 	if(!name || !*name || !schirm) return 0;
 
@@ -421,6 +450,17 @@ int zod_schirm_zeigen(const char *name)
 
 		return 0;
 	}
+
+	return zeigen_bild(bild, name);
+}
+
+/* bild (8 bit, its own palette) shown full screen: it becomes letzt_bild */
+static int zeigen_bild(SDL_Surface *bild, const char *name)
+{
+	SDL_Surface *schirm = SDL_GetVideoSurface();
+	int fx, fy, f, zx, zy, x, y;
+
+	if(!schirm) { SDL_FreeSurface(bild); return 0; }
 
 	/* Ganzzahliger Faktor, sonst entstehen beim Vergroessern ungleich
 	 * breite Spalten -- bei einem 320er Bild auf 640 faellt das sofort
@@ -593,7 +633,7 @@ void zod_schirm_text(int x, int y, const char *text)
 			{
 				for(i = 0; i < 256; i++)
 				{
-					const SDL_Color &c = g->format->palette->colors[i];
+					const SDL_Color &c = glyph_farbe(g, i);
 					int k, best = 0;
 					long best_d = -1;
 
@@ -618,7 +658,7 @@ void zod_schirm_text(int x, int y, const char *text)
 			{
 				for(i = 0; i < 256; i++)
 				{
-					const SDL_Color &c = g->format->palette->colors[i];
+					const SDL_Color &c = glyph_farbe(g, i);
 
 					umsetz[i] = (unsigned char)
 						naechster_platz(&bild_palette, c.r, c.g, c.b);
@@ -784,6 +824,380 @@ void zod_schirm_ende(void)
 		zod_dirty_force_full();
 		SDL_Flip(schirm);
 	}
+}
+
+
+/* ---- A black screen in the same frame as an original picture ------------
+ *
+ * Without zod_screens.zpk there is no loading picture, and the screen stood
+ * black with nothing on it. A 320x200 black "picture" with a palette of its
+ * own puts "LOADING" and the progress bar there in the same frame: slots
+ * 1..4 are the grey ramp every original full screen holds (the font's
+ * colours, see above), the rest the bar's. */
+enum
+{
+	SW_RECESS = 5, SW_LED_AN, SW_LED_HELL, SW_LED_MATT, SW_LED_AUS, SW_KASTEN, SW_FARBEN
+};
+
+int zod_schirm_zeigen_schwarz(void)
+{
+	static const SDL_Color farben[SW_FARBEN] =
+	{
+		{   0,   0,   0, 0 },
+		{ 120, 120, 143, 0 }, { 156, 166, 176, 0 }, { 255, 255, 255, 0 }, { 10, 10, 12, 0 },
+		{  24,  26,  30, 0 },                                    /* the bar's recess */
+		{  90, 230,  70, 0 }, { 170, 255, 150, 0 },              /* a lit LED, its highlight */
+		{  40, 150,  40, 0 }, {  20,  52,  22, 0 },              /* its foot, an unlit LED */
+		{  12,  20,  12, 0 }                                     /* the digits' box */
+	};
+	SDL_Color pal[256];
+	SDL_Surface *bild;
+
+	if(!SDL_GetVideoSurface()) return 0;
+
+	if(letzt_bild) { SDL_FreeSurface(letzt_bild); letzt_bild = 0; }
+
+	bild = SDL_CreateRGBSurface(SDL_SWSURFACE, 320, 200, 8, 0, 0, 0, 0);
+	if(!bild) return 0;
+
+	memset(pal, 0, sizeof(pal));
+	memcpy(pal, farben, sizeof(farben));
+	SDL_SetColors(bild, pal, 0, 256);
+	SDL_FillRect(bild, 0, 0);
+
+	return zeigen_bild(bild, "(black, the bar's own palette)");
+}
+
+/* ---- The load progress bar (docs/concept-load-progress.md) --------------
+ *
+ * Under the original "LOADING" (picture y 131): a bevelled plate in the
+ * picture's grey ramp with LED segments lit in green, the share in the
+ * forts' countdown digits (green_building) in a recessed box, the step in
+ * font19's small set, dimmed. Picture coordinates, the picture's palette.
+ * At most four updates a second; each redraws and outputs only the bar's
+ * region. Every step's time goes to the log. ZOD_LADEBALKEN aus: off. */
+enum
+{
+	LB_X = 70, LB_Y = 148, LB_B = 180, LB_H = 10,   /* the plate */
+	LB_SEG = 44,                                    /* LED segments */
+	LB_TEXT_Y = 162,                                /* the step */
+	LB_BEREICH_X = 40, LB_BEREICH_Y = 145,          /* what is redrawn */
+	LB_BEREICH_B = 260, LB_BEREICH_H = 32,
+	LB_LOG = 24
+};
+
+static int lade_an = -1;
+static int lade_aktiv = 0;
+static unsigned long lade_t0 = 0, lade_schritt_t0 = 0, lade_gezeichnet = 0;
+static char lade_name[40];
+static int lade_hat_gezeichnet = 0;
+static struct { char name[40]; unsigned long ms; } lade_log[LB_LOG];
+static int lade_nlog = 0;
+
+/* the palette slots the bar draws with, for this picture */
+static int lb_grau, lb_schatten, lb_recess, lb_an, lb_hl, lb_matt, lb_aus, lb_kasten;
+static unsigned char lb_ziffer_lut[256];
+static int lb_ziffer_lut_gut = 0;
+static SDL_Surface *lb_ziffer[10];
+
+/* ZOD_LADESHOT=<file>: the screen as BMP when the bar first passes 40 %
+ * (<file>.40.bmp) and at the end (<file>.100.bmp) -- for the FS-UAE test
+ * (tests/auto/LoadBar), the loading screen comes before any game frame */
+static char lade_shot[96];
+static int lade_shot_40 = 0;
+
+static void lade_shot_speichern(const char *teil)
+{
+	char name[128];
+	SDL_Surface *schirm = SDL_GetVideoSurface();
+
+	if(!lade_shot[0] || !schirm) return;
+
+	snprintf(name, sizeof(name), "%s.%s.bmp", lade_shot, teil);
+	SDL_SaveBMP(schirm, name);
+	ZLOG("[load] screen saved: %s\n", name);
+}
+
+static unsigned long lade_ms(void)
+{
+	const unsigned long f = zod_fineclock_freq();
+
+	return f >= 1000 ? zod_fineclock_ticks() / (f / 1000UL) : 0;
+}
+
+static int lade_switch(void)
+{
+	if(lade_an < 0)
+	{
+		const char *e = getenv("ZOD_LADEBALKEN");
+#ifdef __amigaos__
+		char buf[16];
+
+		e = zod_env("ZOD_LADEBALKEN", buf, sizeof(buf));
+#endif
+		lade_an = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
+		                  (e[0] == 'o' && e[1] == 'f')));
+	}
+
+	return lade_an;
+}
+
+int zod_lade_balken_an(void)
+{
+	return lade_switch();
+}
+
+/* one picture pixel in slot `platz` */
+static void lb_punkt(SDL_Surface *schirm, int x, int y, int platz)
+{
+	Uint32 farbe;
+
+	if(schirm->format->BitsPerPixel == 8)
+		farbe = (Uint32)platz;
+	else
+	{
+		const SDL_Color &c = bild_farben[platz & 255];
+
+		farbe = SDL_MapRGB(schirm->format, c.r, c.g, c.b);
+	}
+
+	punkt(schirm, letzt_x + x * letzt_f, letzt_y + y * letzt_f, farbe);
+}
+
+static void lb_flaeche(SDL_Surface *schirm, int x, int y, int b, int h, int platz)
+{
+	int i, j;
+
+	for(j = 0; j < h; j++)
+		for(i = 0; i < b; i++)
+			lb_punkt(schirm, x + i, y + j, platz);
+}
+
+/* a green_building digit at x, y (picture coordinates); its width */
+static int lb_ziffer_zeichnen(SDL_Surface *schirm, int x, int y, int d)
+{
+	SDL_Surface *g = (d >= 0 && d <= 9) ? lb_ziffer[d] : 0;
+	int gx, gy;
+
+	if(!g) return 4;
+
+	if(!lb_ziffer_lut_gut && g->format->palette)
+	{
+		int i;
+
+		for(i = 0; i < 256; i++)
+		{
+			const SDL_Color &c = glyph_farbe(g, i);
+
+			lb_ziffer_lut[i] = (unsigned char)naechster_platz(&bild_palette, c.r, c.g, c.b);
+		}
+
+		lb_ziffer_lut_gut = 1;
+	}
+
+	for(gy = 0; gy < g->h; gy++)
+	{
+		const Uint8 *q = (const Uint8 *)g->pixels + gy * g->pitch;
+
+		for(gx = 0; gx < g->w; gx++)
+			if(q[gx]) lb_punkt(schirm, x + gx, y + gy, lb_ziffer_lut_gut ? lb_ziffer_lut[q[gx]] : lb_an);
+	}
+
+	return g->w;
+}
+
+static void lade_zeichnen(int prozent)
+{
+	SDL_Surface *schirm = SDL_GetVideoSurface();
+	int i, lit, w, x;
+	char ziffern[8];
+
+	if(!schirm || !letzt_bild) return;
+
+	if(prozent < 0) prozent = 0;
+	if(prozent > 100) prozent = 100;
+
+	/* the picture back under the bar, the step and the digits */
+	zod_schirm_putzen(LB_BEREICH_X, LB_BEREICH_Y, LB_BEREICH_B, LB_BEREICH_H);
+
+	if(SDL_MUSTLOCK(schirm)) SDL_LockSurface(schirm);
+
+	/* the plate: a light edge top-left, the shadow bottom-right, the recess */
+	lb_flaeche(schirm, LB_X - 1, LB_Y - 1, LB_B + 2, LB_H + 2, lb_grau);
+	lb_flaeche(schirm, LB_X, LB_Y, LB_B + 1, LB_H + 1, lb_schatten);
+	lb_flaeche(schirm, LB_X, LB_Y, LB_B, LB_H, lb_recess);
+
+	/* the LEDs: 44 of 4 picture pixels (3 lit, 1 gap) from x+2 */
+	lit = LB_SEG * prozent / 100;
+
+	for(i = 0; i < LB_SEG; i++)
+	{
+		const int sx = LB_X + 2 + i * 4;
+
+		if(i < lit)
+		{
+			lb_flaeche(schirm, sx, LB_Y + 2, 3, 1, lb_hl);
+			lb_flaeche(schirm, sx, LB_Y + 3, 3, LB_H - 5, lb_an);
+			lb_flaeche(schirm, sx, LB_Y + LB_H - 2, 3, 1, lb_matt);
+		}
+		else
+			lb_flaeche(schirm, sx, LB_Y + 2, 3, LB_H - 4, lb_aus);
+	}
+
+	/* the share in the countdown's digits, in a recessed box right of it */
+	snprintf(ziffern, sizeof(ziffern), "%d", prozent);
+	w = 0;
+	for(i = 0; ziffern[i]; i++) w += (lb_ziffer[ziffern[i] - '0'] ? lb_ziffer[ziffern[i] - '0']->w : 4) + 1;
+
+	lb_flaeche(schirm, LB_X + LB_B + 5, LB_Y - 1, w + 4, LB_H + 2, lb_grau);
+	lb_flaeche(schirm, LB_X + LB_B + 6, LB_Y, w + 2, LB_H, lb_kasten);
+
+	x = LB_X + LB_B + 7;
+	for(i = 0; ziffern[i]; i++)
+		x += lb_ziffer_zeichnen(schirm, x, LB_Y + 2, ziffern[i] - '0') + 1;
+
+	if(SDL_MUSTLOCK(schirm)) SDL_UnlockSurface(schirm);
+
+	/* the step, dimmed, centred under the bar */
+	zod_schirm_schrift("klein", 1);
+	zod_schirm_hell(0);
+	zod_schirm_text((320 - zod_schirm_breite(lade_name)) / 2, LB_TEXT_Y, lade_name);
+	zod_schirm_hell(1);
+
+	zod_schirm_ausgeben_teil(LB_BEREICH_X, LB_BEREICH_Y, LB_BEREICH_B, LB_BEREICH_H);
+	lade_hat_gezeichnet = 1;
+
+	if(prozent >= 40 && !lade_shot_40)
+	{
+		lade_shot_40 = 1;
+		lade_shot_speichern("40");
+	}
+}
+
+void zod_lade_beginn(void)
+{
+	int d;
+
+	lade_aktiv = 0;
+
+	if(!lade_switch() || !letzt_bild) return;
+
+	/* the picture's slots for the bar: the grey ramp is slots 1..4 in every
+	 * original full screen (and in the black one); the rest the nearest */
+	lb_grau = 1; lb_schatten = 4;
+	lb_recess = naechster_platz(&bild_palette, 24, 26, 30);
+	lb_an = naechster_platz(&bild_palette, 90, 230, 70);
+	lb_hl = naechster_platz(&bild_palette, 170, 255, 150);
+	lb_matt = naechster_platz(&bild_palette, 40, 150, 40);
+	lb_aus = naechster_platz(&bild_palette, 20, 52, 22);
+	lb_kasten = naechster_platz(&bild_palette, 12, 20, 12);
+
+	lb_ziffer_lut_gut = 0;
+
+	for(d = 0; d < 10; d++)
+	{
+		char name[64];
+
+		snprintf(name, sizeof(name), "assets/fonts/green_building/char_%03d.png", '0' + d);
+		lb_ziffer[d] = zod_pack_load_quiet(name);
+	}
+
+	{
+		const char *e = getenv("ZOD_LADESHOT");
+#ifdef __amigaos__
+		char buf[96];
+
+		e = zod_env("ZOD_LADESHOT", buf, sizeof(buf));
+#endif
+		lade_shot[0] = 0;
+		if(e) { strncpy(lade_shot, e, sizeof(lade_shot) - 1); lade_shot[sizeof(lade_shot) - 1] = 0; }
+		lade_shot_40 = 0;
+	}
+
+	lade_t0 = lade_schritt_t0 = lade_ms();
+	lade_gezeichnet = 0;
+	lade_name[0] = 0;
+	lade_nlog = 0;
+	lade_hat_gezeichnet = 0;
+	lade_aktiv = 1;
+
+	strcpy(lade_name, "STARTING");
+	lade_zeichnen(0);
+}
+
+/* `done` of `total` steps finished; `name` is the one that just finished */
+void zod_lade_schritt(const char *name, int done, int total)
+{
+	unsigned long jetzt;
+	int neu;
+
+	if(!lade_aktiv || !name) return;
+
+	jetzt = lade_ms();
+
+	/* the step's time to the log, per name */
+	if(lade_nlog == 0 || strcmp(lade_log[lade_nlog - 1].name, name))
+	{
+		if(lade_nlog < LB_LOG)
+		{
+			strncpy(lade_log[lade_nlog].name, name, sizeof(lade_log[0].name) - 1);
+			lade_log[lade_nlog].name[sizeof(lade_log[0].name) - 1] = 0;
+			lade_log[lade_nlog].ms = 0;
+			lade_nlog++;
+		}
+	}
+
+	if(lade_nlog > 0) lade_log[lade_nlog - 1].ms += jetzt - lade_schritt_t0;
+	lade_schritt_t0 = jetzt;
+
+	neu = strcmp(lade_name, name) != 0;
+
+	/* at most four times a second, and always at the last step */
+	if(!neu && jetzt - lade_gezeichnet < 250 && done < total) return;
+	if(neu && jetzt - lade_gezeichnet < 100 && done < total) { strncpy(lade_name, name, sizeof(lade_name) - 1); return; }
+
+	strncpy(lade_name, name, sizeof(lade_name) - 1);
+	lade_name[sizeof(lade_name) - 1] = 0;
+	lade_gezeichnet = jetzt;
+
+	lade_zeichnen(total > 0 ? (int)(100L * done / total) : 0);
+}
+
+void zod_lade_ende(void)
+{
+	int i, d;
+
+	if(!lade_aktiv) return;
+
+	lade_aktiv = 0;
+
+	for(i = 0; i < lade_nlog; i++)
+		ZLOG("[load] %-22s %6lu ms\n", lade_log[i].name, lade_log[i].ms);
+
+	ZLOG("[load] all steps %lu ms\n", lade_ms() - lade_t0);
+
+	lade_shot_speichern("100");
+
+	for(d = 0; d < 10; d++)
+		if(lb_ziffer[d]) { SDL_FreeSurface(lb_ziffer[d]); lb_ziffer[d] = 0; }
+}
+
+/* the rectangle x, y, b, h of the picture to the screen, nothing else */
+void zod_schirm_ausgeben_teil(int x, int y, int b, int h)
+{
+	SDL_Surface *schirm = SDL_GetVideoSurface();
+	const int sx = letzt_x + x * letzt_f, sy = letzt_y + y * letzt_f;
+	const int sb = b * letzt_f, sh = h * letzt_f;
+
+	if(!schirm) return;
+
+#ifdef __amigaos__
+	zod_dirty_mark(schirm, sx, sy, sb, sh);
+	zod_sdl_flip_teil(sx, sy, sb, sh);
+	SDL_Flip(schirm);
+#else
+	SDL_UpdateRect(schirm, sx, sy, sb, sh);
+#endif
 }
 
 }

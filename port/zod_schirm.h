@@ -106,6 +106,25 @@ void zod_schirm_ausgeben(void);
 /* Gemeinsame Palette zurueck. Schadet nicht, wenn nichts gezeigt wurde. */
 void zod_schirm_ende(void);
 
+/* Only the rectangle x, y, b, h (picture coordinates) to the screen: the
+ * software path copies those blocks, GL re-uploads that part. */
+void zod_schirm_ausgeben_teil(int x, int y, int b, int h);
+
+/* Without an original loading picture: a black 320x200 one with a small
+ * palette of its own (the font's grey ramp in slots 1..4, the bar's
+ * greens), so "LOADING" and the bar stand there too. 1 = shown. */
+int zod_schirm_zeigen_schwarz(void);
+
+/* The load progress bar (docs/concept-load-progress.md) under "LOADING":
+ * beginn after the picture is up, schritt after each step (`done` of
+ * `total` finished, `name` the one that just finished: font19's
+ * characters only), ende before the game. At most four updates a second;
+ * every step's time to the log ("[load] ..."). ZOD_LADEBALKEN aus: off. */
+int zod_lade_balken_an(void);
+void zod_lade_beginn(void);
+void zod_lade_schritt(const char *name, int done, int total);
+void zod_lade_ende(void);
+
 /* Namen zusammensetzen: "load"/"win"/"lose", Planet (planet_type) und Team.
  * Teams jenseits rot/blau/gruen/gelb fallen auf rot zurueck -- das Original
  * kennt nur diese vier.
