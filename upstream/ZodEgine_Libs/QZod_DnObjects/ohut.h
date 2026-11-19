@@ -39,6 +39,12 @@ class QZOD_DNOBJECTSSHARED_EXPORT OHut : public ZObject
 		double next_hut_animal_time;
 		double next_max_hut_animal_time;
 		int max_hut_animals;
+
+		/* where the animals were at the end of the last Process (map
+		 * pixels): DoPreRender skips them all when this box, widened by a
+		 * sprite's half size, lies outside the view (ZOD_HUTCULL) */
+		int ani_x0, ani_y0, ani_x1, ani_y1;
+		bool ani_box;
 };
 
 #endif

@@ -1507,6 +1507,9 @@ static unsigned long zod_sortfix_read = 0, zod_sortfix_skip = 0;
 static unsigned long zod_sortfix_full = 0, zod_sortfix_bad = 0;
 static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
 
+extern "C" void zod_hut_report(unsigned long *culled, unsigned long *drawn,
+                               unsigned long *checked, unsigned long *bad);   /* ohut.cpp */
+
 /* the draw order's split views (ZOD_SORTSPLIT, see split_frame) */
 static unsigned long zod_split_rebuilds = 0, zod_split_dynkeys = 0, zod_split_frames = 0;
 static unsigned long zod_splitcheck_frames = 0, zod_splitcheck_rockties = 0;
@@ -1993,6 +1996,17 @@ extern "C" void zod_render_sections_report(long frames)
 		     (zod_ord_proc / zod_ord_frames) * 1000UL / f,
 		     (zod_ord_pre / zod_ord_frames) * 1000UL / f,
 		     sortfix_on() ? "ZOD_SORTFIX on" : "ZOD_SORTFIX aus");
+	}
+
+	{
+		unsigned long hc, hd, hn, hb;
+
+		zod_hut_report(&hc, &hd, &hn, &hb);
+
+		if(hc || hd)
+			ZLOG("huts: animals drawn %lu times, skipped %lu times off the view (ZOD_HUTCULL);"
+			     " ZOD_HUTCHECK: %lu skipped ones drawn anyway, %lu of them passed a view test\n",
+			     hd, hc, hn, hb);
 	}
 
 	if(zod_split_frames)
