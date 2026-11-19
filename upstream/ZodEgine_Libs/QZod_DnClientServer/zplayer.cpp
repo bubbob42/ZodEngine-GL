@@ -2020,6 +2020,8 @@ extern "C" void zod_render_sections_report(long frames)
 			     hd, hc, hn, hb);
 	}
 
+	COMMON::ifloor_report();
+
 	if(zod_snd_frames)
 		ZLOG("building sounds: ZOD_SNDCHECK %lu frames, %lu differ (%s);"
 		     " radar heard in %lu, a factory in %lu\n",

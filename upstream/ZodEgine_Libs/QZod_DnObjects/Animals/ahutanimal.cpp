@@ -345,8 +345,8 @@ int AHutAnimal::Process()
 		nx = x + (dx * time_dif) + xover;
 		ny = y + (dy * time_dif) + yover;
 
-		inx = (int)floor(nx);
-		iny = (int)floor(ny);
+		inx = ifloor(nx);
+		iny = ifloor(ny);
 
 		xover = nx - inx;
 		yover = ny - iny;

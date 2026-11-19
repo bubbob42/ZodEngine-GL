@@ -3718,8 +3718,8 @@ bool ZObject::ProcessMove(double time_dif, ZMap &tmap, int &stop_x, int &stop_y,
 	nx = x + (dx * time_dif) + xover;
 	ny = y + (dy * time_dif) + yover;
 
-	inx = (int)floor(nx);
-	iny = (int)floor(ny);
+	inx = ifloor(nx);
+	iny = ifloor(ny);
 
 	//minions never stoppable (for now)
 	if(IsMinion()) stoppable = false;
@@ -4021,8 +4021,11 @@ void ZObject::SmoothMove(double &the_time)
 	float &dy = loc.dy;
 
 	//move if it is moving
-	if(!isz(dx)) loc.x = last_loc.x + floor(dx * (the_time - last_loc_set_time));
-	if(!isz(dy)) loc.y = last_loc.y + floor(dy * (the_time - last_loc_set_time));
+	/* ifloor: libm's floor is slow on the 060 (common.h); the sum was
+	 * worked out in double and cut to int, the same as this for an
+	 * integral floor in int range */
+	if(!isz(dx)) loc.x = last_loc.x + ifloor(dx * (the_time - last_loc_set_time));
+	if(!isz(dy)) loc.y = last_loc.y + ifloor(dy * (the_time - last_loc_set_time));
 
 	//set centers
 	center_x = x + (width_pix >> 1);
