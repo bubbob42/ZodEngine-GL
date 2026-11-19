@@ -464,6 +464,14 @@ Tried and dropped (measured, not committed; patches in build/hw/):
   fps. The software HUD redraws small parts nearly every frame; as texels
   they cost ~240 ns each over the bus (16 M px a minute against 1.3 M).
   build/hw/hud-layer.patch.
+- **Client arrays** (one glDrawArrays a batch instead of the per-vertex
+  calls, RadeonGL only): picture right (FS-UAE checker 0), but N v v N
+  24.2 / 27.5 against 26.1 / 23.3 fps, the HUD 2 ms slower in both array
+  runs -- RadeonGL's array path converts each vertex's colour, immediate
+  mode keeps one current colour. build/hw/gl-arrays.patch.
+- **The limit of measuring**: the same binary varied by 13 % inside one
+  series (bot matches differ: fights, effects). Gains under ~5 % no longer
+  show reliably; a seeded, repeatable benchmark would be the next tool.
 
 What the profiles say (A4000D, GL, orig01, 40 s after a 15 s warm-up):
 program 80 % of the running samples, minigl.library 15 %, the OS 5 %. The
