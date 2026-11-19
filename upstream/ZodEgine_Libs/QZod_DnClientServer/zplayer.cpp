@@ -1510,6 +1510,9 @@ static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
 extern "C" void zod_hut_report(unsigned long *culled, unsigned long *drawn,
                                unsigned long *checked, unsigned long *bad);   /* ohut.cpp */
 extern unsigned long zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad;  /* qzod_map.cpp */
+#ifndef DISABLE_OPENGL
+extern unsigned long zod_trig_hits, zod_trig_calls;   /* zsdl_opengl.cpp, ZOD_TRIGCACHE */
+#endif
 
 /* the draw order's split views (ZOD_SORTSPLIT, see split_frame) */
 static unsigned long zod_split_rebuilds = 0, zod_split_dynkeys = 0, zod_split_frames = 0;
@@ -2009,6 +2012,12 @@ extern "C" void zod_render_sections_report(long frames)
 			     " ZOD_HUTCHECK: %lu skipped ones drawn anyway, %lu of them passed a view test\n",
 			     hd, hc, hn, hb);
 	}
+
+#ifndef DISABLE_OPENGL
+	if(zod_trig_hits || zod_trig_calls)
+		ZLOG("turned sprites: sin/cos %lu times worked out, %lu times kept (ZOD_TRIGCACHE)\n",
+		     zod_trig_calls, zod_trig_hits);
+#endif
 
 	if(zod_effpos_skipped || zod_effcheck_n)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
