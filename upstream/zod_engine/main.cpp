@@ -113,6 +113,8 @@ extern "C" void zod_frame_report(unsigned long *count, unsigned long *worst,
 extern "C" void zod_minimap_report(unsigned long *builds, unsigned long *ticks,
                                    unsigned long *worst, unsigned long *freq,
                                    unsigned long *statisch);
+extern "C" void zod_minipart_report(unsigned long *parts, unsigned long *checked,
+                                    unsigned long *px_bad, unsigned long *sig_bad);
 
 #ifdef __amigaos__
 /* port/amiga/sdl_video.cpp -- wie viel die Ausgabe wirklich kopiert */
@@ -899,6 +901,16 @@ void run_single_player()
                              (long)(((mt / mb) * 1000UL) / (mf / 1000UL)),
                              (long)((mw * 1000UL) / (mf / 1000UL)),
                              (long)ms);
+
+                    unsigned long pp, pc, ppx, psig;
+
+                    zod_minipart_report(&pp, &pc, &ppx, &psig);
+
+                    if(pp || pc)
+                        ZLOG("Minimap: object list split %ld times (ZOD_MINIPART);"
+                             " %ld builds checked the old way, %ld rows differ,"
+                             " %ld times only one signature changed\n",
+                             (long)pp, (long)pc, (long)ppx, (long)psig);
                 }
 
                 //Der Mittelwert taeuscht -- Ruckeln ist die SPITZE. Ein

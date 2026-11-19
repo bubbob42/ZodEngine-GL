@@ -1,0 +1,39 @@
+; MiniCheck -- the minimap built from the split object list (ZOD_MINIPART,
+; default on) under ZOD_MINICHECK on: every build is also made the old way;
+; the dots are compared row by row and the static part's signature changes
+; are compared -- both counts in "Minimap: ..." must be 0. ZOD_SORTCHECK
+; stays on ("fixed keys found changed" 0). GL on orig01 still, orig04 and
+; p08 scrolling (ZOD_TOUR), software on orig01 still.
+; FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 1200
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_SORTCHECK on
+SetEnv ZOD_MINICHECK on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod still 40 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-still.done
+Type DEV:Test/zod-still.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod tour 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-tour.done
+Type DEV:Test/zod-tour.log >>DEV:Test/auto.log
+Echo "=== GL, p08, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod big 20 -m Data/Maps/Custom/p08_bb_p08m01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-big.done
+Type DEV:Test/zod-big.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+Echo "=== software, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod stillsw 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-stillsw.done
+Type DEV:Test/zod-stillsw.log >>DEV:Test/auto.log
+UnSetEnv ZOD_SORTCHECK
+UnSetEnv ZOD_MINICHECK
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

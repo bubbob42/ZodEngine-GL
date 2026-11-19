@@ -1,5 +1,52 @@
 #include "zmini_map.h"
 #include "fineclock.h"
+#include "amiga_startup.h"   /* zod_env */
+#include <string.h>
+
+static int minipart = -1;
+
+static bool minipart_on()
+{
+	if(minipart < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_MINIPART", buf, sizeof(buf));
+
+		minipart = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
+		                  (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
+	}
+
+	return minipart == 1;
+}
+
+unsigned long zod_minimap_parts = 0;   /* how often the list was split up again */
+
+/* ZOD_MINICHECK on: builds compared with the old way -- the dots' pixels and
+ * whether the static part's signature changed (both must agree) */
+static int minicheck = -1;
+unsigned long zod_minicheck_builds = 0, zod_minicheck_px_bad = 0, zod_minicheck_sig_bad = 0;
+
+static bool minicheck_on()
+{
+	if(minicheck < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_MINICHECK", buf, sizeof(buf));
+
+		minicheck = (e && (e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'))) ? 1 : 0;
+	}
+
+	return minicheck == 1;
+}
+
+extern "C" void zod_minipart_report(unsigned long *parts, unsigned long *checked,
+                                    unsigned long *px_bad, unsigned long *sig_bad)
+{
+	*parts = zod_minimap_parts;
+	*checked = zod_minicheck_builds;
+	*px_bad = zod_minicheck_px_bad;
+	*sig_bad = zod_minicheck_sig_bad;
+}
 
 ZMiniMap::ZMiniMap()
 {
@@ -19,6 +66,61 @@ ZMiniMap::ZMiniMap()
 	static_ready = false;
 	static_sig = 0;
 	last_build = 0;
+
+	part_rock_sig = 0;
+	part_ok = false;
+	check_sig_old = 0;
+	check_sig_prev = 0;
+	check_sig_ok = false;
+}
+
+/* true: part_dyn, part_items and part_rock_sig describe *object_list as it
+ * is now (split again if the list changed since: compared pointer by
+ * pointer, without touching the objects) */
+bool ZMiniMap::Partition()
+{
+	const size_t n = object_list->size();
+
+	if(part_ok && part_objs.size() == n &&
+	   (n == 0 || memcmp(&part_objs[0], &(*object_list)[0], n * sizeof(ZObject*)) == 0))
+		return true;
+
+	part_objs.assign(object_list->begin(), object_list->end());
+	part_dyn.clear();
+	part_items.clear();
+	part_rock_sig = 0;
+
+	for(vector<ZObject*>::iterator i = object_list->begin(); i != object_list->end(); i++)
+	{
+		unsigned char ot, oid;
+
+		(*i)->GetObjectID(ot, oid);
+
+		if(ot != MAP_ITEM_OBJECT)
+		{
+			part_dyn.push_back(*i);
+			continue;
+		}
+
+		if(oid == ROCK_ITEM)
+		{
+			int x, y;
+
+			(*i)->GetCords(x, y);
+
+			part_rock_sig = part_rock_sig * 31u + (unsigned long)(*i)->GetOwner();
+			part_rock_sig = part_rock_sig * 31u + (unsigned long)x;
+			part_rock_sig = part_rock_sig * 31u + (unsigned long)y;
+			continue;
+		}
+
+		part_items.push_back(*i);
+	}
+
+	part_ok = true;
+	zod_minimap_parts++;
+
+	return true;
 }
 
 void ZMiniMap::Setup(ZMap *zmap_, vector<ZObject*> *object_list_)
@@ -128,7 +230,7 @@ extern "C" void zod_minimap_report(unsigned long *builds, unsigned long *ticks,
  * BILLIG: nur eingebettete Zugriffe (GetObjectID, GetCords, GetOwner), keine
  * Fliesskommarechnung, keine Fuellung. Gegenueber rund 3,5 us je Objekt im
  * vollen Aufbau kostet das je Objekt einige Befehle. */
-unsigned long ZMiniMap::StaticSignature()
+unsigned long ZMiniMap::StaticSignature(int weg)
 {
 	unsigned long sig = (show_terrain != 0.) ? 1u : 2u;
 
@@ -139,6 +241,35 @@ unsigned long ZMiniMap::StaticSignature()
 	    i != zmap->GetZoneInfoList().end(); i++)
 		sig = sig * 31u + (unsigned long)i->owner;
 
+	if(weg == 0) weg = minipart_on() ? 2 : 1;
+
+	if(weg == 2 && Partition())
+	{
+		/* the rocks as their checksum and count, the other map items one by
+		 * one (the same facts: rocks never move or change owner) */
+		sig = sig * 31u + part_rock_sig;
+		sig = sig * 31u + (unsigned long)(part_objs.size() - part_dyn.size() - part_items.size());
+
+		for(vector<ZObject*>::iterator i = part_items.begin(); i != part_items.end(); i++)
+		{
+			int x, y;
+
+			(*i)->GetCords(x, y);
+
+			sig = sig * 31u + (unsigned long)(*i)->GetOwner();
+			sig = sig * 31u + (unsigned long)x;
+			sig = sig * 31u + (unsigned long)y;
+		}
+
+		return sig;
+	}
+
+	return StaticSignatureAll(sig);
+}
+
+/* the map items' part of the signature the old way: every object visited */
+unsigned long ZMiniMap::StaticSignatureAll(unsigned long sig)
+{
 	for(vector<ZObject*>::iterator i = object_list->begin(); i != object_list->end(); i++)
 	{
 		unsigned char ot, oid;
@@ -258,6 +389,38 @@ void ZMiniMap::ZeichneObjekte(bool statisch, ZSDL_Surface *ziel)
 	}
 }
 
+/* ZeichneObjekte's body over a list already chosen (the same dots in the
+ * same order as ZeichneObjekte(false) over the whole list) */
+void ZMiniMap::ZeichneListe(const vector<ZObject*> &liste, ZSDL_Surface *ziel)
+{
+	for(vector<ZObject*>::const_iterator i = liste.begin(); i != liste.end(); i++)
+	{
+		SDL_Rect obj_rect;
+		int x, y, w, h;
+
+		(*i)->GetCords(x, y);
+		(*i)->GetDimensionsPixel(w, h);
+
+		obj_rect.x = x;
+		obj_rect.y = y;
+		obj_rect.w = w * 0.8;
+		obj_rect.h = h * 0.8;
+
+		obj_rect.x *= render_ratio;
+		obj_rect.y *= render_ratio;
+		obj_rect.w *= render_ratio;
+		obj_rect.h *= render_ratio;
+
+		if(obj_rect.w < 1) obj_rect.w = 1;
+		if(obj_rect.h < 1) obj_rect.h = 1;
+
+		int towner;
+		towner = (*i)->GetOwner();
+
+		ZSDL_FillRect(&obj_rect, team_color[towner].r, team_color[towner].g , team_color[towner].b, ziel);
+	}
+}
+
 void ZMiniMap::RebuildCache()
 {
 	if(!cache.GetBaseSurface()) return;
@@ -288,7 +451,57 @@ void ZMiniMap::RebuildCache()
 	}
 
 	static_cache.BlitSurface(&cache, 0, 0);
-	ZeichneObjekte(false, &cache);
+
+	if(minipart_on() && Partition())
+		ZeichneListe(part_dyn, &cache);
+	else
+		ZeichneObjekte(false, &cache);
+
+	if(minicheck_on() && minipart_on())
+	{
+		/* the dots the old way into a second surface, pixel for pixel */
+		SDL_Surface *cs = check_cache.GetBaseSurface();
+
+		if(cs && (cs->w != render_area.w || cs->h != render_area.h))
+		{
+			check_cache.Unload();
+			cs = nullptr;
+		}
+
+		if(!cs)
+		{
+			check_cache.LoadNewSurface(render_area.w, render_area.h, true);
+			cs = check_cache.GetBaseSurface();
+		}
+
+		SDL_Surface *ns = cache.GetBaseSurface();
+
+		if(cs && ns)
+		{
+			static_cache.BlitSurface(&check_cache, 0, 0);
+			ZeichneObjekte(false, &check_cache);
+
+			for(int y = 0; y < ns->h; y++)
+				if(memcmp((unsigned char *)ns->pixels + (size_t)y * ns->pitch,
+				          (unsigned char *)cs->pixels + (size_t)y * cs->pitch,
+				          (size_t)ns->w * ns->format->BytesPerPixel) != 0)
+					zod_minicheck_px_bad++;
+		}
+
+		/* the static part's signature: did both ways see a change, or none? */
+		{
+			const unsigned long s_old = StaticSignature(1);
+
+			if(check_sig_ok && ((s_old != check_sig_old) != (static_sig != check_sig_prev)))
+				zod_minicheck_sig_bad++;
+
+			check_sig_old = s_old;
+			check_sig_prev = static_sig;
+			check_sig_ok = true;
+		}
+
+		zod_minicheck_builds++;
+	}
 }
 
 void ZMiniMap::DoRender(SDL_Surface *dest, int x, int y)
