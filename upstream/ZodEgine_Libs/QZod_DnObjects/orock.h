@@ -87,6 +87,12 @@ class QZOD_DNOBJECTSSHARED_EXPORT ORock : public ZObject
 
 		int palette;
 		ZSDL_Surface *render_img[2][3];
+
+		/* render_img[0][0..2] as one 16x48 image (see ORock::DoRender):
+		 * the parts it was made of, to notice a change */
+		ZSDL_Surface *combo;
+		ZSDL_Surface *combo_of[3];
+		ZSDL_Surface *Combo();
 };
 
 #endif

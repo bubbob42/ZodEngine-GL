@@ -1,4 +1,9 @@
 #include "orock.h"
+#ifdef __amigaos__
+#include "amiga_startup.h"   /* zod_env: ZOD_ROCK_COMBO */
+#else
+#include <stdlib.h>
+#endif
 
 ZSDL_Surface ORock::rock_pal[MAX_PLANET_TYPES];
 
@@ -57,6 +62,9 @@ ORock::ORock(ZTime *ztime_, ZSettings *zsettings_, int palette_) : ZObject(ztime
 	//health = max_health;
 
 	palette = palette_;
+
+	combo = 0;
+	combo_of[0] = combo_of[1] = combo_of[2] = 0;
 
 	SetDefaultRender();
 }
@@ -308,6 +316,106 @@ void ORock::DoPreRender(ZMap &the_map, SDL_Surface *dest, int shift_x, int shift
 			}
 }
 		
+/* THE THREE PARTS AS ONE IMAGE. A rock draws render_img[0][0..2] at y, y+16
+ * and y+32: three 16x16 images that never overlap, each with its own
+ * visibility test and blit -- through GL three quads, three texture lookups
+ * and twelve vertices. Stacked into one 16x48 image (colour key where a part
+ * is missing or transparent) they give the same pixels with one test and one
+ * blit. The images are shared: one per combination of parts (a map has a
+ * few dozen), made when a rock first needs it, kept for the run. A rock
+ * whose parts change (a neighbour destroyed: EditRockRender) gets the image
+ * of its new combination. Parts that are not 16x16 keep the three blits.
+ * ZOD_ROCK_COMBO aus: three blits, as before. */
+struct rock_combo_entry
+{
+	ZSDL_Surface *part[3];
+	ZSDL_Surface *img;   /* 0: these parts cannot be stacked */
+};
+
+static vector<rock_combo_entry> rock_combos;
+static int rock_combo_on = -1;
+
+static bool rock_combo_wanted()
+{
+	if(rock_combo_on < 0)
+	{
+		rock_combo_on = 1;
+#ifdef __amigaos__
+		char v[16];
+		const char *e = zod_env("ZOD_ROCK_COMBO", v, sizeof(v));
+#else
+		const char *e = getenv("ZOD_ROCK_COMBO");
+#endif
+		if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+			rock_combo_on = 0;
+
+		ZLOG("Rocks: %s\n", rock_combo_on ? "one 16x48 image a rock (the three parts stacked)"
+		                                   : "three blits a rock (ZOD_ROCK_COMBO aus)");
+	}
+
+	return rock_combo_on != 0;
+}
+
+ZSDL_Surface *ORock::Combo()
+{
+	size_t i;
+	int j;
+	rock_combo_entry e;
+
+	if(combo_of[0] == render_img[0][0] && combo_of[1] == render_img[0][1] &&
+	   combo_of[2] == render_img[0][2] && combo)
+		return combo;
+
+	for(j = 0; j < 3; j++) combo_of[j] = render_img[0][j];
+	combo = 0;
+
+	for(i = 0; i < rock_combos.size(); i++)
+		if(rock_combos[i].part[0] == combo_of[0] && rock_combos[i].part[1] == combo_of[1] &&
+		   rock_combos[i].part[2] == combo_of[2])
+			return combo = rock_combos[i].img;
+
+	for(j = 0; j < 3; j++) e.part[j] = combo_of[j];
+	e.img = 0;
+
+	/* every part present is a 16x16 8-bit image */
+	{
+		bool ok = true;
+
+		for(j = 0; j < 3 && ok; j++)
+			if(combo_of[j] && combo_of[j]->GetBaseSurface())
+			{
+				SDL_Surface *ps = combo_of[j]->GetBaseSurface();
+
+				if(ps->w != 16 || ps->h != 16 || !ps->format || ps->format->BytesPerPixel != 1)
+					ok = false;
+			}
+
+		if(ok)
+		{
+			ZSDL_Surface *img = new ZSDL_Surface;
+
+			/* not opaque: index 0 is the colour key, and the surface
+			 * starts black -- all key until a part covers it */
+			img->LoadNewSurface(16, 48, false);
+
+			if(img->GetBaseSurface())
+			{
+				for(j = 0; j < 3; j++)
+					if(combo_of[j] && combo_of[j]->GetBaseSurface())
+						combo_of[j]->BlitSurface(0, 0, 16, 16, img, 0, 16 * j);
+
+				e.img = img;
+			}
+			else
+				delete img;
+		}
+	}
+
+	rock_combos.push_back(e);
+
+	return combo = e.img;
+}
+
 void ORock::DoRender(ZMap &the_map, SDL_Surface *dest, int shift_x, int shift_y)
 {
 	int &x = loc.x;
@@ -315,6 +423,24 @@ void ORock::DoRender(ZMap &the_map, SDL_Surface *dest, int shift_x, int shift_y)
 	SDL_Rect from_rect, to_rect;
 	int j;
 	int ys;
+
+	if(rock_combo_wanted())
+	{
+		ZSDL_Surface *img = Combo();
+
+		if(img)
+		{
+			if(the_map.GetBlitInfo(img->GetBaseSurface(), x, y, from_rect, to_rect))
+			{
+				to_rect.x += shift_x;
+				to_rect.y += shift_y;
+
+				img->BlitSurface(&from_rect, &to_rect);
+			}
+
+			return;
+		}
+	}
 
 	//do shadows as prerender
 	for(j=0,ys=0;j<3;j++,ys+=16)
