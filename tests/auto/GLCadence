@@ -1,0 +1,26 @@
+; GLCadence -- the present's cadence report (work between presents, time
+; inside the present, server and game per frame) on orig01 in GL, 30 s, and
+; frame 9000 dumped (r200view): late enough for craters and zone markers,
+; which now go up as the changed parts of map tiles alone.
+; FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 600
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv RadeonGLDump 9000
+SetEnv RadeonGLDumpFile DEV:Test/zod-cad-f9000.r2d
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod cad 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-cad.done
+Type DEV:Test/zod-cad.log >>DEV:Test/auto.log
+Type DEV:Test/zod-cad-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

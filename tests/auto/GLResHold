@@ -1,0 +1,51 @@
+; GLResHold -- the resident map texture and the held atlas uploads.
+; 1) orig01 still view in GL, 30 s, frame 300 dumped (r200view) -- the map
+;    is one texture here -- and the same 30 s in software, frame 300 saved
+;    (ZOD_SHOT), as the picture to compare with;
+; 2) orig04 tour in GL, 60 s: uploads by origin, the library's idle waits
+;    (with uploads held there should be none from the atlas);
+; 3) p08's 4096x4096 map, larger than MAP_RESIDENT_MAX: still the ring of
+;    tiles, frame 400 dumped. FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 1800
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+SetEnv RadeonGLDump 300
+SetEnv RadeonGLDumpFile DEV:Test/zod-rh-f300.r2d
+Run >NIL: Execute DEV:Test/RunZod rh 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rh.done
+Type DEV:Test/zod-rh.log >>DEV:Test/auto.log
+Type DEV:Test/zod-rh-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+Echo "=== software, orig01, still ===" >>DEV:Test/auto.log
+SetEnv ZOD_SHOT DEV:Test/zod-rhsw-f300.bmp:300
+Run >NIL: Execute DEV:Test/RunZod rhsw 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rhsw.done
+Type DEV:Test/zod-rhsw.log >>DEV:Test/auto.log
+UnSetEnv ZOD_SHOT
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Run >NIL: Execute DEV:Test/RunZod rhtour 60 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rhtour.done
+Type DEV:Test/zod-rhtour.log >>DEV:Test/auto.log
+Type DEV:Test/zod-rhtour-lib.log >>DEV:Test/auto.log
+Echo "=== GL, p08 (map larger than the resident limit) ===" >>DEV:Test/auto.log
+SetEnv RadeonGLDump 400
+SetEnv RadeonGLDumpFile DEV:Test/zod-rhbig-f400.r2d
+Run >NIL: Execute DEV:Test/RunZod rhbig 20 -m Data/Maps/Custom/p08_bb_p08m01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rhbig.done
+Type DEV:Test/zod-rhbig.log >>DEV:Test/auto.log
+Type DEV:Test/zod-rhbig-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLDump
+UnSetEnv RadeonGLDumpFile
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

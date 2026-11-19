@@ -1,0 +1,29 @@
+; GLHazards -- where the GL path's uploads land in a texture already drawn
+; from in the same frame (RadeonGL then flushes the frame so far and waits
+; for the card: an "idle wait"). 60 s of the still view on orig01 and 60 s of
+; the tour on orig04; the game's report counts the uploads by origin, the
+; library's log the idle waits. FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 900
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hzstill 60 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hzstill.done
+Type DEV:Test/zod-hzstill.log >>DEV:Test/auto.log
+Type DEV:Test/zod-hzstill-lib.log >>DEV:Test/auto.log
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Run >NIL: Execute DEV:Test/RunZod hztour 60 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hztour.done
+Type DEV:Test/zod-hztour.log >>DEV:Test/auto.log
+Type DEV:Test/zod-hztour-lib.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_GL_SYNC
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
