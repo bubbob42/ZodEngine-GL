@@ -1813,8 +1813,11 @@ extern "C" void zod_worst_report(void)
 #ifndef DISABLE_OPENGL
 extern int zod_gl_active;
 unsigned long zod_gl_draw_count(void);
+unsigned long zod_gl_lib_ticks(void);
 #endif
 static unsigned long zod_rsec_draws[RSEC_MAX], zod_rsec_draw_mark = 0;
+/* GL: the library's time in each section (glEnd, uploads: zod_gl_lib_ticks) */
+static unsigned long zod_rsec_lib[RSEC_MAX], zod_rsec_lib_mark = 0;
 
 static inline void zod_rsec_begin(void)
 {
@@ -1824,7 +1827,11 @@ static inline void zod_rsec_begin(void)
 
 	zod_rsec_mark = zod_fineclock_ticks();
 #ifndef DISABLE_OPENGL
-	if(zod_gl_active) zod_rsec_draw_mark = zod_gl_draw_count();
+	if(zod_gl_active)
+	{
+		zod_rsec_draw_mark = zod_gl_draw_count();
+		zod_rsec_lib_mark = zod_gl_lib_ticks();
+	}
 #endif
 }
 
@@ -1844,6 +1851,11 @@ static inline void zod_rsec_end(int slot)
 
 		zod_rsec_draws[slot] += d - zod_rsec_draw_mark;
 		zod_rsec_draw_mark = d;
+
+		const unsigned long l = zod_gl_lib_ticks();
+
+		zod_rsec_lib[slot] += l - zod_rsec_lib_mark;
+		zod_rsec_lib_mark = l;
 	}
 #endif
 }
@@ -1868,9 +1880,11 @@ extern "C" void zod_render_sections_report(long frames)
 
 		summe += us;
 
-		if(zod_rsec_draws[i])
-			ZLOG("  zeichnen.%s = %ld us, %lu quads/fills a frame x10\n", zod_rsec_name[i], (long)us,
-			     zod_rsec_draws[i] * 10UL / (unsigned long)frames);
+		if(zod_rsec_draws[i] || zod_rsec_lib[i])
+			ZLOG("  zeichnen.%s = %ld us, %lu quads/fills a frame x10, library %lu us\n",
+			     zod_rsec_name[i], (long)us,
+			     zod_rsec_draws[i] * 10UL / (unsigned long)frames,
+			     (zod_rsec_lib[i] / frames) * 1000UL / (freq / 1000UL));
 		else
 			ZLOG("  zeichnen.%s = %ld us\n", zod_rsec_name[i], (long)us);
 	}

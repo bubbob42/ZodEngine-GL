@@ -22,6 +22,11 @@
 extern "C" { unsigned long zod_gl_upload_ticks = 0; }
 static unsigned long up_t0 = 0;
 
+/* the same plus glEnd, cumulative (zod_gl_lib_ticks): the drawing sections
+ * book the library's time to themselves -- a PC profile cannot, its stack
+ * window rarely reaches back from the library into the program */
+static unsigned long st_lib_ticks = 0;
+
 static void up_begin(void)
 {
 	up_t0 = zod_fineclock_ticks();
@@ -41,6 +46,7 @@ static void up_end(void)
 	const unsigned long d = zod_fineclock_ticks() - up_t0;
 
 	zod_gl_upload_ticks += d;
+	st_lib_ticks += d;
 	up_end_kind(d);
 }
 
@@ -433,7 +439,10 @@ static void batch_end(void)
 {
 	if(in_batch)
 	{
+		const unsigned long t0 = zod_fineclock_ticks();
+
 		glEnd();
+		st_lib_ticks += zod_fineclock_ticks() - t0;
 		in_batch = 0;
 	}
 }
@@ -2146,6 +2155,11 @@ void zod_gl_flush(void)
 unsigned long zod_gl_draw_count(void)
 {
 	return st_quads + st_fills;
+}
+
+unsigned long zod_gl_lib_ticks(void)
+{
+	return st_lib_ticks;
 }
 
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b)
