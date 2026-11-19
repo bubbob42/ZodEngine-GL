@@ -43,8 +43,12 @@ static bool killfast_on()
 {
 	if(killfast < 0)
 	{
+#ifdef __amigaos__
 		char buf[16];
 		const char *e = zod_env("ZOD_KILLFAST", buf, sizeof(buf));
+#else
+		const char *e = getenv("ZOD_KILLFAST");
+#endif
 
 		killfast = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
 		                  (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
