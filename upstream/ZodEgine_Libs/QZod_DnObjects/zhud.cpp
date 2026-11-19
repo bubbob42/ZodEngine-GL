@@ -1,4 +1,83 @@
 #include "zhud.h"
+#include "fineclock.h"
+#include "zod_log.h"
+
+/* What the HUD's parts cost (the drawing report's zeichnen.hud split up):
+ * the E clock and, under GL, the library's time (glEnd, uploads) at each
+ * step of ZHud::DoRender, only while the frame times are measured. */
+bool zod_time_measuring();
+#ifndef DISABLE_OPENGL
+extern int zod_gl_active;
+unsigned long zod_gl_lib_ticks(void);
+#endif
+
+enum { HS_MAIN, HS_ICON, HS_BACKDROP, HS_MINIMAP, HS_BUTTON, HS_TIME,
+       HS_HEALTH, HS_CHAT, HS_AMOUNT, HS_MAX };
+
+static const char *zod_hudsec_name[HS_MAX] =
+{
+	"main", "icon", "backdrop", "minimap", "button", "time",
+	"health", "chat", "amount"
+};
+
+static unsigned long zod_hudsec[HS_MAX], zod_hudsec_lib[HS_MAX];
+static unsigned long zod_hudsec_calls[HS_MAX];
+static unsigned long zod_hudsec_mark = 0, zod_hudsec_lib_mark = 0;
+static bool zod_hudsec_on = false;
+
+static unsigned long zod_hudsec_libnow(void)
+{
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active) return zod_gl_lib_ticks();
+#endif
+	return 0;
+}
+
+static void zod_hudsec_begin(void)
+{
+	zod_hudsec_on = zod_time_measuring();
+	if(!zod_hudsec_on) return;
+
+	zod_hudsec_mark = zod_fineclock_ticks();
+	zod_hudsec_lib_mark = zod_hudsec_libnow();
+}
+
+static void zod_hudsec_end(int part)
+{
+	if(!zod_hudsec_on) return;
+
+	const unsigned long t = zod_fineclock_ticks();
+	const unsigned long l = zod_hudsec_libnow();
+
+	zod_hudsec[part] += t - zod_hudsec_mark;
+	zod_hudsec_lib[part] += l - zod_hudsec_lib_mark;
+	zod_hudsec_mark = t;
+	zod_hudsec_lib_mark = l;
+}
+
+/* a step that ran (main, icon, button only run when their mark is set) */
+static void zod_hudsec_ran(int part)
+{
+	if(zod_hudsec_on) zod_hudsec_calls[part]++;
+}
+
+void zod_hudsec_report(long frames)
+{
+	const unsigned long freq = zod_fineclock_freq();
+
+	if(freq < 1000 || frames <= 0) return;
+
+	for(int i = 0; i < HS_MAX; i++)
+	{
+		if(!zod_hudsec[i]) continue;
+
+		ZLOG("    zeichnen.hud.%s = %lu us, library %lu us, ran in %lu of %ld frames\n",
+		     zod_hudsec_name[i],
+		     (zod_hudsec[i] / (unsigned long)frames) * 1000UL / (freq / 1000UL),
+		     (zod_hudsec_lib[i] / (unsigned long)frames) * 1000UL / (freq / 1000UL),
+		     zod_hudsec_calls[i], frames);
+	}
+}
 
 
 HubButton::HubButton()
@@ -619,9 +698,13 @@ void ZHud::DoRender(SDL_Surface *dest, int screen_w, int screen_h)
 	//off_y = dest->h - 484;
 	off_x = screen_w - 648;
 	off_y = screen_h - 484;
-	
+
+	zod_hudsec_begin();
+
 	if(rerender_main)
 	{
+		zod_hudsec_ran(HS_MAIN);
+
 		//render bottom
 		{
 			//if(bottom_filler.GetBaseSurface())
@@ -715,8 +798,11 @@ void ZHud::DoRender(SDL_Surface *dest, int screen_w, int screen_h)
 		rerender_button = -1;
 	}
 
+	zod_hudsec_end(HS_MAIN);
+
 	if(rerender_icon)
 	{
+		zod_hudsec_ran(HS_ICON);
 		rerender_icon = false;
 
 		//clear the render_icon spot always before the icon
@@ -822,21 +908,30 @@ void ZHud::DoRender(SDL_Surface *dest, int screen_w, int screen_h)
 		}
 	}
 
+	zod_hudsec_end(HS_ICON);
+
 	RenderBackdrop(dest, off_x, off_y);
+	zod_hudsec_end(HS_BACKDROP);
 
 	zminimap.DoRender(dest, off_x + 555, off_y + 299);
+	zod_hudsec_end(HS_MINIMAP);
 
 	if(rerender_button != -1)
 	{
+		zod_hudsec_ran(HS_BUTTON);
 		button[rerender_button].Render(dest, off_x, off_y);
 		rerender_button = -1;
 	}
+	zod_hudsec_end(HS_BUTTON);
 
 	RenderTime(dest, off_x, off_y);
+	zod_hudsec_end(HS_TIME);
 
 	RenderHealth(dest, off_x, off_y);
+	zod_hudsec_end(HS_HEALTH);
 
 	RenderChatMessage(dest, off_x, off_y);
+	zod_hudsec_end(HS_CHAT);
 
 	/* Auch ausserhalb von rerender_main aufrufen. Vorher stand der einzige
 	 * Aufruf INNERHALB von if(rerender_main) (zhud.cpp weiter oben) --
@@ -845,6 +940,7 @@ void ZHud::DoRender(SDL_Surface *dest, int screen_w, int screen_h)
 	 * anstand. Die Einheitenzahl im HUD frischte deshalb verspaetet auf.
 	 * Die Funktion steigt bei nicht gesetzter Marke sofort aus. */
 	RenderUnitAmountBar(dest, off_x, off_y);
+	zod_hudsec_end(HS_AMOUNT);
 }
 
 void ZHud::RenderChatMessage(SDL_Surface *dest, int off_x, int off_y)

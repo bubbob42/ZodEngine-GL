@@ -4,6 +4,7 @@
 #include <zod_pack.h>
 #include <zod_census.h>
 #include <stdio.h>
+#include <string.h>
 #ifdef ZOD_ALLOC_PROBE
 extern "C" void zod_alloc_report(const char *tag);
 #endif
@@ -1497,6 +1498,51 @@ static void zod_dirty_force_full(void) { }
 unsigned long zod_rsec_band_alle = 0, zod_rsec_band_besucht = 0;
 /* the band over prender_olist (RenderObjects): objects in the lists, visited */
 unsigned long zod_band_obj_alle = 0, zod_band_obj_besucht = 0;
+
+/* the draw order's fixed keys (sort_draw_order, ZOD_SORTFIX): keys read,
+ * keys not read because they cannot change, lists read in full again,
+ * and with ZOD_SORTCHECK on the fixed keys found changed (must stay 0) */
+static unsigned long zod_sortfix_read = 0, zod_sortfix_skip = 0;
+static unsigned long zod_sortfix_full = 0, zod_sortfix_bad = 0;
+static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
+
+/* E clock in the four sorts, the Process pass and the pre-render's rest
+ * loop, while the frame times are measured: what the fixed keys buy, by
+ * the clock instead of the frame rate (a 60 s bot match varies by ~5 %) */
+static unsigned long zod_ord_sort = 0, zod_ord_proc = 0, zod_ord_pre = 0, zod_ord_frames = 0;
+
+static int zod_switch(const char *name, int dflt)
+{
+	char buf[16];
+	const char *e = zod_env(name, buf, sizeof(buf));
+
+	if(!e) return dflt;
+	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
+	if(e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
+
+	return dflt;
+}
+
+static int sortfix = -1, sortcheck = -1;
+
+static int sortfix_on(void)
+{
+	if(sortfix < 0)
+	{
+		sortfix = zod_switch("ZOD_SORTFIX", 1);
+		ZLOG("Draw order: %s\n", sortfix ? "rocks' keys read once (they never change)"
+		                                   : "every key read each frame (ZOD_SORTFIX aus)");
+	}
+
+	return sortfix;
+}
+
+static int sortcheck_on(void)
+{
+	if(sortcheck < 0) sortcheck = zod_switch("ZOD_SORTCHECK", 0);
+
+	return sortcheck;
+}
 unsigned long zod_steine_gebacken = 0;
 /* orock.cpp -- wie viele Schattenkacheln wirklich gestempelt wurden. */
 extern unsigned long zod_steine_kacheln;
@@ -1809,6 +1855,8 @@ extern "C" void zod_worst_report(void)
 	}
 }
 
+void zod_hudsec_report(long frames);
+
 /* GL: quads and fills each section drew (zod_gl_draw_count), beside its time */
 #ifndef DISABLE_OPENGL
 extern int zod_gl_active;
@@ -1887,6 +1935,9 @@ extern "C" void zod_render_sections_report(long frames)
 			     (zod_rsec_lib[i] / frames) * 1000UL / (freq / 1000UL));
 		else
 			ZLOG("  zeichnen.%s = %ld us\n", zod_rsec_name[i], (long)us);
+
+		/* the HUD's parts right under it (zhud.cpp) */
+		if(i == RSEC_HUD) zod_hudsec_report(frames);
 	}
 
 	/* Die Summe gehoert ins Protokoll, nicht in meinen Kopf: Weicht sie vom
@@ -1925,6 +1976,25 @@ extern "C" void zod_render_sections_report(long frames)
 		ZLOG("draw.object band = %lu of %lu visited (%lu %%)\n",
 		     zod_band_obj_besucht, zod_band_obj_alle,
 		     100UL * zod_band_obj_besucht / zod_band_obj_alle);
+
+	if(zod_ord_frames && zod_fineclock_freq() >= 1000)
+	{
+		const unsigned long f = zod_fineclock_freq() / 1000UL;
+
+		ZLOG("draw.order us a frame: sorts %lu, Process pass %lu, pre-render rest %lu (%s)\n",
+		     (zod_ord_sort / zod_ord_frames) * 1000UL / f,
+		     (zod_ord_proc / zod_ord_frames) * 1000UL / f,
+		     (zod_ord_pre / zod_ord_frames) * 1000UL / f,
+		     sortfix_on() ? "ZOD_SORTFIX on" : "ZOD_SORTFIX aus");
+	}
+
+	if(zod_sortfix_read || zod_sortfix_skip)
+		ZLOG("draw.order keys = %lu read, %lu fixed not read, %lu lists read in full;"
+		     " Process skipped for %lu rocks, pre-render asked %lu rocks fewer;"
+		     " fixed keys found changed %lu%s\n",
+		     zod_sortfix_read, zod_sortfix_skip, zod_sortfix_full,
+		     zod_sortfix_procskip, zod_sortfix_preskip, zod_sortfix_bad,
+		     sortcheck_on() ? "" : " (ZOD_SORTCHECK off: not looked)");
 
 	/* Was die Aufteilung selbst kostet. Auf der V1200 braucht ein Blick auf
 	 * die E-Clock **9882 ns** -- das 27-fache des Emulators und das
@@ -2338,6 +2408,139 @@ static int sortkeys_on(void)
 	return sortkeys;
 }
 
+/* The draw order with fixed keys (ZOD_SORTFIX, default on).
+ *
+ * A rock's key, loc.y + height_pix, never changes: it does not move, and
+ * height_pix is set once in its constructor (orock.cpp). Rocks are most of
+ * every list sorted here (1412 of ~1900 objects on orig04), and reading a
+ * key touches the object -- on the A4000D a cache miss into card RAM each.
+ * The profile had sort_draw_order at 7 % of the scrolling frame.
+ *
+ * So each list keeps its keys and a fixed flag per entry from the last
+ * frame, in the order the last sort left them. While the list holds the
+ * same objects in that order (compared pointer by pointer, without
+ * touching the objects), only the keys of the others are read again. Any
+ * other change -- an object added, removed, the list rebuilt -- reads all.
+ * The sort is the same stable insertion sort on the same keys, so the
+ * order is exactly the one of reading every key. ZOD_SORTCHECK on reads
+ * the fixed keys anyway and counts the ones that changed. */
+struct sort_cache
+{
+	const vector<ZObject*> *list;
+	vector<ZObject*> objs;
+	vector<int> keys;
+	vector<unsigned char> fixed;
+};
+
+enum { SORT_CACHES = 4 };
+static struct sort_cache sort_caches[SORT_CACHES];
+
+static struct sort_cache *sort_cache_for(const vector<ZObject*> *v, bool make)
+{
+	for(int i = 0; i < SORT_CACHES; i++)
+		if(sort_caches[i].list == v) return &sort_caches[i];
+
+	if(make)
+		for(int i = 0; i < SORT_CACHES; i++)
+			if(!sort_caches[i].list) { sort_caches[i].list = v; return &sort_caches[i]; }
+
+	return 0;
+}
+
+static bool sort_key_fixed(ZObject *o)
+{
+	unsigned char ot, oid;
+
+	o->GetObjectID(ot, oid);
+
+	return ot == MAP_ITEM_OBJECT && oid == ROCK_ITEM;
+}
+
+static bool sort_cache_same(const struct sort_cache *c, const vector<ZObject*> &v)
+{
+	const size_t n = v.size();
+
+	return c->objs.size() == n && (n == 0 || memcmp(&c->objs[0], &v[0], n * sizeof(ZObject*)) == 0);
+}
+
+static bool sort_fixed_sort(vector<ZObject*> &v, vector<int> *keep)
+{
+	struct sort_cache *c = sort_cache_for(&v, true);
+	const size_t n = v.size();
+
+	if(!c) return false;
+
+	if(!sort_cache_same(c, v))
+	{
+		c->keys.resize(n);
+		c->fixed.resize(n);
+
+		for(size_t i = 0; i < n; i++)
+		{
+			c->keys[i] = v[i]->SortKey();
+			c->fixed[i] = sort_key_fixed(v[i]) ? 1 : 0;
+		}
+
+		zod_sortfix_full++;
+		zod_sortfix_read += n;
+	}
+	else
+	{
+		for(size_t i = 0; i < n; i++)
+			if(!c->fixed[i])
+			{
+				c->keys[i] = v[i]->SortKey();
+				zod_sortfix_read++;
+			}
+			else
+			{
+				zod_sortfix_skip++;
+
+				if(sortcheck_on() && c->keys[i] != v[i]->SortKey()) zod_sortfix_bad++;
+			}
+	}
+
+	for(size_t i = 1; i < n; i++)
+	{
+		ZObject *obj = v[i];
+		const int k = c->keys[i];
+		const unsigned char f = c->fixed[i];
+		size_t j = i;
+
+		while(j > 0 && k < c->keys[j - 1])
+		{
+			v[j] = v[j - 1];
+			c->keys[j] = c->keys[j - 1];
+			c->fixed[j] = c->fixed[j - 1];
+			j--;
+		}
+
+		v[j] = obj;
+		c->keys[j] = k;
+		c->fixed[j] = f;
+	}
+
+	c->objs.assign(v.begin(), v.end());
+
+	if(keep)
+	{
+		keep->assign(c->keys.begin(), c->keys.begin() + n);
+		prender_keys_n = n;
+	}
+
+	return true;
+}
+
+/* the fixed flags of v as its last sort left them, 0 when v changed since */
+static const vector<unsigned char> *sort_fixed_flags(const vector<ZObject*> &v)
+{
+	const struct sort_cache *c = sort_cache_for(&v, false);
+
+	if(!c || !sort_cache_same(c, v)) return 0;
+
+	return &c->fixed;
+}
+
 static void sort_draw_order(vector<ZObject*> &v, vector<int> *keep = 0)
 {
 	static vector<int> keys;
@@ -2365,6 +2568,8 @@ static void sort_draw_order(vector<ZObject*> &v, vector<int> *keep = 0)
 
 		return;
 	}
+
+	if(sortfix_on() && sort_fixed_sort(v, keep)) return;
 
 	if(keys.size() < n) keys.resize(n);
 
@@ -2426,6 +2631,8 @@ void ZPlayer::ProcessGame()
 	 * std::sort darf bei gleichem Schluessel die Reihenfolge von Bild zu Bild
 	 * willkuerlich aendern -- bei gleich hohen Objekten ist das eine
 	 * moegliche Flimmerquelle. */
+	const unsigned long ord_t0 = zod_time_measure ? zod_fineclock_ticks() : 0;
+
 	sort_draw_order(ols.prender_olist, &prender_keys);
 
 	/* Dieselbe Sortierung fuer die kleine Vorzeichnen-Liste. Sie ist eine
@@ -2438,6 +2645,12 @@ void ZPlayer::ProcessGame()
 
 		for(int k = 0; k < 3; k++)
 			sort_draw_order(*klein[k]);
+	}
+
+	if(zod_time_measure)
+	{
+		zod_ord_sort += zod_fineclock_ticks() - ord_t0;
+		zod_ord_frames++;
 	}
 
 	/* ProcessObject NUR fuer Nicht-Kartenobjekte, Process fuer alle.
@@ -2467,8 +2680,27 @@ void ZPlayer::ProcessGame()
 	    i!=ols.non_mapitem_olist.end(); i++)
 		(*i)->ProcessObject();
 
- 	for(vector<ZObject*>::iterator i=ols.prender_olist.begin(); i!=ols.prender_olist.end(); i++)
- 		(*i)->Process();
+	/* ORock::Process is empty ("rocks dont process!"): with the draw
+	 * order's fixed flags at hand (the same order, rocks marked), rocks are
+	 * not touched -- the same calls in the same order otherwise. */
+	{
+		const unsigned long t0 = zod_time_measure ? zod_fineclock_ticks() : 0;
+		const vector<unsigned char> *fx = sortfix_on() ? sort_fixed_flags(ols.prender_olist) : 0;
+
+		if(fx)
+		{
+			for(size_t k = 0; k < ols.prender_olist.size(); k++)
+				if(!(*fx)[k]) ols.prender_olist[k]->Process();
+				else zod_sortfix_procskip++;
+		}
+		else
+		{
+			for(vector<ZObject*>::iterator i=ols.prender_olist.begin(); i!=ols.prender_olist.end(); i++)
+				(*i)->Process();
+		}
+
+		if(zod_time_measure) zod_ord_proc += zod_fineclock_ticks() - t0;
+	}
 
 	if(zod_centercheck_an()) PruefeMittelpunkte();
 
@@ -4202,8 +4434,33 @@ void ZPlayer::RenderObjects()
 	}
 
 	//draw objects pre stuff -- nur die Klassen, die eines haben
-	for(vector<ZObject*>::iterator i=ols.prerender_olist.begin(); i!=ols.prerender_olist.end(); i++)
-		if(!(*i)->PreRenderBanded()) (*i)->DoPreRender(zmap, screen);
+	/* The rest: every entry not banded. Only ORock answers PreRenderBanded()
+	 * with true, so with the draw order's fixed flags (rocks marked, the
+	 * same order) the rocks are not touched -- asking each of ~1400 rocks
+	 * cost a cache miss and a virtual call apiece (ZOD_SORTFIX). */
+	{
+		const unsigned long pre_t0 = zod_time_measure ? zod_fineclock_ticks() : 0;
+		const vector<unsigned char> *fx = sortfix_on() ? sort_fixed_flags(ols.prerender_olist) : 0;
+
+		if(fx)
+		{
+			for(size_t k = 0; k < ols.prerender_olist.size(); k++)
+			{
+				if((*fx)[k]) { zod_sortfix_preskip++; continue; }
+
+				ZObject *o = ols.prerender_olist[k];
+
+				if(!o->PreRenderBanded()) o->DoPreRender(zmap, screen);
+			}
+		}
+		else
+		{
+			for(vector<ZObject*>::iterator i=ols.prerender_olist.begin(); i!=ols.prerender_olist.end(); i++)
+				if(!(*i)->PreRenderBanded()) (*i)->DoPreRender(zmap, screen);
+		}
+
+		if(zod_time_measure) zod_ord_pre += zod_fineclock_ticks() - pre_t0;
+	}
 
 	zod_rsec_end(RSEC_OBJ_VOR);
 
