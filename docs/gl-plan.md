@@ -589,15 +589,29 @@ per comparison (4.2 % of the A4000D tour). **Bots** run SmoothMove without
 the map items, as the player's client already does.
 
 A4000D t11/t12 tour: 18.9 / 19.0 fps (objects 8.6 -> 7.4 ms). The series h
-(t12, all on) i i h was cut short: the A4000D stopped answering at ~08:06
-between two runs (the second time this morning, after ~06:20), so the
-sort and rock changes have no clean A/B yet.
+(t12, all on) i i h was cut short at ~08:06: the Mac left the home LAN (all
+Amigas unreachable, gateway changed) -- not an A4000D fault. The sort and
+rock changes have no clean A/B yet.
+
+**Objects drawn: only the band around the view** (RenderObjects). The draw
+list is sorted by key each frame; the sort keeps its keys, two binary
+searches give the objects with keys in [view top - 32, view bottom + 128].
+Margins from a census (ZOD_BANDCENSUS on: every object that drew in
+DoRender, how far its key lay outside the view): over orig01 still, orig04
+and p08 scrolling, 1.83 M draws, never above the view's top, at most 47 px
+below its bottom (a rock), and 0 draws outside the band. FS-UAE: 18 / 34 /
+12 % of the objects visited; GLResHold and SwSums pass. ZOD_BAND aus: all.
+
+**The bots' 0.6..1 s tick** is their map download at the start of a match
+(it sits between the "map_data_size" lines: each bot parses the map and
+builds its path tiles), not play. It is in the -B window (~1..2 s of a
+60 s A4000D run) but no hitch in a game.
 
 Where the A4000D stands (orig01 still / orig04 tour, 60 s): GL from ~24 /
-12.4 fps at this morning's tip to 32..34 / 19.0 fps. The tour's frame is
-~52 ms now: server ~9.5, client game ~7.5, net ~1.8, drawing ~33 (objects
-7.5, map ~3.7 with the changed parts, HUD 3.8, map effects 3.6, GUI 2.0,
-obj_vor 2.0). Not found yet: one bot tick of 0.6..1 s a run.
+12.4 fps at this morning's tip to 32..34 / 19.0 fps (t12; the band, t15, not
+yet measured there). The tour's frame is ~52 ms: server ~9.5, client game
+~7.5, net ~1.8, drawing ~33 (objects 7.5, map ~3.7 with the changed parts,
+HUD 3.8, map effects 3.6, GUI 2.0, obj_vor 2.0).
 
 ## 6. Open questions (recommendation first)
 
