@@ -676,6 +676,14 @@ public:
     vector<ZObject*> aftereffect_olist;
     vector<ZObject*> non_mapitem_olist;
     vector<ZObject*> grenades_olist;
+    /* Every object but the rocks, in object_list's order: the server's
+     * per-tick passes (ZServer::ProcessObjects). A rock's ProcessServer
+     * changes nothing (no auto repair, waypoints, target, lid, run or
+     * production; only its own ProcessServer sets its sflags, so they stay
+     * clear) and it points at nothing RemoveObject clears -- but each pass
+     * over it touches several cache lines of its object: orig04 has 1412
+     * rocks among ~1900 objects. ZOD_ROCKS_IDLE=off: all objects again. */
+    vector<ZObject*> server_olist;
 };
 
 // ==================================================================

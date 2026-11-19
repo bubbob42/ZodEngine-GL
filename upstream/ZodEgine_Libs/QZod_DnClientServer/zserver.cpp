@@ -1,5 +1,39 @@
 #include "zserver.h"
 #include "fineclock.h"   /* feine Uhr -- current_time() loest hier 20 ms auf */
+#ifdef __amigaos__
+#include "amiga_startup.h"  /* zod_env: ZOD_ROCKS_IDLE (proto/dos.h's macros
+                             * Read and SetOwner collide with member names) */
+#else
+#include <stdlib.h>
+#endif
+
+/* The server's per-tick passes over every object but the rocks (see
+ * ZOLists::server_olist); ZOD_ROCKS_IDLE=off: over all objects, as before. */
+static int rocks_idle = -1;
+
+static int rocks_idle_on(void)
+{
+	if(rocks_idle < 0)
+	{
+		rocks_idle = 1;
+#ifdef __amigaos__
+		char v[16];
+		const char *e = zod_env("ZOD_ROCKS_IDLE", v, sizeof(v));
+
+		if(e && ((e[0] == 'o' && e[1] == 'f') || e[0] == '0' || e[0] == 'a' || e[0] == 'A'))
+			rocks_idle = 0;
+#else
+		const char *e = getenv("ZOD_ROCKS_IDLE");
+
+		if(e && ((e[0] == 'o' && e[1] == 'f') || e[0] == '0' || e[0] == 'a' || e[0] == 'A'))
+			rocks_idle = 0;
+#endif
+		ZLOG("Server: rocks %s\n", rocks_idle ? "left out of the per-tick passes"
+		                                       : "in every per-tick pass (ZOD_ROCKS_IDLE off)");
+	}
+
+	return rocks_idle;
+}
 
 /* --- Aufteilung des Postens `server` -------------------------------------
  *
@@ -1323,9 +1357,13 @@ void ZServer::ProcessObjects()
 
 	zod_ssec_end(SSEC_LOESCHEN);
 
-	//process all the objects
-	for(obj=object_list.begin(); obj!=object_list.end();obj++) 
-		(*obj)->ProcessServer(zmap, ols);
+	//process all the objects (the rocks do nothing here: server_olist)
+	{
+		vector<ZObject*> &plist = rocks_idle_on() ? ols.server_olist : object_list;
+
+		for(obj=plist.begin(); obj!=plist.end();obj++)
+			(*obj)->ProcessServer(zmap, ols);
+	}
 
 	zod_ssec_end(SSEC_PROCESS);
 
@@ -1364,7 +1402,10 @@ void ZServer::ProcessObjects()
 	zod_ssec_end(SSEC_WEGERGEBNIS);
 
 	//check to see what updated and needs to be sent to the clients
-	for(obj=object_list.begin(); obj!=object_list.end(); )
+	//(a rock's sflags stay clear: server_olist)
+	vector<ZObject*> &ulist = rocks_idle_on() ? ols.server_olist : object_list;
+
+	for(obj=ulist.begin(); obj!=ulist.end(); )
 	{
 		ZObject *tobj;
 
@@ -2398,8 +2439,13 @@ vector<ZObject*>::iterator ZServer::DeleteObject(vector<ZObject*>::iterator obj)
 	ref_id = dobj->GetRefID();
 
 	//now make sure no other part of the server is still pointing to this object
-	for(vector<ZObject*>::iterator o=object_list.begin();o!=object_list.end();o++)
-		(*o)->RemoveObject(dobj);
+	//(a rock points at nothing: server_olist)
+	{
+		vector<ZObject*> &rlist = rocks_idle_on() ? ols.server_olist : object_list;
+
+		for(vector<ZObject*>::iterator o=rlist.begin();o!=rlist.end();o++)
+			(*o)->RemoveObject(dobj);
+	}
 
 	//make the deletion
 	delete *obj;

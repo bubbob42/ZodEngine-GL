@@ -4958,6 +4958,7 @@ void ZOLists::DeleteAllObjects()
     aftereffect_olist.clear();
     non_mapitem_olist.clear();
     grenades_olist.clear();
+    server_olist.clear();
 }
 
 void ZOLists::RemoveObject(ZObject *obj)
@@ -4975,6 +4976,7 @@ void ZOLists::RemoveObject(ZObject *obj)
     RemoveObjectFromList(obj, &aftereffect_olist);
     RemoveObjectFromList(obj, &non_mapitem_olist);
     RemoveObjectFromList(obj, &grenades_olist);
+    RemoveObjectFromList(obj, &server_olist);
 }
 
 void ZOLists::DeleteObject(ZObject *obj)
@@ -5097,6 +5099,7 @@ void ZOLists::AddObject(ZObject *obj)
     if(ot != MAP_ITEM_OBJECT) non_mapitem_olist.push_back(obj);
     if(ot == MAP_ITEM_OBJECT && oid == FLAG_ITEM) flag_olist.push_back(obj);
     if(ot == MAP_ITEM_OBJECT && oid == GRENADES_ITEM) grenades_olist.push_back(obj);
+    if(!(ot == MAP_ITEM_OBJECT && oid == ROCK_ITEM)) server_olist.push_back(obj);
 }
 
 void ZOLists::DeleteObjectFromList(ZObject *obj, vector<ZObject*> *olist)
