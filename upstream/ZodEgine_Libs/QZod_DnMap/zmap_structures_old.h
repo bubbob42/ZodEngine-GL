@@ -130,10 +130,13 @@ struct QZOD_DNMAPSHARED_EXPORT map_zone_info
 class QZOD_DNMAPSHARED_EXPORT map_effect_info
 {
 public:
-    map_effect_info();
-    map_effect_info(unsigned int tile_) {tile = tile_; next_effect_time = 0;};
+    map_effect_info() {tile = 0; next_effect_time = 0; px = py = -1;};
+    map_effect_info(unsigned int tile_) {tile = tile_; next_effect_time = 0; px = py = -1;};
     unsigned int tile;
     double next_effect_time;
+    /* the tile's map pixel position, kept by ZMap::DoEffects on first use
+     * (-1: not yet) -- GetTile divides by the map width twice (ZOD_EFFPOS) */
+    int px, py;
 };
 
 class QZOD_DNMAPSHARED_EXPORT map_basics

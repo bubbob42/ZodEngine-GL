@@ -1509,6 +1509,7 @@ static unsigned long zod_sortfix_procskip = 0, zod_sortfix_preskip = 0;
 
 extern "C" void zod_hut_report(unsigned long *culled, unsigned long *drawn,
                                unsigned long *checked, unsigned long *bad);   /* ohut.cpp */
+extern unsigned long zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad;  /* qzod_map.cpp */
 
 /* the draw order's split views (ZOD_SORTSPLIT, see split_frame) */
 static unsigned long zod_split_rebuilds = 0, zod_split_dynkeys = 0, zod_split_frames = 0;
@@ -2008,6 +2009,11 @@ extern "C" void zod_render_sections_report(long frames)
 			     " ZOD_HUTCHECK: %lu skipped ones drawn anyway, %lu of them passed a view test\n",
 			     hd, hc, hn, hb);
 	}
+
+	if(zod_effpos_skipped || zod_effcheck_n)
+		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
+		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
+		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
 
 	if(zod_split_frames)
 		ZLOG("draw.order views = %lu frames, %lu made again, %lu moving keys read;"

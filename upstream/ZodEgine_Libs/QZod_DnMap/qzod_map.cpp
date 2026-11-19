@@ -970,6 +970,42 @@ void ZMap::InitEffects()
     RebuildRegions();
 }
 
+/* ZOD_EFFPOS (default on): DoEffects keeps each effect tile's position and
+ * asks GetBlitInfo's first four questions itself before calling it. The
+ * loop runs over every effect tile of the whole map each frame (1137 on
+ * the largest map), and each paid two divisions and a call to find most of
+ * them outside the view: ~1.9 ms of a scrolling A4000D frame on orig04.
+ * ZOD_EFFCHECK on: the position and the view test are done the old way as
+ * well and compared (zod_effcheck_bad must stay 0). */
+static int effpos = -1, effcheck = -1;
+unsigned long zod_effpos_skipped = 0, zod_effcheck_n = 0, zod_effcheck_bad = 0;
+
+static int eff_switch(const char *name, int dflt)
+{
+    char buf[16];
+    const char *e = zod_env(name, buf, sizeof(buf));
+
+    if(!e) return dflt;
+    if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
+    if(e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
+
+    return dflt;
+}
+
+static bool effpos_on()
+{
+    if(effpos < 0) effpos = eff_switch("ZOD_EFFPOS", 1);
+
+    return effpos == 1;
+}
+
+static bool effcheck_on()
+{
+    if(effcheck < 0) effcheck = eff_switch("ZOD_EFFCHECK", 0);
+
+    return effcheck == 1;
+}
+
 int ZMap::DoEffects(double the_time, SDL_Surface *dest, int shift_x, int shift_y)
 {
     double min_interval_time = 0.2;
@@ -1016,7 +1052,45 @@ int ZMap::DoEffects(double the_time, SDL_Surface *dest, int shift_x, int shift_y
              * Mittel, 1137 auf der groessten Karte), waehrend das Sichtfenster
              * nur rund 7 % der Karte zeigt. Die Haelfte der Divisionen fiel
              * also fuer Kacheln an, die nie gezeichnet werden. */
-            GetTile(map_tile, x, y);
+            if(effpos_on())
+            {
+                if(i->px < 0)
+                {
+                    GetTile(map_tile, x, y);
+                    i->px = x;
+                    i->py = y;
+                }
+
+                x = i->px;
+                y = i->py;
+
+                /* GetBlitInfo's own first tests (w = h = 16), before the call */
+                const bool aussen = (x > this->shift_x + view_w || y > this->shift_y + view_h ||
+                                     x + 16 < this->shift_x || y + 16 < this->shift_y);
+
+                if(effcheck_on())
+                {
+                    int cx, cy;
+                    SDL_Rect cf, ct;
+
+                    GetTile(map_tile, cx, cy);
+                    zod_effcheck_n++;
+
+                    if(cx != x || cy != y ||
+                       aussen != !GetBlitInfo((Sint16)cx, (Sint16)cy, 16, 16, cf, ct))
+                        zod_effcheck_bad++;
+                }
+
+                if(aussen)
+                {
+                    zod_effpos_skipped++;
+                    i++;
+                    continue;
+                }
+            }
+            else
+                GetTile(map_tile, x, y);
+
             dest.x = static_cast<Sint16>(x);
             dest.y = static_cast<Sint16>(y);
 
