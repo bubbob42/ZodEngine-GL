@@ -660,6 +660,19 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   against 1.1 ms scrolling, 0.27 against 0.76 ms still; still 42.6 / 42.3
   against 40.2 / 39.4 fps; scrolling 24.3 / 22.1 against 24.0 / 24.1 (the
   22.1 run had a big fight: effects 1.8 ms, server 9.5 ms).
+- **Held atlas uploads re-measured** after the white-box fix (now two real
+  uploads per new image: the temporary texture and the page copy): A4000D
+  (pansample, t30, 3 4 4 3) scrolling 23.8 / 23.6 held against 24.0 / 24.8
+  not held, still 41.9 / 43.7 against 40.8 / 41.1 -- a wash (not held:
+  fewer uploads, but ~550 idle waits a run). The default stays (held).
+- **The server's deletion pass left out while nothing is set to die**
+  (fps-night, ZOD_KILLFAST): ZServer::ProcessObjects asked every object
+  KillMe() each tick (~1900 on orig04, one pass over card RAM); a counter
+  of objects set to die (DoKillMe up, the destructor down) lets it skip the
+  pass while that is 0 -- on the tour it ran 14..17 of ~1460 ticks.
+  A4000D (pansample, t32, 5 6 6 5): server.loeschen 80 / 83 against 533 /
+  551 us; scrolling 24.3 / 24.3 against 24.3 / 23.2 fps, frame 41.0 / 41.0
+  against 41.1 / 42.9 ms.
 - **The user's white boxes** (videos 21:03..21:07, the fort's countdown,
   the snakes, any new animation frame: a white box of the image's size
   for 1-2 frames): held_take made a new image's temporary texture inside
