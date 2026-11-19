@@ -502,6 +502,63 @@ same dirty blocks). Not done: a tear-free software path on the PiStorm (the
 same panned screen, copying the dirty blocks of the last two frames) -- GL
 is the launcher's default now and tear-free there.
 
+## 5g. Morning 2026-11-19 (the user: "merge everything, then optimize the hell out of the whole thing -- we need >30 fps, that includes gl scrolling"; "it does not have to stop at 30")
+
+The three overnight branches are merged into `gl` (local). Where the frame
+goes on the A4000D at the tip (60 s, the game's report):
+
+| | frame | server | client game | net | drawing sections | rest of "zeichnen" |
+|---|---|---|---|---|---|---|
+| orig01 still | 41 ms | 8.2 | 5.4 | 0.7 | 19.4 | 7.3 (the present) |
+| orig04 tour | 81 ms | 18.5 | 9.1 | 2.7 | 47.0 | 3.5 |
+
+**Uploads into a texture drawn this frame.** Counted on our side by the
+library's own rule (a texture stamped by a glBegin since the last
+mglSwitchDisplay): 402 of them in a 30 s FS-UAE run against the library's
+402 idle waits, 644 against 642 in the tour. ALL came from atlas uploads
+(new images and run-time slots into a page already drawn from); map tiles,
+the minimap and other refreshes never. Now such an upload is HELD: its
+pixels go into the page at the next frame's first draw, until then the image
+draws from a texture of its own (ZOD_GL_HOLD=aus: at once). FS-UAE and the
+A4000D: 0 idle waits.
+
+**The map as one texture** where it fits (RadeonGL, at most 6 MB at 16 bit:
+orig01, orig04; p08's 4096x4096 keeps the ring of tiles), all of it sent
+when the map is made (ZOD_GL_MAPRES=aus: the ring). A changed part of a
+tile (crater, zone marker, shadow) now goes up alone instead of the whole
+128x128 tile: a quarter of a tile on average (FS-UAE: 249 parts in 30 s
+still, 387 in 60 s tour).
+
+A4000D, t2 (one texture + held uploads) as a against the same binary with
+both switched off as b:
+
+| series | a | b | |
+|---|---|---|---|
+| orig04 tour, a b b a | 14.9 / 14.7 | 12.9 / 12.7 | +15.5 %; map 11.7 -> 5.9 ms |
+| orig01 still, a b b a | 24.7 / 22.9 | 27.4 / 25.5 | -10 % |
+
+**Why the still view got slower: the present's pacing.** RadeonGL pans once a
+refresh at most: a present less than a refresh after the last pan (17.35 ms
+at 640x480) sleeps until the blank ("pans held for the last pan's blank" in
+its log). Zod's presents come bunched: holds in 641 / 1232 of ~1480 frames
+with a, 427 / 635 with b, 6.2 / 11.7 s of 1 ms sleeps a run (b 3.6 / 5.7 s).
+That is also the 13 % spread of one binary inside a series (old logs: 34 to
+822 holds a run). MiniGL read the library side: the rule works as designed,
+the cost falls on a program whose presents bunch up. Next: the present's
+cadence log (sdl_screen.cpp, in every GL report from t4 on) -- the work
+between presents, the time inside the present, server, game and upload time
+per frame, histograms and 48 raw frames.
+
+**Rocks out of the server's per-tick passes** (ZOLists::server_olist;
+ZOD_ROCKS_IDLE=off: all objects). A rock's ProcessServer changes nothing,
+but each pass touched several cache lines of every rock: the PC histogram
+inside ZObject::ProcessServer (tools/prof_report.py --addr) put the samples
+on its first stores into the object (sflags.clear), and those inside
+ZServer::ProcessObjects on the update loop's flag tests. Three passes skip
+the rocks: ProcessServer, the update loop, and DeleteObject's "forget this
+object" pass. FS-UAE, the same maps: server.process -47 % (still) to -57 %
+(tour), server.update -58 to -75 %, p08 46 -> 64 fps.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
