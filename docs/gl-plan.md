@@ -613,6 +613,109 @@ yet measured there). The tour's frame is ~52 ms: server ~9.5, client game
 ~7.5, net ~1.8, drawing ~33 (objects 7.5, map ~3.7 with the changed parts,
 HUD 3.8, map effects 3.6, GUI 2.0, obj_vor 2.0).
 
+## 5h. Evening 2026-11-19 and the backlog
+
+Measured on the Radeon A4000D (.132), 60 s bot matches:
+- **RadeonGL's PanPace fix** (MiniGL, branch pan-sample): Zod t17, still,
+  p q q p: main13 37.6 / 31.1 fps with 68 / 702 held pans, pansample 38.7 /
+  38.0 with 2 / 2. The holds were the run-to-run noise of every A/B before:
+  in GL the present is booked into "draw", so a run with many holds looks
+  4..8 ms slower. A/B series now stage minigl-pansample.library (ZLIB).
+- **The band** (t18, installed 0.16, j k k j): objects 3.0..3.2 -> 1.55 ms
+  still, 7.4..7.9 -> 4.5 ms scrolling; still 37.8 / 36.2 against 32.1 / 29.5
+  fps; scrolling hidden by the holds (18.7 / 20.5 against 19.5 / 19.1).
+- **Library time per drawing section** (93495f6): the HUD's 3..4 ms are its
+  own code, not the library (0.34..0.85 ms). Its parts (t19): minimap 1.6 /
+  2.2 ms (still / scrolling; builds of 2.4 / 3.7 ms four times a second,
+  the 62x85 refresh ~2.2 ms each), the GL-only full redraw 0.9 ms, the
+  clock 0.4..0.5 ms.
+- A4000T (arkon, 060, labelmaster-ff), software, orig01 still, R S S R x2:
+  cego's v1.1 33.6 fps, ours (t18) 61.2 fps = 1.82x; the flip 14..15 ->
+  3.5..4 ms (dirty blocks with sums, 6 % of the marked bytes sent).
+- Radeon A4000D, orig01 still, R G G R x2, installed RadeonGL 0.16: cego's
+  v1.1 (software) 19.4 fps, ours (t23, GL) 34.1 fps = 1.76x (the G spread
+  31..37 is 0.16's pan holds; with pansample the same build ran 36..39).
+- **The card RAM is the cost** (E-clock timers in the draw order, t23): on
+  the A4000D every pass over a list of ~1900 pointers costs ~0.3 ms (reads
+  at ~40 ns a byte), so keeping the rocks' keys (e688ebc) saved nothing in
+  the sorts -- the passes over the arrays cost what the object reads did.
+  What helped is not passing at all:
+  - cc20dd2 two views per list, rocks sorted only when the lists change:
+    the sorts 3.0 -> 0.6 ms scrolling, 1.4 -> 0.44 ms still;
+  - 98031b2 minimap from the split object list: a build 3.7 -> 2.8 ms;
+  - 72c8c74 hut animals off the view not asked: the pre-render 1.4 -> 0.6 ms;
+  - 43c0335 map effect tiles with kept positions: 3.8 -> 3.4 ms.
+  Each is exact by a check mode run in FS-UAE (ZOD_SORTCHECK, ZOD_SPLITCHECK,
+  ZOD_MINICHECK, ZOD_HUTCHECK, ZOD_EFFCHECK: 0 differences); the only
+  difference is the draw order of a rock and another object on EQUAL keys
+  (now the rock first) -- for the eye test.
+- Where the library's time goes (MiniGL named Zod's hot spots in
+  pansample): _ToVram 5.4 % (the vertex stream copied into the card's ring
+  over the bus), the vertex hook 3.4 %, texture uploads 2.6 % -- per vertex,
+  no cheaper entry; on Zod's side the lever is fewer quads.
+- **The user's white boxes** (videos 21:03..21:07, the fort's countdown,
+  the snakes, any new animation frame: a white box of the image's size
+  for 1-2 frames): held_take made a new image's temporary texture inside
+  an open batch (glBegin), where RadeonGL rejects the bind, the
+  parameters and the upload -- the texture had no image, the quad drew in
+  its vertex colour. Since 3e5c455 (held uploads, 19.11 07:30) every run's
+  RadeonGL log said "first GL error raised by glBindTexture"; runs with
+  ZOD_GL_HOLD=aus never. Fixed in 17261a8 (batch_end first); ZOD_GLCHECK
+  on checks every bind: 378 of 71 492 failed before, 0 after (FS-UAE), 0
+  of 37 297 on the A4000D. My first answer (the hit flash, from mapping
+  the time to a software run) was wrong: the log line was the clue.
+- **A kept HUD under GL** (ZOD_HUDKEEP, default off until the user's eye):
+  the HUD drawn only where it changed or something drew over it, three
+  frames for RadeonGL's three buffers. A4000D: scrolling 24.5 / 25.1
+  against 23.0 / 23.8 fps, still 45.1 / 45.7 against 37.3 / 41.9; the eye
+  test ran 21:17 (t29, 120 s scrolling, 26.3 fps).
+- Where the A4000D stands (pansample): orig01 still 38..43 fps, orig04
+  scrolling 24 fps (this morning 32..34 / 19.0; at last night's tip ~24 /
+  12.4). The scrolling frame (~41 ms): server ~8.8, game ~4.8, net ~1.6,
+  drawing ~26 (objects 4.7, HUD 3.7 of it the minimap 1.9, map 3.6, map
+  effects 3.4, obj_nach 1.3, zones 1.2, birds 1.1).
+
+Backlog (not started):
+- **Music through camd.library** (the user: "Add MIDI to the backlog -- it
+  could save even more cycles"). cego's v1.1 README: "Music output: AHI or
+  Paula supported. CAMD/MHI support is planned." ZMU1 is already a MIDI-like
+  event stream (converted XMI, fixed 1/120 s steps), so a camd output path
+  would send its events as MIDI to an external or card synth and skip
+  mischer_fuellen() and the 16-bit AHI stream (or the Paula path) entirely.
+  What it saves: the mixer process (port/amiga/musik_ausgabe.h: 38 per mille
+  on the V1200) plus AHI's bus traffic -- only in runs with sound on; the
+  -B benchmarks run with -s. Sibling: Doom64's MIDI-via-camd concept
+  (camd 37.x has the serial driver, 40.x does not).
+  Two MIDI flavours (the user: "add general and mt-32 midi support for our
+  new prismamidi and mt-32-pi"):
+  - **General MIDI** for PrismaMIDI -- the Prisma session's GM synth on the
+    Prisma card (PrismaSynth on the VS1063a, camd driver DEVS:Midi/prisma,
+    branches midi-m1..m5 in prismamegamix-midi, not released yet). Needs a
+    GM program for each of cego's instruments (128 melodic + percussion on
+    channel 10). From the Prisma session: the cluster is "prisma.out.0", a
+    normal camd GM output; on camd 37 the unit must be in
+    ENV:sys/midi.prefs (PrismaMIDI PREFS writes it, camd 40 loads DEVS:Midi
+    itself); the driver takes the card on the first byte (~0.5..0.8 s), so
+    GM System On goes out a second ahead of the music.
+  - **MT-32** for the mt32-pi (the user's, in MT-32 mode; also a real MT-32
+    on the PiStorm's serial port through camd 37's internal driver). Needs an
+    MT-32 patch map, or the song's own MT-32 setup if the original XMI
+    carries one -- open: which device the XMI music was written for.
+  One output path for both (camd cluster from ZodLaunch, e.g. out.0 or the
+  Prisma cluster), the flavour choosing the program map and the reset sent
+  at the start (GM System On, or the MT-32 reset). A ZodLaunch "Music"
+  choice: Mixer (AHI/Paula) / General MIDI / MT-32.
+- **Retained HUD under GL**: draw the HUD only when it changed or something
+  drew over it, for as many frames as the swap chain has buffers; needs the
+  map and objects clipped to the view (glScissor on RadeonGL). ~1.7 ms a
+  frame, both views; a picture change that needs the user's eye.
+- **Atlas page clears**: 32 a minute while scrolling, ~20 ms each (the
+  atlas holds fewer images than the scrolling view keeps needing).
+- **Map effect tiles** (ZMap::DoEffects): every effect tile of the whole
+  map gets a division and a view-test call per frame, every water tile a
+  due check -- ~1.9 ms of a scrolling frame on orig04; precomputed tile
+  positions and an inline view test keep the behaviour exact.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
