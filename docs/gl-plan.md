@@ -444,6 +444,8 @@ Branches, each on the one before, none pushed:
 | | a2b00fb | profile starts after ZOD_PROFILE_SKIP s | -- |
 | | fe89c8b | ZodLaunch: MiniGL is the default renderer | launchtest passes; ZodLaunch builds in cego's image |
 | `sw-speed` | 1e9cb89 | software path: the copy gap from the machine's own prices | A4000D M P P M: 19.8 / 19.9 -> 22.1 / 21.5 fps (+10 %) |
+| | 685dc7d | software path: dirty blocks summed, only changed ones sent (where a byte into the screen is dear) | A4000D P O O P still: 22.0 / 21.4 -> 24.3 / 23.1 (+9 %), 5 KB a frame sent instead of 54; but scrolling -9 % |
+| | 73b4100 | frames that scroll are copied plainly (after three summed frames that marked and changed more than half the screen) | still O I I O 23.3 / 23.3 vs 22.6 / 23.5 (same), scrolling P I I P 7.2 / 7.2 vs 7.1 / 7.2 (same) |
 
 Tried and dropped (measured, not committed; patches in build/hw/):
 - **Map items' server shortcut** (868 of ~1000 objects skip six no-op calls):
@@ -456,7 +458,8 @@ Tried and dropped (measured, not committed; patches in build/hw/):
   surface), and 96 % of the copied bytes were unchanged -- but no gain on
   the A4000D: there the CPU reads its own card RAM at ~40 ns a byte and
   writes the Radeon at ~120 ns, so reading compose AND shadow costs about
-  what the saved writes did. build/hw/flip-shadow.patch.
+  what the saved writes did. build/hw/flip-shadow.patch. Its successor,
+  per-block sums read from the compose surface alone, is 685dc7d.
 - **The HUD as a GL layer** (concept B): worse, 23.6 / 24.2 -> 23.3 / 21.4
   fps. The software HUD redraws small parts nearly every frame; as texels
   they cost ~240 ns each over the bus (16 M px a minute against 1.3 M).
@@ -476,6 +479,13 @@ plain longword loop; Radeon VRAM writes through the Mediator ~120 ns/byte;
 a copy call ~0.5-0.65 us. Runs of the same binary drift by up to 15 %
 between blocks on a long-running machine: compare only inside one A B B A
 series, reboot before a series.
+
+Software path on the A4000D, orig01 still, from tonight's start to the
+branch tip: ~19.8 fps (gap 8, everything marked sent) -> ~23 fps (gap 0 +
+block sums), about +17 %; scrolling unchanged at ~7.2 fps (bus-bound: a
+scrolling frame is 300 KB of new bytes at ~120 ns each). Idea for later:
+let the Radeon shift the screen itself while the view scrolls (a blit in
+its own memory) and send only the new edge and the sprites.
 
 Waiting for the user's eye: tearing on the PiStorm (the present), the
 4444 picture on the A4000D (FS-UAE frames match software), and the software
