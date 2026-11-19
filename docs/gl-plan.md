@@ -537,17 +537,20 @@ both switched off as b:
 | orig04 tour, a b b a | 14.9 / 14.7 | 12.9 / 12.7 | +15.5 %; map 11.7 -> 5.9 ms |
 | orig01 still, a b b a | 24.7 / 22.9 | 27.4 / 25.5 | -10 % |
 
-**Why the still view got slower: the present's pacing.** RadeonGL pans once a
-refresh at most: a present less than a refresh after the last pan (17.35 ms
-at 640x480) sleeps until the blank ("pans held for the last pan's blank" in
-its log). Zod's presents come bunched: holds in 641 / 1232 of ~1480 frames
-with a, 427 / 635 with b, 6.2 / 11.7 s of 1 ms sleeps a run (b 3.6 / 5.7 s).
-That is also the 13 % spread of one binary inside a series (old logs: 34 to
-822 holds a run). MiniGL read the library side: the rule works as designed,
-the cost falls on a program whose presents bunch up. Next: the present's
-cadence log (sdl_screen.cpp, in every GL report from t4 on) -- the work
-between presents, the time inside the present, server, game and upload time
-per frame, histograms and 48 raw frames.
+**Why the still view got slower: RadeonGL's pan pacing.** RadeonGL pans once
+a refresh at most: a pan less than a refresh after the last one (17.35 ms at
+640x480) sleeps until the blank ("pans held for the last pan's blank" in its
+log): holds in 641 / 1232 of ~1480 frames with a, 427 / 635 with b, 6.2 /
+11.7 s of 1 ms sleeps a run (b 3.6 / 5.7 s). That is also the 13 % spread of
+one binary inside a series (old logs: 34 to 822 holds a run). The present's
+cadence log (sdl_screen.cpp, in every GL report from t4 on) showed the work
+between Zod's presents at 17..28 ms in all but the first frames -- they do
+not bunch. MiniGL then found the cause in the library: its line model learns
+only from flushes long enough for the beam to move 48 lines, Zod's flushes
+are short, and until three samples are in the refresh rule is off and every
+pan waits for the beam. Early in a run, for a variable number of frames.
+The fix belongs in RadeonGL (MiniGL proposes it to the user); nothing to do
+on Zod's side.
 
 **Rocks out of the server's per-tick passes** (ZOLists::server_olist;
 ZOD_ROCKS_IDLE=off: all objects). A rock's ProcessServer changes nothing,
@@ -558,6 +561,43 @@ ZServer::ProcessObjects on the update loop's flag tests. Three passes skip
 the rocks: ProcessServer, the update loop, and DeleteObject's "forget this
 object" pass. FS-UAE, the same maps: server.process -47 % (still) to -57 %
 (tour), server.update -58 to -75 %, p08 46 -> 64 fps.
+
+A4000D, t5 (+ changed map parts alone, rocks out of the server passes) as e:
+
+| series | e | other | |
+|---|---|---|---|
+| orig01 still, e g g e (g: uploads at once) | 32.4 / 34.0 | 32.8 / 31.2 | the held uploads no longer matter |
+| orig01 still, e f f e (f: rocks in every pass) | 33.7 / 22.9 | 27.7 / 23.1 | pan holds rule it (one e run slept 13 s); ~+10 % with the sleeps taken out |
+| orig04 tour, e f f e | 17.5 / 17.7 | 15.1 / 15.3 | +15 % |
+
+**Uploads, timed** (t7..t12: by origin, first of a frame against later ones,
+every upload of 10 ms or more). The tour spent ~6 ms a frame in upload
+calls. Most of a seemingly moving 2 s chunk was the ATLAS PAGE CLEAR: a new
+1024x1023 page cleared with zero RGBA bytes, converted by the library texel
+by texel, 17 strips at ~120 ms = 2 s a page -- the first at the start, the
+second mid-run as a 2 s frame; the clear had been booked to whichever upload
+kind came last. As ARGB4444 words: ~20 ms a strip, ~0.3 s a page. The map's
+first send is ~0.7 s (14 strips of 128 rows). Own textures at their own size
+(no power of two, no mip chain) saved heap but not time.
+
+**Rocks as one image** (ORock::DoRender): the three 16x16 parts of a rock
+never overlap, so one 16x48 image per combination of parts gives the same
+pixels with one test and one blit (FS-UAE: no difference on any rock edge,
+in GL or software). **Draw order on cached keys**: the same insertion sort
+on keys read once per object, without sort_objects_func's out-of-line call
+per comparison (4.2 % of the A4000D tour). **Bots** run SmoothMove without
+the map items, as the player's client already does.
+
+A4000D t11/t12 tour: 18.9 / 19.0 fps (objects 8.6 -> 7.4 ms). The series h
+(t12, all on) i i h was cut short: the A4000D stopped answering at ~08:06
+between two runs (the second time this morning, after ~06:20), so the
+sort and rock changes have no clean A/B yet.
+
+Where the A4000D stands (orig01 still / orig04 tour, 60 s): GL from ~24 /
+12.4 fps at this morning's tip to 32..34 / 19.0 fps. The tour's frame is
+~52 ms now: server ~9.5, client game ~7.5, net ~1.8, drawing ~33 (objects
+7.5, map ~3.7 with the changed parts, HUD 3.8, map effects 3.6, GUI 2.0,
+obj_vor 2.0). Not found yet: one bot tick of 0.6..1 s a run.
 
 ## 6. Open questions (recommendation first)
 
