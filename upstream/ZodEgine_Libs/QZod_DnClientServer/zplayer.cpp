@@ -1514,6 +1514,9 @@ extern unsigned long zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad;  /* q
 extern unsigned long zod_trig_hits, zod_trig_calls;   /* zsdl_opengl.cpp, ZOD_TRIGCACHE */
 #endif
 
+/* the after effects' band (ZOD_AFTERBAND): objects in the list, visited */
+static unsigned long zod_after_alle = 0, zod_after_besucht = 0;
+
 /* the draw order's split views (ZOD_SORTSPLIT, see split_frame) */
 static unsigned long zod_split_rebuilds = 0, zod_split_dynkeys = 0, zod_split_frames = 0;
 static unsigned long zod_splitcheck_frames = 0, zod_splitcheck_rockties = 0;
@@ -2024,6 +2027,10 @@ extern "C" void zod_render_sections_report(long frames)
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
 		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
 
+	if(zod_after_alle)
+		ZLOG("draw.after effects band = %lu of %lu visited (ZOD_AFTERBAND)\n",
+		     zod_after_besucht, zod_after_alle);
+
 	if(zod_split_frames)
 		ZLOG("draw.order views = %lu frames, %lu made again, %lu moving keys read;"
 		     " ZOD_SPLITCHECK: %lu frames (%lu made again late, %lu of another band size),"
@@ -2354,9 +2361,39 @@ static void band_census_note(ZObject *o, int top, int bottom)
 	if(key - bottom > band_below[ot]) band_below[ot] = key - bottom;
 }
 
+/* the same for DoAfterEffects (health bars, countdowns over buildings):
+ * the margins a band over the after-effects list would need */
+static int after_above[MAX_MAP_OBJECT_TYPES + 1], after_below[MAX_MAP_OBJECT_TYPES + 1];
+static unsigned long after_drawn[MAX_MAP_OBJECT_TYPES + 1];
+
+static void after_census_note(ZObject *o, int top, int bottom)
+{
+	unsigned char ot, oid;
+	const int key = o->SortKey();
+	static int init = 0;
+
+	if(!init)
+	{
+		for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++) after_above[k] = after_below[k] = -100000;
+		init = 1;
+	}
+
+	o->GetObjectID(ot, oid);
+	if(ot > MAX_MAP_OBJECT_TYPES) ot = MAX_MAP_OBJECT_TYPES;
+
+	after_drawn[ot]++;
+	if(top - key > after_above[ot]) after_above[ot] = top - key;
+	if(key - bottom > after_below[ot]) after_below[ot] = key - bottom;
+}
+
 void zod_band_census_report(void)
 {
 	if(band_census != 1) return;
+
+	for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++)
+		if(after_drawn[k])
+			ZLOG("  after effects, type %d: %lu draws, key above the view's top %d, below its bottom %d (px, at most)\n",
+			     k, after_drawn[k], after_above[k], after_below[k]);
 
 	ZLOG("Band census (objects that drew; px their sort key lay above the view's top /"
 	     " below its bottom, at most; negative: never outside):\n");
@@ -4910,15 +4947,59 @@ void ZPlayer::RenderObjects()
 	//draw after effects -- nur die Klassen, die eines haben
 	if(split_active())
 	{
+		/* ZOD_AFTERBAND (default on): only the band around the view, as for
+		 * the objects. The census (ZOD_BANDCENSUS, after_census_note) over
+		 * orig01 still, orig04 and p08 scrolling: only buildings draw here,
+		 * their keys never above the view's top and at most 157 px below
+		 * its bottom (a fort's countdown and flags over a tall building);
+		 * the band keeps 32 above and 256 below. The calls only draw. */
+		enum { AFTER_ABOVE = 32, AFTER_BELOW = 256 };
 		static vector<ZObject*> nach;
+		struct split_view *sv = &split_views[SV_AFTER];
 
 		split_sync(ols);
-		split_all(&split_views[SV_AFTER], nach);
+
+		static int afterband = -1;
+
+		if(afterband < 0) afterband = zod_switch("ZOD_AFTERBAND", 1);
+
+		if(afterband)
+		{
+			int bx, by, bw, bh;
+			size_t fa, fb, da, db;
+
+			zmap.GetViewShiftFull(bx, by, bw, bh);
+			split_range(sv->fix_keys, by - AFTER_ABOVE, by + bh + AFTER_BELOW, &fa, &fb);
+			split_range(sv->dyn_keys, by - AFTER_ABOVE, by + bh + AFTER_BELOW, &da, &db);
+			split_merge(sv, fa, fb, da, db, nach);
+			zod_after_alle += (unsigned long)(sv->fix.size() + sv->dyn.size());
+			zod_after_besucht += (unsigned long)nach.size();
+		}
+		else
+			split_all(sv, nach);
 
 		for(size_t i = 0; i < nach.size(); i++)
 			nach[i]->DoAfterEffects(zmap, screen);
 	}
 	else
+#ifndef DISABLE_OPENGL
+	if(zod_gl_active && band_census_on())
+	{
+		int bx, by, bw, bh;
+
+		zmap.GetViewShiftFull(bx, by, bw, bh);
+
+		for(vector<ZObject*>::iterator i=ols.aftereffect_olist.begin(); i!=ols.aftereffect_olist.end(); i++)
+		{
+			const unsigned long before = zod_gl_draw_count();
+
+			(*i)->DoAfterEffects(zmap, screen);
+
+			if(zod_gl_draw_count() != before) after_census_note(*i, by, by + bh);
+		}
+	}
+	else
+#endif
 	for(vector<ZObject*>::iterator i=ols.aftereffect_olist.begin(); i!=ols.aftereffect_olist.end(); i++)
 		(*i)->DoAfterEffects(zmap, screen);
 
