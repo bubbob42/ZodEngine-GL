@@ -40,6 +40,13 @@ second, nothing for loads under 0.3 s; every step's time goes to the log.
 on the black screen the A4000D shows today; on an original loading picture
 the same layout sits under its "LOADING".)
 
+The pictures in `docs/img/` are NOT in the repository: they show the
+game's own art (font19, the countdown digits), and no Bitmap Brothers
+material goes into it (.gitignore). Make them from your own game data:
+`tools/assets/load_mockup.py <packs> docs/img/load-progress-45.png 45`
+(and 90); the FS-UAE ones come from tests/auto/LoadBar (`ZOD_LADESHOT`).
+The user saw the real thing on the A4000D on 19.11: accepted.
+
 Everything in picture coordinates (320x200, the 2x layout of `zod_schirm`),
 under the existing "LOADING" line (y 131):
 

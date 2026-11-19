@@ -5,6 +5,11 @@ logs/
 *.o
 *.a
 
+# Pictures made from the game's art (load-bar mockups, screenshots): they
+# show Bitmap Brothers material, so they stay local -- see
+# docs/concept-load-progress.md for how to make them.
+docs/img/
+
 # Spieldaten (Bitmap-Brothers-Assets aus Upstream) -- NICHTS davon ins
 # Repository.
 #
