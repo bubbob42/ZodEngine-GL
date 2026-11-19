@@ -698,6 +698,17 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   (43 objects a tick, two bots, ~2 ticks a frame: ~7 us an object -- the
   two floor() calls go through ___fpu_round_to_integer on the 060), AI
   0.03 ms (once a second).
+- **floor() as fintrz and a compare** (fps-night, ifloor in common.h,
+  ZOD_FASTFLOOR): libm's floor on the 060 is a call into a bit-by-bit
+  ___fpu_round_to_integer (_floor and it: 1.4 % of the tour's samples);
+  (int) is one fintrz there, one step down for negative non-integers gives
+  the same int. SmoothMove (server, bots, player), ProcessMove and the hut
+  animals. FS-UAE FloorCheck (ZOD_FLOORCHECK: both at every call): 0 of
+  1 995 584 calls differ, 476 823 of them took the step down. A4000D
+  (pansample, t38, f1 f0 f0 f1, tour): 26.3 / 25.1 against 24.4 / 24.8
+  fps; game 4448 / 4598 against 5177 / 5069 us (the Process pass 2002 /
+  2033 against 2239 / 2306: the hut animals), bots' SmoothMove 503 / 534
+  against 693 / 699 us.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
