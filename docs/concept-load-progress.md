@@ -90,3 +90,31 @@ same path, so it works on Amigas without GL unchanged.
 
 The bar on the A4000D (GL, black screen) and in FS-UAE (software); with the
 original loading pictures if an install with `zod_screens.zpk` is at hand.
+
+## Implemented (branch `load-progress`, the same night)
+
+- `port/zod_schirm.cpp`: `zod_schirm_zeigen_schwarz()` (the black screen in
+  the frame of an original picture, with the bar's own palette),
+  `zod_lade_beginn/schritt/ende()`, `zod_schirm_ausgeben_teil()` (only the
+  bar's region: `zod_dirty_mark` for the software path, `zod_sdl_flip_teil`
+  -> `zod_gl_show_surface_teil` for GL). `ZOD_LADEBALKEN aus`: as before.
+- `zplayer.cpp`: the five steps before `Load_Graphics` and its 80, each
+  named by its group (TEAMS, MAP, HUD, ROCKS, SELECTION, MESSAGES, SOUNDS,
+  CURSORS, OBJECTS, UNITS, ANIMALS, BUILDINGS, MAP OBJECTS, CANNONS,
+  VEHICLES, ROBOTS, EFFECTS, MENUS, PORTRAITS, READY).
+- A fix on the way: font19 and green_building glyphs are SHARED8 (indices
+  into the engine's base palette); `zod_schirm_text` read their colours
+  from the glyph surface's palette, which on the Amiga is the shared one --
+  holding the PICTURE's colours while a picture stands. Now from the base
+  palette (`glyph_farbe`). On the black screen that is what makes "LOADING"
+  white; on the original pictures it should look as before or better (eye
+  test).
+- FS-UAE (tests/auto/LoadBar, `ZOD_LADESHOT` saves the screen): GL at 43 %
+  and software at the end:
+
+  ![GL 43 %](img/load-progress-fsuae-gl-43.png) ![software 100 %](img/load-progress-fsuae-sw-100.png)
+
+  Step times in FS-UAE (GL): PORTRAITS 360 ms, EFFECTS 321, VEHICLES 309,
+  UNITS 223, ANIMALS 204, ROBOTS 144, BUILDINGS 121, CANNONS 116; all
+  steps 2.24 s (software 1.4 s). The A4000D's numbers come with its first
+  run ("[load]" lines in the log).

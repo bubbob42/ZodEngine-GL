@@ -80,6 +80,10 @@ void zod_gl_fill(int x, int y, int w, int h, Uint8 r, Uint8 g, Uint8 b);
  * sent again every call */
 void zod_gl_show_surface(SDL_Surface *s);
 
+/* the same, with only x, y, w, h of it changed since (the rest of its
+ * texture stays): the load progress bar */
+void zod_gl_show_surface_teil(SDL_Surface *s, int x, int y, int w, int h);
+
 /* counters for the end of a -B run */
 void zod_gl_report(void);
 

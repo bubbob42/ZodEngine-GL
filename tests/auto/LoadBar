@@ -1,0 +1,33 @@
+; LoadBar -- the load progress bar (docs/concept-load-progress.md): the
+; loading screen saved at 40 % and at the end (ZOD_LADESHOT), the steps'
+; times in the log ("[load] ..."). GL on orig01, then software, then GL
+; with ZOD_LADEBALKEN aus (the old black screen). This install has no
+; zod_screens.zpk: the black screen with the bar's own palette is drawn.
+; FS-UAE + RadeonGL 0.16's null card.
+; LIMIT 700
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_LADESHOT DEV:Test/zod-load-gl
+Echo "=== GL, orig01 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod gl 10 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-gl.done
+Type DEV:Test/zod-gl.log >>DEV:Test/auto.log
+SetEnv ZOD_LADESHOT DEV:Test/zod-load-sw
+Echo "=== software, orig01 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sw 10 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sw.done
+Type DEV:Test/zod-sw.log >>DEV:Test/auto.log
+UnSetEnv ZOD_LADESHOT
+SetEnv ZOD_LADEBALKEN aus
+Echo "=== GL, orig01, ZOD_LADEBALKEN aus ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod off 10 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-off.done
+Type DEV:Test/zod-off.log >>DEV:Test/auto.log
+UnSetEnv ZOD_LADEBALKEN
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

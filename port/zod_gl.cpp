@@ -2407,6 +2407,14 @@ void zod_gl_show_surface(SDL_Surface *s)
 	zod_gl_blit(s, 0, 0, 0, 255, 0);
 }
 
+void zod_gl_show_surface_teil(SDL_Surface *s, int x, int y, int w, int h)
+{
+	if(!s) return;
+
+	zod_gl_changed(s, x, y, w, h);
+	zod_gl_blit(s, 0, 0, 0, 255, 0);
+}
+
 void zod_gl_report(void)
 {
 	const unsigned long f = st_frames ? st_frames : 1;

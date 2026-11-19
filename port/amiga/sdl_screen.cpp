@@ -1559,13 +1559,33 @@ extern "C" void zod_flip_sums_report(void)
 		     " the compose surface\n", (unsigned long)check_bytes, (unsigned long)check_differ);
 }
 
+/* The next SDL_Flip shows only this rectangle of a software-drawn screen
+ * under GL (the load progress bar: a whole 640x480 re-upload costs ~130 ms
+ * on the A4000D, the bar's strip a few). The software path marks its
+ * blocks itself (zod_dirty_mark). */
+static int flip_teil = 0, flip_tx, flip_ty, flip_tw, flip_th;
+
+extern "C" void zod_sdl_flip_teil(int x, int y, int w, int h)
+{
+	flip_teil = 1;
+	flip_tx = x; flip_ty = y; flip_tw = w; flip_th = h;
+}
+
 int SDL_Flip(SDL_Surface *screen)
 {
 #ifndef DISABLE_OPENGL
 	if(gl_kontext)
 	{
 		/* a screen drawn in software (loading, statistics) */
-		if(screen) zod_gl_show_surface(screen);
+		if(screen)
+		{
+			if(flip_teil)
+				zod_gl_show_surface_teil(screen, flip_tx, flip_ty, flip_tw, flip_th);
+			else
+				zod_gl_show_surface(screen);
+		}
+
+		flip_teil = 0;
 
 		gl_bild_zeigen();
 		return 0;
