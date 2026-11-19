@@ -27,9 +27,21 @@ static void up_begin(void)
 	up_t0 = zod_fineclock_ticks();
 }
 
+static unsigned long fineclock_ms(unsigned long ticks)
+{
+	const unsigned long f = zod_fineclock_freq();
+
+	return f >= 1000 ? ticks / (f / 1000UL) : 0UL;
+}
+
+static void up_end_kind(unsigned long d);
+
 static void up_end(void)
 {
-	zod_gl_upload_ticks += zod_fineclock_ticks() - up_t0;
+	const unsigned long d = zod_fineclock_ticks() - up_t0;
+
+	zod_gl_upload_ticks += d;
+	up_end_kind(d);
 }
 
 int zod_gl_active = 0;
@@ -69,6 +81,7 @@ enum
  * ZOD_GL_MAPRES=aus keeps the ring (the same binary, to compare). */
 enum { MAP_RESIDENT_MAX = 6 * 1024 * 1024 };
 static int map_resident_ok = 1;
+static int own_pot = 0;          /* ZOD_GL_OWNPOT=ein: own textures as powers of two */
 
 struct torus
 {
@@ -145,15 +158,22 @@ static int bind_is_own = 0;         /* set by the caller before batch_begin */
 enum
 {
 	UP_MAP_TILE, UP_DYN_NEW, UP_ATLAS_IMG, UP_REFRESH_ATLAS, UP_REFRESH_OWN,
-	UP_POOL, UP_PAGE, UP_HELD, UP_MAP_PART, UP_KINDS
+	UP_POOL, UP_PAGE, UP_HELD, UP_MAP_PART, UP_HELD_TEMP, UP_KINDS
 };
 static const char *const up_kind_name[UP_KINDS] =
 {
 	"map tiles", "run-time slots", "atlas images", "refreshes in the atlas",
 	"refreshes of own textures", "refills from the pool", "page clears",
-	"held ones into their page", "changed parts of map tiles"
+	"held ones into their page", "changed parts of map tiles",
+	"textures of their own for held ones"
 };
 static unsigned long st_up_n[UP_KINDS], st_up_hazard[UP_KINDS];
+static unsigned long st_up_ticks[UP_KINDS];   /* E clock in the upload calls */
+/* refreshes of own textures by what pack sent: [0] ARGB4444 words, [1] RGBA
+ * bytes (the library converts those texel by texel); the last one's sizes */
+static unsigned long st_ref_n[2], st_ref_px[2], st_ref_ticks[2];
+static int st_ref_tw, st_ref_th, st_ref_bpp, st_ref_w, st_ref_h;
+static int up_cur = UP_ATLAS_IMG;              /* the kind upload_note saw last */
 static int up_kind = UP_ATLAS_IMG;  /* atlas_send's caller */
 enum { DRAWN_SLOTS = 4096 };
 static GLuint drawn_name[DRAWN_SLOTS];
@@ -194,12 +214,58 @@ static void drawn_note(GLuint name)
 	drawn_frame[i] = frame_no + 1;  /* 0 means never */
 }
 
+/* the first upload of a frame against the later ones: on RadeonGL each takes
+ * a Picasso96 lock, granted with the card idle -- does the first one wait? */
+static unsigned long up_seen_frame = 0xFFFFFFFFUL;
+static unsigned long st_up_first_n, st_up_first_ticks, st_up_later_n, st_up_later_ticks;
+
+/* uploads of 10 ms and more: when in the run (E clock from the first upload)
+ * and which kind -- a wait that keeps a rhythm comes from outside */
+enum { UP_LONG_MAX = 48 };
+static unsigned long up_long_t[UP_LONG_MAX], up_long_d[UP_LONG_MAX];
+static unsigned char up_long_k[UP_LONG_MAX];
+static int up_long_n = 0;
+static unsigned long up_long_total = 0, up_clock0 = 0;
+
+static void up_end_kind(unsigned long d)
+{
+	st_up_ticks[up_cur] += d;
+
+	if(!up_clock0) up_clock0 = up_t0 ? up_t0 : 1;
+
+	if(fineclock_ms(d) >= 10)
+	{
+		up_long_total++;
+
+		if(up_long_n < UP_LONG_MAX)
+		{
+			up_long_t[up_long_n] = up_t0 - up_clock0;
+			up_long_d[up_long_n] = d;
+			up_long_k[up_long_n] = (unsigned char)up_cur;
+			up_long_n++;
+		}
+	}
+
+	if(up_seen_frame != frame_no)
+	{
+		up_seen_frame = frame_no;
+		st_up_first_n++;
+		st_up_first_ticks += d;
+	}
+	else
+	{
+		st_up_later_n++;
+		st_up_later_ticks += d;
+	}
+}
+
 /* the bound texture name is about to receive pixels */
 static void upload_note(GLuint name, int kind)
 {
 	const unsigned i = (unsigned)name & (DRAWN_SLOTS - 1);
 
 	st_up_n[kind]++;
+	up_cur = kind;
 	if(drawn_name[i] == name && drawn_frame[i] == frame_no + 1)
 		st_up_hazard[kind]++;
 }
@@ -814,15 +880,45 @@ static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
 
 	if(tr->resident)
 	{
-		int mx, my;
+		int mx, my, strips = 0;
+		const unsigned long z0 = zod_fineclock_ticks();
+		/* all of it now, before anything draws from it (no idle waits): a
+		 * strip of MAP_TILE rows at a time, the whole width in one call --
+		 * tile by tile it took 154 calls and 2.7 s on the A4000D (orig04) */
+		Uint16 *strip = (Uint16 *)malloc((size_t)tr->W * MAP_TILE * 2);
 
-		/* all of it now, before anything draws from it (no idle waits) */
+		if(strip)
+		{
+			batch_end();
+			glBindTexture(GL_TEXTURE_2D, tr->name);
+
+			for(my = 0; my < tr->mty; my++)
+			{
+				const int y0 = my * MAP_TILE;
+				const int h = (s->h - y0 < MAP_TILE) ? s->h - y0 : MAP_TILE;
+
+				if(!convert565(s, 0, y0, s->w, h, strip)) break;
+
+				upload_note(tr->name, UP_MAP_TILE);
+				{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y0, s->w, h, GL_RGB,
+				                              MGL_UNSIGNED_SHORT_5_6_5, strip); up_end(); }
+				strips++;
+
+				for(mx = 0; mx < tr->mtx; mx++)
+					tr->slot_tile[my * tr->nx + mx] = my * tr->mtx + mx;
+			}
+
+			cur_name = 0;
+			free(strip);
+		}
+
+		/* what the strips did not cover (no memory, no 8-bit surface): tile by tile */
 		for(my = 0; my < tr->mty; my++)
 			for(mx = 0; mx < tr->mtx; mx++)
 				torus_tile(t, mx, my);
 
-		ZLOG("GL: map %dx%d as one texture, all %d tiles sent at once as RGB565 words\n",
-		     s->w, s->h, tr->mtx * tr->mty);
+		ZLOG("GL: map %dx%d as one texture, sent at once as RGB565 words in %d strips, %lu ms\n",
+		     s->w, s->h, strips, fineclock_ms(zod_fineclock_ticks() - z0));
 	}
 	else
 		ZLOG("GL: map %dx%d through a %dx%d texture of %dx%d tiles, sent as %s\n",
@@ -1052,16 +1148,24 @@ static int atlas_page_new(void)
 	}
 
 	/* RadeonGL: transparent between the images, in strips (the buffer
-	 * stays small); the contents are undefined until written */
+	 * stays small); the contents are undefined until written. As ARGB4444
+	 * words where the library copies them: as RGBA bytes it converted every
+	 * texel, ~120 ms a strip and 2 s a page on the A4000D -- the second page
+	 * of an orig04 tour came mid-run as a 2 s frame. */
 	if(npot_ok)
 	{
-		zero = (unsigned char *)calloc((size_t)ATLAS_W * 64, 4);
+		const int words = copy4444_ok;
+
+		zero = (unsigned char *)calloc((size_t)ATLAS_W * 64, words ? 2 : 4);
 
 		if(zero)
 		{
 			for(y = 0; y < p->h; y += 64)
+			{
+				upload_note(p->name, UP_PAGE);
 				{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, ATLAS_W, (p->h - y < 64) ? p->h - y : 64,
-				                GL_RGBA, GL_UNSIGNED_BYTE, zero); up_end(); }
+				                GL_RGBA, words ? MGL_UNSIGNED_SHORT_4_4_4_4 : GL_UNSIGNED_BYTE, zero); up_end(); }
+			}
 			free(zero);
 		}
 	}
@@ -1394,6 +1498,7 @@ static int held_take(struct zod_gl_tex *t, int pg, int x, int y, int uw, int h,
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	upload_note(name, UP_HELD_TEMP);
 	{ up_begin(); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, uw, h, 0, GL_RGBA, type, buf); up_end(); }
 	cur_name = 0;
 
@@ -1574,6 +1679,16 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 
 	t->tw = (npot_ok && s->w > 256) ? (s->w < tile_max ? s->w : tile_max) : pot(s->w);
 	t->th = (npot_ok && s->h > 256) ? (s->h < tile_max ? s->h : tile_max) : pot(s->h);
+
+	/* RadeonGL: small own textures at their own size too (even width: whole
+	 * longwords a row), one level instead of a power of two with its mip
+	 * chain. The minimap's refresh took 11 ms on the A4000D in a 64x128
+	 * texture (ZOD_GL_OWNPOT=ein: powers of two, to compare). */
+	if(npot_ok && !own_pot)
+	{
+		if(s->w <= 256) t->tw = (s->w + 1) & ~1;
+		if(s->h <= 256) t->th = s->h;
+	}
 	t->cols = (s->w + t->tw - 1) / t->tw;
 	t->rows = (s->h + t->th - 1) / t->th;
 	t->gen = ctx_gen;
@@ -1709,8 +1824,21 @@ static void tex_refresh(struct zod_gl_tex *t)
 
 			glBindTexture(GL_TEXTURE_2D, t->names[r * t->cols + c]);
 			upload_note(t->names[r * t->cols + c], t->atlas ? UP_REFRESH_ATLAS : UP_REFRESH_OWN);
-			{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, t->bx + ox0 - x0, t->by + oy0 - y0,
-			                ox1 - ox0, oy1 - oy0, GL_RGBA, type, buf); up_end(); }
+			{
+				const unsigned long z0 = zod_fineclock_ticks();
+				const int k = type == MGL_UNSIGNED_SHORT_4_4_4_4 ? 0 : 1;
+
+				{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, t->bx + ox0 - x0, t->by + oy0 - y0,
+				                ox1 - ox0, oy1 - oy0, GL_RGBA, type, buf); up_end(); }
+				st_ref_n[k]++;
+				st_ref_px[k] += (unsigned long)(ox1 - ox0) * (oy1 - oy0);
+				st_ref_ticks[k] += zod_fineclock_ticks() - z0;
+				st_ref_tw = t->tw;
+				st_ref_th = t->th;
+				st_ref_bpp = t->s->format ? t->s->format->BytesPerPixel : 0;
+				st_ref_w = ox1 - ox0;
+				st_ref_h = oy1 - oy0;
+			}
 			free(buf);
 
 			st_updates++;
@@ -1921,6 +2049,13 @@ void zod_gl_init(int w, int h)
 
 			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
 				map_resident_ok = 0;
+
+			/* ZOD_GL_OWNPOT=ein: small own textures as powers of two again */
+			own_pot = 0;
+			e = zod_env("ZOD_GL_OWNPOT", buf, sizeof(buf));
+
+			if(e && (e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')))
+				own_pot = 1;
 
 			/* ZOD_GL_HOLD=aus: atlas uploads at once, into a page drawn
 			 * this frame too (to measure) */
@@ -2211,11 +2346,25 @@ void zod_gl_report(void)
 			hz += st_up_hazard[k];
 		}
 
+		ZLOG("GL: the first upload of a frame %lu times, %lu ms in all; the later ones %lu times, %lu ms\n",
+		     st_up_first_n, fineclock_ms(st_up_first_ticks), st_up_later_n, fineclock_ms(st_up_later_ticks));
+		ZLOG("GL: uploads of 10 ms and more: %lu; the first %d (ms into the run / ms long / kind):",
+		     up_long_total, up_long_n);
+		for(k = 0; k < up_long_n; k++)
+			ZLOG("%s %lu/%lu/%u", k % 8 ? "" : "\n ", fineclock_ms(up_long_t[k]),
+			     fineclock_ms(up_long_d[k]), (unsigned)up_long_k[k]);
+		ZLOG("\n");
+		ZLOG("GL: refreshes sent as ARGB4444 %lu (%lu px, %lu ms), as RGBA bytes %lu (%lu px, %lu ms);"
+		     " the last: %dx%d of a %dx%d texture, surface %d byte(s) a pixel\n",
+		     st_ref_n[0], st_ref_px[0], fineclock_ms(st_ref_ticks[0]),
+		     st_ref_n[1], st_ref_px[1], fineclock_ms(st_ref_ticks[1]),
+		     st_ref_w, st_ref_h, st_ref_tw, st_ref_th, st_ref_bpp);
 		ZLOG("GL: uploads %lu, into a texture drawn this frame %lu (on RadeonGL each an idle wait);"
 		     " atlas uploads held for the next frame %lu, not held %lu (%s):\n",
 		     n, hz, st_held, st_held_not, hold_ok && npot_ok ? "holding on" : "holding off");
 		for(k = 0; k < UP_KINDS; k++)
 			if(st_up_n[k])
-				ZLOG("  %s: %lu, drawn this frame %lu\n", up_kind_name[k], st_up_n[k], st_up_hazard[k]);
+				ZLOG("  %s: %lu, drawn this frame %lu, %lu ms in the calls\n", up_kind_name[k],
+				     st_up_n[k], st_up_hazard[k], fineclock_ms(st_up_ticks[k]));
 	}
 }
