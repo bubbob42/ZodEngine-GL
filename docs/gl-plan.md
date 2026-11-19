@@ -817,6 +817,60 @@ Backlog (not started):
     would give even steps; below it, presenting every frame is better;
   - a tearing eye test on the A4000D while scrolling (MiniGL waits for
     one anyway before merging pan-sample).
+- **Soft scrolling, for GL and for AGA and software RTG too** (the user,
+  19.11 23:30: "soft scrolling for gl -- should be possible with AGA and
+  software RTG, too").
+  - What the game does now: the view's position is in pixels; the arrow
+    keys, the mouse at the edge and ZOD_TOUR move it 400 px/s times the
+    frame's time (zplayer.cpp, shift_speed). At 22..26 fps that is a jump
+    of 15..18 px a frame, and the jumps differ because the frame times
+    differ (and frames alternate between two and three refreshes). Every
+    frame draws the whole view again; on the software path every block
+    changes, so the dirty-block copy becomes a full copy (640x480 8-bit:
+    300 KB a frame over the bus).
+  - What smooth needs, on any renderer: the same step on every frame the
+    display shows, and frames on the display's beat. Best at the full
+    refresh (50 Hz PAL: 8 px a refresh at 400 px/s); a fixed divisor
+    (25 fps at 50 Hz, 16 px) still reads as smooth; anything in between
+    judders. So: a frame cap at a refresh divisor while the frame rate
+    holds above it, the step taken from the presented frame count (speed /
+    cap) instead of the clock, and the present on the beam -- the same
+    pacing as the vsync item above. On orig04 the A4000D sits at 24..25
+    fps scrolling, right at the 25 fps edge: the >30 fps goal is what makes
+    a steady 25 possible.
+  - GL: per-pixel offsets are already free -- the map is one texture
+    (1376x1760, drawn as one quad per strip), the view's position only
+    moves its texture coordinates. Missing: the pacing above.
+  - Software RTG: scroll on the card instead of copying the whole view.
+    The part of the view that stays visible moves by an on-card blit
+    (BltBitMap VRAM to VRAM, the card's blitter on most RTG boards, no bus
+    traffic); only the newly exposed strip (16 px x 480 at 25 fps) and the
+    changed blocks of units and effects go over the bus -- close to the
+    still view's ~6 % of a frame instead of 100 %. The HUD stays where it
+    is (the blit covers the map area only). Needs: the compose surface
+    shifted the same way (a memmove in fast RAM) so the block sums stay
+    valid, and the dirty-block code told about the shift. Alternative:
+    the whole map in one VRAM bitmap (1376x1760 8-bit = 2.4 MB) panned by
+    ScrollVPort -- but then the HUD scrolls with it and must be drawn
+    again at every offset; the on-card blit is the simpler fit.
+  - AGA: hardware scroll with ScrollVPort over a planar buffer larger than
+    the display (RasInfo RxOffset/RyOffset -- graphics.library, no copper
+    of our own, no register writes), the exposed strip and the changed
+    blocks through c2p; a wrap-around buffer (every new row drawn twice,
+    the offset taken modulo the view height) keeps chip RAM bounded. The
+    open point is the HUD: it sits at the right edge and the bottom, so a
+    second ViewPort (top/bottom split) cannot hold it; it would be drawn
+    again through c2p at each offset (~75 KB a frame) or the AGA layout
+    gets a HUD row only. Cost per frame at 7..14 MB/s chip RAM: strip +
+    blocks ~2..4 ms instead of ~25..45 ms for a full frame -- the
+    difference between unplayable and smooth on AGA.
+  - A further option where the frame rate stays low (AGA, slower RTG):
+    the view pans at the full refresh from a VBlank-driven ScrollVPort
+    while the game draws units at its own rate; units then lag the ground
+    by up to a frame ("swim") -- the classic trade, an eye test.
+  - Order: GL pacing first (with the vsync item), then the software RTG
+    on-card scroll (helps the A4000T, PiStorm without GL, every RTG
+    Amiga), then AGA together with the AGA item above.
 - **Atlas page clears**: 32 a minute while scrolling, ~20 ms each (the
   atlas holds fewer images than the scrolling view keeps needing).
 - **Map effect tiles** (ZMap::DoEffects): every effect tile of the whole
