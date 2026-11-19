@@ -13,6 +13,24 @@
 
 #include "zod_log.h"
 #include "amiga_startup.h"   /* zod_env */
+#include "fineclock.h"
+
+/* E-clock ticks spent in texture uploads (the present's cadence report in
+ * sdl_screen.cpp reads and clears them every frame): on RadeonGL every
+ * upload takes a Picasso96 lock, which Radeon.card grants only with the
+ * engine idle -- an upload early in a frame waits for the last one */
+extern "C" { unsigned long zod_gl_upload_ticks = 0; }
+static unsigned long up_t0 = 0;
+
+static void up_begin(void)
+{
+	up_t0 = zod_fineclock_ticks();
+}
+
+static void up_end(void)
+{
+	zod_gl_upload_ticks += zod_fineclock_ticks() - up_t0;
+}
 
 int zod_gl_active = 0;
 
@@ -39,15 +57,31 @@ enum
  * so a scrolling view only ever needs the tiles at its edge. A tile is sent
  * when a draw needs it; one more of the ring around the view goes up each
  * frame ahead of time. A crater or zone marker baked into the map marks the
- * tiles it touches stale. */
+ * tiles it touches stale.
+ *
+ * RESIDENT: where the library takes any size and copies RGB565 words
+ * (RadeonGL) and the map is at most MAP_RESIDENT_MAX bytes at 16 bit, the
+ * texture is the whole map instead, every tile in its own slot, all sent
+ * when the texture is made. A scrolling view then sends nothing: on the
+ * A4000D a tile cost ~10 ms, a view crossing a row of tiles 6 of them in
+ * one frame (orig04 tour: map 11.8 ms a frame, the worst frames 100 ms).
+ * Stale tiles go up when drawn, one more a frame ahead of time.
+ * ZOD_GL_MAPRES=aus keeps the ring (the same binary, to compare). */
+enum { MAP_RESIDENT_MAX = 6 * 1024 * 1024 };
+static int map_resident_ok = 1;
+
 struct torus
 {
 	GLuint name;
-	int W, H;                 /* texture size, powers of two */
+	int W, H;                 /* texture size: powers of two, or the map's own */
 	int nx, ny;               /* slots across and down */
 	int mtx, mty;             /* map tiles across and down */
 	int *slot_tile;           /* nx * ny: the map tile in the slot, -1 none */
 	unsigned char *stale;     /* nx * ny: the map changed under the slot */
+	short *dirty;             /* nx * ny * 4: the changed part of a stale slot's
+	                           * tile, x0 y0 x1 y1 inside the tile -- sent alone */
+	int resident;             /* the whole map: slot == tile */
+	int stale_n;              /* slots marked stale */
 };
 
 struct zod_gl_tex
@@ -96,9 +130,79 @@ static int cur_rgba_ok = 0;
 static unsigned long st_frames, st_binds, st_batches, st_quads, st_fills;
 static unsigned long st_made, st_made_px, st_updates, st_update_px, st_refused;
 static unsigned long st_reused, st_map_tiles, st_map_quads;
+static unsigned long st_map_parts, st_map_part_px;  /* changed parts sent alone */
 static unsigned long st_atlas_in, st_atlas_px, st_atlas_resets;
 static unsigned long st_bind_own;   /* binds of textures outside atlas and map */
 static int bind_is_own = 0;         /* set by the caller before batch_begin */
+
+/* ---- uploads into a texture drawn this frame ---------------------------------
+ * RadeonGL stamps every texture a glBegin uses with its GPU-idle epoch, which
+ * goes up at each mglSwitchDisplay; an upload into a texture stamped in the
+ * current epoch flushes the frame so far and waits for the card to go idle
+ * (docs/core.md "Texture hazards" there). Such a flush mid-frame also pans
+ * the last frame early, and the next pan then waits for its blank. Counted
+ * here by the upload's origin, the same rule on our side. */
+enum
+{
+	UP_MAP_TILE, UP_DYN_NEW, UP_ATLAS_IMG, UP_REFRESH_ATLAS, UP_REFRESH_OWN,
+	UP_POOL, UP_PAGE, UP_HELD, UP_MAP_PART, UP_KINDS
+};
+static const char *const up_kind_name[UP_KINDS] =
+{
+	"map tiles", "run-time slots", "atlas images", "refreshes in the atlas",
+	"refreshes of own textures", "refills from the pool", "page clears",
+	"held ones into their page", "changed parts of map tiles"
+};
+static unsigned long st_up_n[UP_KINDS], st_up_hazard[UP_KINDS];
+static int up_kind = UP_ATLAS_IMG;  /* atlas_send's caller */
+enum { DRAWN_SLOTS = 4096 };
+static GLuint drawn_name[DRAWN_SLOTS];
+static unsigned long drawn_frame[DRAWN_SLOTS];
+static unsigned long frame_no = 0;
+
+/* ---- atlas uploads held for the next frame (RadeonGL) ----------------------
+ * An image that goes into an atlas page this frame has drawn from already
+ * would cost an idle wait and a flush in the middle of the frame (see
+ * "uploads into a texture drawn this frame": all of RadeonGL's idle waits in
+ * the FS-UAE runs came from these). Instead its pixels wait for the next
+ * frame's first draw, when every texture is free to rewrite again; until
+ * then the image draws from a texture of its own that nothing has drawn
+ * from. The page place is taken at once, so nothing else lands there.
+ * ZOD_GL_HOLD=aus sends at once (the same binary, to compare). */
+enum { HELD_MAX = 64, HELD_OLD_MAX = 256 };
+struct held_up
+{
+	struct zod_gl_tex *t;
+	int pg, x, y, uw, h;
+	GLenum type;
+	unsigned char *buf;
+};
+static struct held_up held[HELD_MAX];
+static int held_n = 0;
+static unsigned long held_frame = 0;
+static int hold_ok = 1;
+static struct { GLuint name; unsigned long frame; } held_old[HELD_OLD_MAX];
+static int held_old_n = 0;
+static unsigned long st_held, st_held_not;
+static void held_old_add(GLuint name);
+
+static void drawn_note(GLuint name)
+{
+	const unsigned i = (unsigned)name & (DRAWN_SLOTS - 1);
+
+	drawn_name[i] = name;
+	drawn_frame[i] = frame_no + 1;  /* 0 means never */
+}
+
+/* the bound texture name is about to receive pixels */
+static void upload_note(GLuint name, int kind)
+{
+	const unsigned i = (unsigned)name & (DRAWN_SLOTS - 1);
+
+	st_up_n[kind]++;
+	if(drawn_name[i] == name && drawn_frame[i] == frame_no + 1)
+		st_up_hazard[kind]++;
+}
 
 /* ---- atlas pages -------------------------------------------------------------
  * Small loaded images (zod_gl_hint_atlas) share pages of ATLAS_W x ATLAS_W,
@@ -181,7 +285,6 @@ static struct old_name retired[RETIRE_MAX];
 static int retired_n = 0;
 static struct old_name pool[POOL_MAX];
 static int pool_n = 0;
-static unsigned long frame_no = 0;
 
 static void batch_end(void);
 
@@ -301,6 +404,7 @@ static void batch_begin(GLuint name, int mode)
 		if(bind_is_own) st_bind_own++;
 	}
 
+	if(mode != 2) drawn_note(cur_name);
 	glBegin(GL_QUADS);
 	in_batch = 1;
 	batch_quads = 0;
@@ -497,8 +601,12 @@ static int gl_refused(void)
 	return e == GL_OUT_OF_MEMORY;
 }
 
+static void held_cancel(struct zod_gl_tex *t);
+
 static void tex_drop_names(struct zod_gl_tex *t)
 {
+	if(t->atlas && held_n) held_cancel(t);
+
 	if(t->tor)
 	{
 		struct torus *tr = t->tor;
@@ -519,6 +627,7 @@ static void tex_drop_names(struct zod_gl_tex *t)
 
 		free(tr->slot_tile);
 		free(tr->stale);
+		free(tr->dirty);
 		free(tr);
 		t->tor = 0;
 	}
@@ -588,40 +697,14 @@ static void tex_drop_names(struct zod_gl_tex *t)
 
 static void vertex(float u, float v, float x, float y);
 
-/* the map texture for t (see struct torus) */
-static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
+/* the torus's texture of W x H (RGB, which RadeonGL keeps as RGB565):
+ * a freed map's of the same size, or a new one. 0: the library refused */
+static int torus_texture(struct torus *tr, int W, int H)
 {
-	struct torus *tr = (struct torus *)calloc(1, sizeof(*tr));
-	int W = MAP_TILE, H = MAP_TILE, i;
-
-	if(!tr)
-	{
-		t->failed = 1;
-		return;
-	}
-
-	while(W < screen_w + 2 * MAP_TILE && W < tile_max) W <<= 1;
-	while(H < screen_h + 2 * MAP_TILE && H < tile_max) H <<= 1;
+	int i;
 
 	tr->W = W;
 	tr->H = H;
-	tr->nx = W / MAP_TILE;
-	tr->ny = H / MAP_TILE;
-	tr->mtx = (s->w + MAP_TILE - 1) / MAP_TILE;
-	tr->mty = (s->h + MAP_TILE - 1) / MAP_TILE;
-	tr->slot_tile = (int *)malloc(sizeof(int) * tr->nx * tr->ny);
-	tr->stale = (unsigned char *)calloc((size_t)tr->nx * tr->ny, 1);
-	t->tor = tr;
-
-	if(!tr->slot_tile || !tr->stale)
-	{
-		t->failed = 1;
-		return;
-	}
-
-	for(i = 0; i < tr->nx * tr->ny; i++) tr->slot_tile[i] = -1;
-
-	batch_end();
 
 	/* a freed map's texture of the same size (the last map) */
 	for(i = pool_n - 1; i >= 0; i--)
@@ -632,8 +715,9 @@ static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
 		tr->name = pool[i].name;
 		pool[i] = pool[--pool_n];
 		st_reused++;
+		return 1;
 	}
-	else
+
 	{
 		/* RadeonGL takes no pixels (storage only); other libraries get zeros */
 		unsigned char *zero = npot_ok ? 0 : (unsigned char *)calloc((size_t)W * H, 3);
@@ -644,27 +728,105 @@ static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-		/* opaque: RGB, which RadeonGL keeps as RGB565 */
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_UNSIGNED_BYTE, zero);
+		{ up_begin(); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, W, H, 0, GL_RGB, GL_UNSIGNED_BYTE, zero); up_end(); }
 		free(zero);
+		cur_name = 0;
 
 		if(gl_refused())
 		{
 			delete_name(tr->name);
 			tr->name = 0;
-			t->failed = 1;
-			st_refused++;
-			ZLOG("GL: no room for the %dx%d map texture -- the map stays undrawn\n", W, H);
-			return;
+			return 0;
 		}
-
-		st_made_px += (unsigned long)W * H;
 	}
 
-	cur_name = 0;
+	st_made_px += (unsigned long)W * H;
+	return 1;
+}
+
+static int torus_tile(struct zod_gl_tex *t, int mx, int my);
+
+/* the map texture for t (see struct torus) */
+static void torus_make(struct zod_gl_tex *t, SDL_Surface *s)
+{
+	struct torus *tr = (struct torus *)calloc(1, sizeof(*tr));
+	int W = MAP_TILE, H = MAP_TILE, i, ok = 0;
+
+	if(!tr)
+	{
+		t->failed = 1;
+		return;
+	}
+
+	t->tor = tr;
+	tr->mtx = (s->w + MAP_TILE - 1) / MAP_TILE;
+	tr->mty = (s->h + MAP_TILE - 1) / MAP_TILE;
+
+	batch_end();
+
+	/* the whole map, where it fits (see MAP_RESIDENT_MAX) */
+	if(map_resident_ok && npot_ok && copy565_ok && s->w <= tile_max && s->h <= tile_max &&
+	   (long)s->w * s->h * 2 <= MAP_RESIDENT_MAX)
+	{
+		tr->resident = 1;
+		tr->nx = tr->mtx;
+		tr->ny = tr->mty;
+		ok = torus_texture(tr, (s->w + 1) & ~1, s->h);
+
+		if(!ok)
+		{
+			ZLOG("GL: no room for the %dx%d map as one texture -- tiles around the view instead\n",
+			     s->w, s->h);
+			tr->resident = 0;
+		}
+	}
+
+	if(!tr->resident)
+	{
+		while(W < screen_w + 2 * MAP_TILE && W < tile_max) W <<= 1;
+		while(H < screen_h + 2 * MAP_TILE && H < tile_max) H <<= 1;
+
+		tr->nx = W / MAP_TILE;
+		tr->ny = H / MAP_TILE;
+	}
+
+	tr->slot_tile = (int *)malloc(sizeof(int) * tr->nx * tr->ny);
+	tr->stale = (unsigned char *)calloc((size_t)tr->nx * tr->ny, 1);
+	tr->dirty = (short *)calloc((size_t)tr->nx * tr->ny * 4, sizeof(short));
+
+	if(!tr->slot_tile || !tr->stale || !tr->dirty)
+	{
+		t->failed = 1;
+		return;
+	}
+
+	for(i = 0; i < tr->nx * tr->ny; i++) tr->slot_tile[i] = -1;
+
+	if(!ok && !torus_texture(tr, W, H))
+	{
+		t->failed = 1;
+		st_refused++;
+		ZLOG("GL: no room for the %dx%d map texture -- the map stays undrawn\n", W, H);
+		return;
+	}
+
 	st_made++;
-	ZLOG("GL: map %dx%d through a %dx%d texture of %dx%d tiles, sent as %s\n",
-	     s->w, s->h, W, H, MAP_TILE, MAP_TILE, copy565_ok ? "RGB565 words" : "RGBA bytes");
+
+	if(tr->resident)
+	{
+		int mx, my;
+
+		/* all of it now, before anything draws from it (no idle waits) */
+		for(my = 0; my < tr->mty; my++)
+			for(mx = 0; mx < tr->mtx; mx++)
+				torus_tile(t, mx, my);
+
+		ZLOG("GL: map %dx%d as one texture, all %d tiles sent at once as RGB565 words\n",
+		     s->w, s->h, tr->mtx * tr->mty);
+	}
+	else
+		ZLOG("GL: map %dx%d through a %dx%d texture of %dx%d tiles, sent as %s\n",
+		     s->w, s->h, tr->W, tr->H, MAP_TILE, MAP_TILE, copy565_ok ? "RGB565 words" : "RGBA bytes");
 }
 
 /* map tile (mx, my) into its slot, if it is not there yet */
@@ -684,21 +846,51 @@ static int torus_tile(struct zod_gl_tex *t, int mx, int my)
 	batch_end();
 	glBindTexture(GL_TEXTURE_2D, tr->name);
 
+	/* the tile is in its slot, only a part of it changed: that part alone
+	 * (a crater or a zone marker is a few hundred texels of the 16384),
+	 * from an even column to an even column -- whole longwords a row */
+	if(tr->slot_tile[slot] == tile && copy565_ok)
+	{
+		short *d = &tr->dirty[slot * 4];
+		const int rx0 = d[0] & ~1;
+		const int ry0 = d[1];
+		const int rx1 = ((d[2] + 1) & ~1) < w ? ((d[2] + 1) & ~1) : w;
+		const int ry1 = d[3] < h ? d[3] : h;
+
+		if(rx1 > rx0 && ry1 > ry0 &&
+		   convert565(t->s, x0 + rx0, y0 + ry0, rx1 - rx0, ry1 - ry0, buf565))
+		{
+			upload_note(tr->name, UP_MAP_PART);
+			{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE + rx0,
+			                (my % tr->ny) * MAP_TILE + ry0, rx1 - rx0, ry1 - ry0,
+			                GL_RGB, MGL_UNSIGNED_SHORT_5_6_5, buf565); up_end(); }
+			cur_name = 0;
+			tr->stale[slot] = 0;
+			tr->stale_n--;
+			st_map_parts++;
+			st_map_part_px += (unsigned long)(rx1 - rx0) * (ry1 - ry0);
+			return 1;
+		}
+	}
+
+	upload_note(tr->name, UP_MAP_TILE);
+
 	/* 2 bytes a texel the library only copies (A4000D, scrolling: a tile
 	 * as RGBA bytes cost ~20 ms, converted twice) */
 	if(copy565_ok && convert565(t->s, x0, y0, w, h, buf565))
-		glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
-		                w, h, GL_RGB, MGL_UNSIGNED_SHORT_5_6_5, buf565);
+		{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
+		                w, h, GL_RGB, MGL_UNSIGNED_SHORT_5_6_5, buf565); up_end(); }
 	else
 	{
 		convert(t->s, x0, y0, w, h, buf, w * 4);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
-		                w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+		{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, (mx % tr->nx) * MAP_TILE, (my % tr->ny) * MAP_TILE,
+		                w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf); up_end(); }
 	}
 
 	cur_name = 0;
 
 	tr->slot_tile[slot] = tile;
+	if(tr->stale[slot]) tr->stale_n--;
 	tr->stale[slot] = 0;
 	st_map_tiles++;
 
@@ -718,6 +910,41 @@ static void torus_blit(struct zod_gl_tex *t, int sx0, int sy0, int sx1, int sy1,
 	for(my = my0; my <= my1; my++)
 		for(mx = mx0; mx <= mx1; mx++)
 			torus_tile(t, mx, my);
+
+	if(tr->resident)
+	{
+		/* one stale tile outside the view ahead of time */
+		if(tr->stale_n > 0)
+		{
+			int i;
+
+			for(i = 0; i < tr->nx * tr->ny; i++)
+				if(tr->stale[i])
+				{
+					torus_tile(t, i % tr->nx, i / tr->nx);
+					break;
+				}
+		}
+
+		/* the map is one texture: one quad */
+		batch_begin(tr->name, 0);
+		quad_colour(255, 255, 255, alpha);
+		{
+			const float u0 = (float)sx0 / tr->W, v0 = (float)sy0 / tr->H;
+			const float u1 = (float)sx1 / tr->W, v1 = (float)sy1 / tr->H;
+			const float X0 = (float)x, Y0 = (float)y;
+			const float X1 = X0 + (sx1 - sx0), Y1 = Y0 + (sy1 - sy0);
+
+			vertex(u0, v0, X0, Y0);
+			vertex(u1, v0, X1, Y0);
+			vertex(u1, v1, X1, Y1);
+			vertex(u0, v1, X0, Y1);
+		}
+		batch_quads++;
+		st_quads++;
+		st_map_quads++;
+		return;
+	}
 
 	/* one tile of the ring around the view ahead of time -- only those
 	 * whose slot holds nothing of the view itself */
@@ -798,7 +1025,7 @@ static int atlas_page_new(void)
 	 * from address 0 over the Amiga bus -- with RGBA that froze the machine
 	 * (memory: pistorm3d-defects 1). Elsewhere the page comes zeroed. */
 	if(npot_ok)
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+		{ up_begin(); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0); up_end(); }
 	else
 	{
 		zero = (unsigned char *)calloc((size_t)ATLAS_W * p->h, 4);
@@ -810,7 +1037,7 @@ static int atlas_page_new(void)
 			return -1;
 		}
 
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, zero);
+		{ up_begin(); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ATLAS_W, p->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, zero); up_end(); }
 		free(zero);
 	}
 
@@ -833,8 +1060,8 @@ static int atlas_page_new(void)
 		if(zero)
 		{
 			for(y = 0; y < p->h; y += 64)
-				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, ATLAS_W, (p->h - y < 64) ? p->h - y : 64,
-				                GL_RGBA, GL_UNSIGNED_BYTE, zero);
+				{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, ATLAS_W, (p->h - y < 64) ? p->h - y : 64,
+				                GL_RGBA, GL_UNSIGNED_BYTE, zero); up_end(); }
 			free(zero);
 		}
 	}
@@ -847,7 +1074,7 @@ static int atlas_page_new(void)
 		static unsigned char white[4 * 4 * 4];
 
 		memset(white, 255, sizeof(white));
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, white);
+		{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, white); up_end(); }
 		white_name = p->name;
 		white_u = 2.0f / ATLAS_W;
 		white_v = 2.0f / p->h;
@@ -878,6 +1105,14 @@ static int shelf_class(int h)
 static void atlas_reset(void)
 {
 	int i;
+
+	while(held_n > 0)
+	{
+		struct held_up *e = &held[--held_n];
+
+		if(e->t->names) held_old_add(e->t->names[0]);
+		free(e->buf);
+	}
 
 	for(i = 0; i < REG_SIZE; i++)
 		if(reg[i].s && reg[i].s != REG_TOMB && reg[i].t && reg[i].t->atlas)
@@ -948,7 +1183,9 @@ static int atlas_place(int w, int h, int *page, int *x, int *y)
 /* s into page pg at x, y */
 static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y);
 static int atlas_take(struct zod_gl_tex *t, int pg, int x, int y);
-static void atlas_send(int pg, int x, int y, int w, int h, GLenum type, const unsigned char *buf);
+static void atlas_send(struct zod_gl_tex *t, int pg, int x, int y, int w, int h, GLenum type,
+                       const unsigned char *buf);
+
 
 /* two sums over n bytes (a multiple of 4: pack's rows), as sent: a multiply
  * hash and a rotate-add, so that one collision would have to fool both */
@@ -1081,7 +1318,8 @@ static int dyn_put(struct zod_gl_tex *t, SDL_Surface *s)
 			return 0;
 		}
 
-		atlas_send(pg, x, y, s->w, s->h, type, buf);
+		up_kind = UP_DYN_NEW;
+		atlas_send(t, pg, x, y, s->w, s->h, type, buf);
 		free(buf);
 	}
 
@@ -1112,16 +1350,171 @@ static int atlas_take(struct zod_gl_tex *t, int pg, int x, int y)
 	return 1;
 }
 
-static void atlas_send(int pg, int x, int y, int w, int h, GLenum type, const unsigned char *buf)
+/* the temporary texture of a held upload: retired, deleted RETIRE_FRAMES
+ * frames later (it was drawn from this frame) */
+static void held_old_add(GLuint name)
+{
+	if(held_old_n < HELD_OLD_MAX)
+	{
+		held_old[held_old_n].name = name;
+		held_old[held_old_n].frame = frame_no;
+		held_old_n++;
+	}
+	else
+		delete_name(name);
+}
+
+/* the atlas page pg has been drawn from this frame */
+static int page_drawn(int pg)
+{
+	const GLuint name = pages[pg].name;
+	const unsigned i = (unsigned)name & (DRAWN_SLOTS - 1);
+
+	return drawn_name[i] == name && drawn_frame[i] == frame_no + 1;
+}
+
+/* hold t's upload (see "atlas uploads held"): 1 done, 0 send it now */
+static int held_take(struct zod_gl_tex *t, int pg, int x, int y, int uw, int h,
+                     GLenum type, const unsigned char *buf)
+{
+	const long bytes = (type == MGL_UNSIGNED_SHORT_4_4_4_4) ? (long)uw * 2 * h : (long)uw * 4 * h;
+	struct held_up *e;
+	GLuint name = 0;
+
+	if(held_n >= HELD_MAX || !t || !t->names) return 0;
+
+	e = &held[held_n];
+	e->buf = (unsigned char *)malloc((size_t)bytes);
+	if(!e->buf) return 0;
+	memcpy(e->buf, buf, (size_t)bytes);
+
+	glGenTextures(1, &name);
+	glBindTexture(GL_TEXTURE_2D, name);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	{ up_begin(); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, uw, h, 0, GL_RGBA, type, buf); up_end(); }
+	cur_name = 0;
+
+	if(gl_refused())
+	{
+		delete_name(name);
+		free(e->buf);
+		e->buf = 0;
+		return 0;
+	}
+
+	e->t = t;
+	e->pg = pg;
+	e->x = x;
+	e->y = y;
+	e->uw = uw;
+	e->h = h;
+	e->type = type;
+	held_n++;
+	held_frame = frame_no;
+	st_held++;
+
+	/* this frame t draws from its own texture */
+	t->names[0] = name;
+	t->tw = uw;
+	t->th = h;
+	t->bx = 0;
+	t->by = 0;
+
+	return 1;
+}
+
+/* entry i into its page now, t back onto the page */
+static void held_send(int i)
+{
+	struct held_up *e = &held[i];
+	struct zod_gl_tex *t = e->t;
+
+	batch_end();
+	glBindTexture(GL_TEXTURE_2D, pages[e->pg].name);
+	upload_note(pages[e->pg].name, UP_HELD);
+	{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, e->x, e->y, e->uw, e->h, GL_RGBA, e->type, e->buf); up_end(); }
+	cur_name = 0;
+
+	held_old_add(t->names[0]);
+	t->names[0] = pages[e->pg].name;
+	t->tw = ATLAS_W;
+	t->th = pages[e->pg].h;
+	t->bx = e->x;
+	t->by = e->y;
+
+	free(e->buf);
+	held[i] = held[--held_n];
+}
+
+/* the next frame: everything held into its page, before anything draws */
+static void held_flush(void)
+{
+	while(held_n > 0) held_send(held_n - 1);
+}
+
+#define HELD_DUE() do { if(held_n && held_frame != frame_no) held_flush(); } while(0)
+
+/* t goes away (or its pixels change): its held upload is dropped, t back
+ * onto its page place without the pixels -- a run-time slot then must not
+ * be found by its sums (they describe pixels never sent) */
+static void held_cancel(struct zod_gl_tex *t)
+{
+	int i;
+
+	for(i = 0; i < held_n; i++)
+		if(held[i].t == t)
+		{
+			struct held_up *e = &held[i];
+
+			if(t->names)
+			{
+				held_old_add(t->names[0]);
+				t->names[0] = pages[e->pg].name;
+			}
+
+			t->tw = ATLAS_W;
+			t->th = pages[e->pg].h;
+			t->bx = e->x;
+			t->by = e->y;
+			t->sum_ok = 0;
+			free(e->buf);
+			held[i] = held[--held_n];
+			return;
+		}
+}
+
+static int held_has(const struct zod_gl_tex *t)
+{
+	int i;
+
+	for(i = 0; i < held_n; i++)
+		if(held[i].t == t) return 1;
+
+	return 0;
+}
+
+static void atlas_send(struct zod_gl_tex *t, int pg, int x, int y, int w, int h, GLenum type,
+                       const unsigned char *buf)
 {
 	/* 16-bit texels of an odd width: one column more -- the row's zero
 	 * padding into the place's own gap column -- so the row ends on a whole
 	 * longword too (atlas_place) */
 	const int uw = (type == MGL_UNSIGNED_SHORT_4_4_4_4) ? ((w + 1) & ~1) : w;
 
+	if(hold_ok && npot_ok && page_drawn(pg))
+	{
+		if(held_take(t, pg, x, y, uw, h, type, buf)) return;
+		st_held_not++;
+	}
+
 	batch_end();
 	glBindTexture(GL_TEXTURE_2D, pages[pg].name);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, uw, h, GL_RGBA, type, buf);
+	upload_note(pages[pg].name, up_kind);
+	up_kind = UP_ATLAS_IMG;
+	{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, uw, h, GL_RGBA, type, buf); up_end(); }
 	cur_name = 0;
 }
 
@@ -1141,7 +1534,7 @@ static int atlas_fill(struct zod_gl_tex *t, SDL_Surface *s, int pg, int x, int y
 	}
 
 	type = pack(s, 0, 0, s->w, s->h, buf, &pitch);
-	atlas_send(pg, x, y, s->w, s->h, type, buf);
+	atlas_send(t, pg, x, y, s->w, s->h, type, buf);
 	free(buf);
 
 	return 1;
@@ -1224,8 +1617,9 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 					pool[i] = pool[--pool_n];
 
 					glBindTexture(GL_TEXTURE_2D, *name);
-					glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->tw, t->th,
-					                GL_RGBA, type, buf);
+					upload_note(*name, UP_POOL);
+					{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->tw, t->th,
+					                GL_RGBA, type, buf); up_end(); }
 					st_reused++;
 				}
 				else
@@ -1236,8 +1630,8 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 					glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-					glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, t->tw, t->th, 0,
-					             GL_RGBA, type, buf);
+					{ up_begin(); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, t->tw, t->th, 0,
+					             GL_RGBA, type, buf); up_end(); }
 				}
 			}
 
@@ -1282,6 +1676,19 @@ static void tex_refresh(struct zod_gl_tex *t)
 
 	if(t->dx1 <= t->dx0 || t->dy1 <= t->dy0) return;
 
+	/* held: its pixels into the page now, then the change over them */
+	if(held_n)
+	{
+		int i;
+
+		for(i = 0; i < held_n; i++)
+			if(held[i].t == t)
+			{
+				held_send(i);
+				break;
+			}
+	}
+
 	batch_end();
 
 	for(r = 0; r < t->rows; r++)
@@ -1301,8 +1708,9 @@ static void tex_refresh(struct zod_gl_tex *t)
 			type = pack(t->s, ox0, oy0, ox1 - ox0, oy1 - oy0, buf, &pitch);
 
 			glBindTexture(GL_TEXTURE_2D, t->names[r * t->cols + c]);
-			glTexSubImage2D(GL_TEXTURE_2D, 0, t->bx + ox0 - x0, t->by + oy0 - y0,
-			                ox1 - ox0, oy1 - oy0, GL_RGBA, type, buf);
+			upload_note(t->names[r * t->cols + c], t->atlas ? UP_REFRESH_ATLAS : UP_REFRESH_OWN);
+			{ up_begin(); glTexSubImage2D(GL_TEXTURE_2D, 0, t->bx + ox0 - x0, t->by + oy0 - y0,
+			                ox1 - ox0, oy1 - oy0, GL_RGBA, type, buf); up_end(); }
 			free(buf);
 
 			st_updates++;
@@ -1328,6 +1736,8 @@ static struct zod_gl_tex *tex_get(SDL_Surface *s)
 	struct zod_gl_tex *t;
 
 	if(!s || !s->pixels || !zod_gl_active) return 0;
+
+	HELD_DUE();
 
 	e = reg_find(s);
 
@@ -1383,7 +1793,30 @@ void zod_gl_changed(SDL_Surface *s, int x, int y, int w, int h)
 			{
 				const int slot = (my % tr->ny) * tr->nx + (mx % tr->nx);
 
-				if(tr->slot_tile[slot] == my * tr->mtx + mx) tr->stale[slot] = 1;
+				if(tr->slot_tile[slot] == my * tr->mtx + mx)
+				{
+					/* the change inside this tile */
+					const int tx = mx * MAP_TILE, ty = my * MAP_TILE;
+					const short cx0 = (short)((x > tx ? x : tx) - tx);
+					const short cy0 = (short)((y > ty ? y : ty) - ty);
+					const short cx1 = (short)((x1 < tx + MAP_TILE ? x1 : tx + MAP_TILE) - tx);
+					const short cy1 = (short)((y1 < ty + MAP_TILE ? y1 : ty + MAP_TILE) - ty);
+					short *d = &tr->dirty[slot * 4];
+
+					if(!tr->stale[slot])
+					{
+						tr->stale[slot] = 1;
+						tr->stale_n++;
+						d[0] = cx0; d[1] = cy0; d[2] = cx1; d[3] = cy1;
+					}
+					else
+					{
+						if(cx0 < d[0]) d[0] = cx0;
+						if(cy0 < d[1]) d[1] = cy0;
+						if(cx1 > d[2]) d[2] = cx1;
+						if(cy1 > d[3]) d[3] = cy1;
+					}
+				}
 			}
 
 		return;
@@ -1447,6 +1880,10 @@ void zod_gl_init(int w, int h)
 	dyn_free_n = 0;
 	dyn_retired_n = 0;
 
+	/* held uploads and their textures belonged to the old context */
+	while(held_n > 0) free(held[--held_n].buf);
+	held_old_n = 0;
+
 	{
 		const char *ext = (const char *)glGetString(GL_EXTENSIONS);
 		GLint max = 0;
@@ -1476,6 +1913,22 @@ void zod_gl_init(int w, int h)
 
 			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
 				copy4444_ok = 0;
+
+			/* ZOD_GL_MAPRES=aus: the map through the ring of tiles even
+			 * where it fits as one texture (to measure) */
+			map_resident_ok = 1;
+			e = zod_env("ZOD_GL_MAPRES", buf, sizeof(buf));
+
+			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+				map_resident_ok = 0;
+
+			/* ZOD_GL_HOLD=aus: atlas uploads at once, into a page drawn
+			 * this frame too (to measure) */
+			hold_ok = 1;
+			e = zod_env("ZOD_GL_HOLD", buf, sizeof(buf));
+
+			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+				hold_ok = 0;
 		}
 
 		/* the hit flash's white silhouette needs GL_ADD. A library without
@@ -1533,6 +1986,16 @@ void zod_gl_flush(void)
 	}
 
 	retired_n = j;
+
+	for(i = 0, j = 0; i < held_old_n; i++)
+	{
+		if(frame_no - held_old[i].frame < RETIRE_FRAMES)
+			held_old[j++] = held_old[i];
+		else
+			delete_name(held_old[i].name);
+	}
+
+	held_old_n = j;
 
 	for(i = 0, j = 0; i < dyn_retired_n; i++)
 	{
@@ -1675,6 +2138,8 @@ void zod_gl_fill(int x, int y, int w, int h, Uint8 r, Uint8 g, Uint8 b)
 {
 	if(!zod_gl_active || w <= 0 || h <= 0) return;
 
+	HELD_DUE();
+
 	if(!white_name && page_n == 0) atlas_page_new();
 
 	if(white_name)
@@ -1726,12 +2191,31 @@ void zod_gl_report(void)
 
 	ZLOG("GL: %lu frames; per frame x10: batches %lu, binds %lu, quads %lu, fills %lu\n",
 	     st_frames, st_batches * 10 / f, st_binds * 10 / f, st_quads * 10 / f, st_fills * 10 / f);
-	ZLOG("GL: map texture: %lu tiles sent, %lu quads drawn (per frame x10: %lu, %lu)\n",
-	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f);
+	ZLOG("GL: map texture: %lu tiles sent, %lu quads drawn (per frame x10: %lu, %lu);"
+	     " changed parts sent alone %lu (%lu px)\n",
+	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f,
+	     st_map_parts, st_map_part_px);
 	ZLOG("GL: binds of own textures (not atlas, not map) per frame x10: %lu\n", st_bind_own * 10 / f);
 	ZLOG("GL: atlas: %d pages, %lu images packed (%lu px), started again %lu times;"
 	     " run-time slots %lu (%lu of them reused, %lu found with the same pixels: not sent)\n",
 	     page_n, st_atlas_in, st_atlas_px, st_atlas_resets, st_dyn_in, st_dyn_reused, st_dyn_same);
 	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu\n",
 	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused);
+	{
+		int k;
+		unsigned long n = 0, hz = 0;
+
+		for(k = 0; k < UP_KINDS; k++)
+		{
+			n += st_up_n[k];
+			hz += st_up_hazard[k];
+		}
+
+		ZLOG("GL: uploads %lu, into a texture drawn this frame %lu (on RadeonGL each an idle wait);"
+		     " atlas uploads held for the next frame %lu, not held %lu (%s):\n",
+		     n, hz, st_held, st_held_not, hold_ok && npot_ok ? "holding on" : "holding off");
+		for(k = 0; k < UP_KINDS; k++)
+			if(st_up_n[k])
+				ZLOG("  %s: %lu, drawn this frame %lu\n", up_kind_name[k], st_up_n[k], st_up_hazard[k]);
+	}
 }
