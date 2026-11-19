@@ -49,6 +49,8 @@ class QZOD_DNOBJECTSSHARED_EXPORT ZObject
 		inline team_type GetOwner() { return owner; }
 		inline void GetDimensions(int &w, int &h) { w = width; h = height; }
 		inline void GetDimensionsPixel(int &w_pix, int &h_pix) { w_pix = width_pix; h_pix = height_pix; }
+		/* sort_objects_func's key: the bottom of the footprint */
+		inline int SortKey() const { return loc.y + height_pix; }
 		virtual int Process();
 		int ProcessObject();
 // 		virtual SDL_Surface *GetRender();
@@ -685,6 +687,10 @@ public:
      * rocks among ~1900 objects. ZOD_ROCKS_IDLE=off: all objects again. */
     vector<ZObject*> server_olist;
 };
+
+/* ZOD_ROCKS_IDLE (zserver.cpp): 1 = objects that cannot change left out of
+ * the per-tick passes (rocks on the server, map items in a bot's SmoothMove) */
+bool zod_rocks_idle();
 
 // ==================================================================
 // %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

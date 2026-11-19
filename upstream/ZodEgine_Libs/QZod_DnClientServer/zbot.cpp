@@ -1,4 +1,18 @@
 #include "zbot.h"
+#include "fineclock.h"
+
+/* A bot's tick over 100 ms, by its parts (the A4000D's -B reports showed
+ * server.bots peaks of 0.6..1 s, once a run): socket, events, SmoothMove,
+ * Stage1AI_3, ChooseBuildOrders. Logged the first eight times. */
+static int bot_slow_told = 0;
+static unsigned long bot_t_sm, bot_t_ai, bot_t_build;
+
+static unsigned long bot_ms(unsigned long ticks)
+{
+	const unsigned long f = zod_fineclock_freq();
+
+	return f >= 1000 ? ticks / (f / 1000UL) : 0UL;
+}
 
 using namespace COMMON;
 
@@ -52,18 +66,37 @@ void ZBot::Run()
 
 void ZBot::Tick()
 {
+	unsigned long t0, t1, t2, t3;
+
 	if(!allow_run) return;
 
 	ztime.UpdateTime();
 
+	t0 = zod_fineclock_ticks();
+
 	//check for tcp events
 	ProcessSocketEvents();
+
+	t1 = zod_fineclock_ticks();
 
 	//process events
 	ehandler.ProcessEvents();
 
+	t2 = zod_fineclock_ticks();
+
 	//do bot AI
+	bot_t_sm = bot_t_ai = bot_t_build = 0;
 	ProcessAI();
+
+	t3 = zod_fineclock_ticks();
+
+	if(bot_slow_told < 8 && bot_ms(t3 - t0) >= 100)
+	{
+		bot_slow_told++;
+		ZLOG("Bot %d: a tick of %lu ms -- socket %lu, events %lu, SmoothMove %lu,"
+		     " Stage1AI_3 %lu, ChooseBuildOrders %lu ms\n", (int)our_team, bot_ms(t3 - t0),
+		     bot_ms(t1 - t0), bot_ms(t2 - t1), bot_ms(bot_t_sm), bot_ms(bot_t_ai), bot_ms(bot_t_build));
+	}
 }
 
 void ZBot::ProcessSocketEvents()
@@ -111,8 +144,20 @@ void ZBot::ProcessAI()
 {
 	double &the_time = ztime.ztime;
 
-	for(vector<ZObject*>::iterator o=object_list.begin(); o!=object_list.end(); o++)
-		(*o)->SmoothMove(the_time);
+	/* SmoothMove of a map item changes nothing: it never moves, and its
+	 * centre is SetCords' (the player's client skips them the same way, see
+	 * ZPlayer::ProcessGame, checked with ZOD_CENTERCHECK). Two bots each
+	 * touched every rock every tick. ZOD_ROCKS_IDLE off: all objects. */
+	{
+		vector<ZObject*> &mlist = zod_rocks_idle() ? ols.non_mapitem_olist : object_list;
+
+		const unsigned long ts = zod_fineclock_ticks();
+
+		for(vector<ZObject*>::iterator o=mlist.begin(); o!=mlist.end(); o++)
+			(*o)->SmoothMove(the_time);
+
+		bot_t_sm = zod_fineclock_ticks() - ts;
+	}
 
 	if(the_time < next_ai_time) return;
 
@@ -121,7 +166,12 @@ void ZBot::ProcessAI()
 	//are we ignored?
 	if(OurPInfo().ignored) return;
 
-	Stage1AI_3();
+	{
+		const unsigned long ta = zod_fineclock_ticks();
+
+		Stage1AI_3();
+		bot_t_ai = zod_fineclock_ticks() - ta;
+	}
 	//Stage1AI_2();
 	////capture all territories
 	//if(!Stage1AI())
@@ -131,7 +181,12 @@ void ZBot::ProcessAI()
 	//}
 
 	//set new build orders
-	ChooseBuildOrders();
+	{
+		const unsigned long tb = zod_fineclock_ticks();
+
+		ChooseBuildOrders();
+		bot_t_build = zod_fineclock_ticks() - tb;
+	}
 }
 
 bool ZBot::Stage1AI_3()

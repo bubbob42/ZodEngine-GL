@@ -35,6 +35,11 @@ static int rocks_idle_on(void)
 	return rocks_idle;
 }
 
+bool zod_rocks_idle()
+{
+	return rocks_idle_on() != 0;
+}
+
 /* --- Aufteilung des Postens `server` -------------------------------------
  *
  * `server` ist mit rund 3700 us je Bild (V1200) der zweitgroesste Posten nach

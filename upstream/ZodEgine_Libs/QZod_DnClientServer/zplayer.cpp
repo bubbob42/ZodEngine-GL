@@ -2140,6 +2140,86 @@ void ZPlayer::PruefeMittelpunkte()
 	}
 }
 
+/* The draw order by y, as sort_objects_func orders it: the same insertion
+ * sort (stable, strict <), on the keys read ONCE per object into an array.
+ * Before, every comparison called sort_objects_func out of line and read
+ * both objects -- on the A4000D 4.2 % of the scrolling frame in that call
+ * alone (~1200 comparisons a frame over the four lists). The order is the
+ * same by construction: the same comparisons on the same values.
+ * ZOD_SORTKEYS aus: the comparator again. */
+static int sortkeys = -1;
+
+static int sortkeys_on(void)
+{
+	if(sortkeys < 0)
+	{
+		sortkeys = 1;
+#ifdef __amigaos__
+		char wahl[16];
+
+		if(GetVar((CONST_STRPTR)"ZOD_SORTKEYS", (STRPTR)wahl, sizeof(wahl), 0) > 0)
+			sortkeys = !(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0' ||
+			             (wahl[0] == 'o' && wahl[1] == 'f'));
+#else
+		const char *e = getenv("ZOD_SORTKEYS");
+
+		if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+			sortkeys = 0;
+#endif
+		ZLOG("Draw order: %s\n", sortkeys ? "keys read once a frame" : "the comparator (ZOD_SORTKEYS aus)");
+	}
+
+	return sortkeys;
+}
+
+static void sort_draw_order(vector<ZObject*> &v)
+{
+	static vector<int> keys;
+	const size_t n = v.size();
+
+	if(n < 2) return;
+
+	if(!sortkeys_on())
+	{
+		for(size_t i = 1; i < n; i++)
+		{
+			ZObject *obj = v[i];
+			size_t j = i;
+
+			while(j > 0 && sort_objects_func(obj, v[j - 1]))
+			{
+				v[j] = v[j - 1];
+				j--;
+			}
+
+			v[j] = obj;
+		}
+
+		return;
+	}
+
+	if(keys.size() < n) keys.resize(n);
+
+	for(size_t i = 0; i < n; i++) keys[i] = v[i]->SortKey();
+
+	for(size_t i = 1; i < n; i++)
+	{
+		ZObject *obj = v[i];
+		const int k = keys[i];
+		size_t j = i;
+
+		while(j > 0 && k < keys[j - 1])
+		{
+			v[j] = v[j - 1];
+			keys[j] = keys[j - 1];
+			j--;
+		}
+
+		v[j] = obj;
+		keys[j] = k;
+	}
+}
+
 void ZPlayer::ProcessGame()
 {
 	double &the_time = ztime.ztime;
@@ -2172,23 +2252,7 @@ void ZPlayer::ProcessGame()
 	 * std::sort darf bei gleichem Schluessel die Reihenfolge von Bild zu Bild
 	 * willkuerlich aendern -- bei gleich hohen Objekten ist das eine
 	 * moegliche Flimmerquelle. */
-	{
-		vector<ZObject*> &pol = ols.prender_olist;
-
-		for(size_t i = 1; i < pol.size(); i++)
-		{
-			ZObject *obj = pol[i];
-			size_t j = i;
-
-			while(j > 0 && sort_objects_func(obj, pol[j - 1]))
-			{
-				pol[j] = pol[j - 1];
-				j--;
-			}
-
-			pol[j] = obj;
-		}
-	}
+	sort_draw_order(ols.prender_olist);
 
 	/* Dieselbe Sortierung fuer die kleine Vorzeichnen-Liste. Sie ist eine
 	 * Teilmenge, und derselbe Schluessel liefert deshalb genau die relative
@@ -2199,23 +2263,7 @@ void ZPlayer::ProcessGame()
 		                               &ols.prerender_band_olist };
 
 		for(int k = 0; k < 3; k++)
-		{
-			vector<ZObject*> &ppl = *klein[k];
-
-			for(size_t i = 1; i < ppl.size(); i++)
-			{
-				ZObject *obj = ppl[i];
-				size_t j = i;
-
-				while(j > 0 && sort_objects_func(obj, ppl[j - 1]))
-				{
-					ppl[j] = ppl[j - 1];
-					j--;
-				}
-
-				ppl[j] = obj;
-			}
-		}
+			sort_draw_order(*klein[k]);
 	}
 
 	/* ProcessObject NUR fuer Nicht-Kartenobjekte, Process fuer alle.
