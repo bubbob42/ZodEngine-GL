@@ -75,9 +75,12 @@ static int sums_mode = 0;              /* 0 off, 1 skip unchanged blocks */
 static int sums_auto = 0;              /* measure_gap: a byte into the screen is dear */
 static int sums_check = 0;             /* ZOD_FLIP_SUMS=pruefen: compare the screen */
 static ULONG *sums = 0;                /* two per block of the dirty grid */
+static unsigned char *sums_valid = 0;  /* per block: its sums are the screen's */
 static int sums_w = 0, sums_h = 0;     /* the grid it was made for */
-static int sums_fresh = 1;             /* next flip copies all and records */
+static int sums_fresh = 1;             /* next flip: no block's sums hold */
 static unsigned long long sums_marked = 0, sums_sent = 0;
+static unsigned long sums_frames = 0, sums_plain_frames = 0;
+static int sums_hot = 0;               /* summed frames in a row that marked and changed much */
 static unsigned long long check_bytes = 0, check_differ = 0;
 
 /* ---- Wohin `umschalten` wirklich geht -----------------------------------
@@ -265,7 +268,9 @@ static void close_all(void)
 
 	/* the flip's block sums belong to the screen */
 	free(sums);
+	free(sums_valid);
 	sums = 0;
+	sums_valid = 0;
 	sums_fresh = 1;
 
 	if(window_ptr)
@@ -1363,6 +1368,19 @@ static void zeiger_entfernen(SDL_Surface *flaeche)
  * nowhere and stay equal on both sides. The pointer is in the compose
  * surface while it is copied (zeiger_einsetzen), so it is summed too.
  *
+ * The view scrolling is the other case: every frame marks the whole screen
+ * and nearly every block really changes, so summing only adds a second read
+ * of every byte (A4000D, orig04 scrolling: flip 44.6 -> 54.4 ms, -9 % fps).
+ * After three summed frames in a row that marked more than half the screen
+ * AND changed more than half of what they marked, frames that mark more
+ * than half the screen are copied plainly, until one marks less. A single
+ * frame that marks much (a burst, a full restore of the same pixels) stays
+ * summed: switching on one such frame cost ~4 % in the still view, through
+ * the plain copy and the re-sending it forces. The blocks a plain frame
+ * copies lose their sums (sums_valid) and count as changed the next time
+ * they are summed, so a block that changes and changes back is never
+ * skipped wrongly.
+ *
  * On by itself where measure_gap finds a byte into the screen dear (>= 20
  * ns); ZOD_FLIP_SUMS=ein / aus overrides, =pruefen reads the whole screen
  * back after every flip and counts the bytes that differ from the compose
@@ -1401,9 +1419,11 @@ static void block_sum(const unsigned char *p, long pitch, int rows, int bw,
 extern "C" void zod_flip_sums_report(void)
 {
 	if(sums_mode && sums_marked)
-		ZLOG("Flip sums: %lu of %lu marked bytes sent to the screen (%lu %%)\n",
+		ZLOG("Flip sums: %lu of %lu marked bytes sent to the screen (%lu %%); %lu of %lu"
+		     " frames copied plainly (more than half the screen marked)\n",
 		     (unsigned long)sums_sent, (unsigned long)sums_marked,
-		     (unsigned long)(sums_sent * 100ULL / sums_marked));
+		     (unsigned long)(sums_sent * 100ULL / sums_marked),
+		     sums_plain_frames, sums_frames);
 
 	if(sums_check && check_bytes)
 		ZLOG("Flip sums check: %lu screen bytes compared after the flips, %lu differ from"
@@ -1467,17 +1487,58 @@ int SDL_Flip(SDL_Surface *screen)
 		const int block = 1 << schub;
 		const int gw = (w + block - 1) >> schub, gh = (h + block - 1) >> schub;
 
-		if(sums_mode && (!sums || sums_w != gw || sums_h != gh))
+		if(sums_mode && (!sums || !sums_valid || sums_w != gw || sums_h != gh))
 		{
 			free(sums);
+			free(sums_valid);
 			sums = (ULONG *)malloc((size_t)gw * gh * 2 * sizeof(ULONG));
+			sums_valid = (unsigned char *)malloc((size_t)gw * gh);
 			sums_w = gw;
 			sums_h = gh;
 			sums_fresh = 1;
 		}
 
 		/* only the runs path keeps the sums (ZOD_BREIT is a measuring aid) */
-		const int sums_use = sums_mode && sums && !breit_an;
+		const int sums_keep = sums_mode && sums && sums_valid && !breit_an;
+
+		if(sums_keep && sums_fresh)
+		{
+			memset(sums_valid, 0, (size_t)gw * gh);
+			sums_fresh = 0;
+		}
+
+		/* much marked and much changing: copied plainly this frame */
+		int sums_use = sums_keep;
+		const unsigned long long marked_before = sums_marked, sent_before = sums_sent;
+
+		if(sums_keep)
+		{
+			enum { MAX_RUNS = 24 };
+			short rx0[MAX_RUNS], rx1[MAX_RUNS];
+			unsigned long marked = 0;
+
+			for(int y = 0; y < h; y += block)
+			{
+				const int nr = zod_dirty_out_runs(y >> schub, rx0, rx1, MAX_RUNS);
+				const int rows = (h - y < block) ? h - y : block;
+
+				for(int i = 0; i < nr; i++)
+					if(rx1[i] >= rx0[i]) marked += (unsigned long)(rx1[i] - rx0[i] + 1) * rows;
+			}
+
+			sums_frames++;
+
+			if(marked * 2 > (unsigned long)w * h)
+			{
+				if(sums_hot >= 3)
+				{
+					sums_use = 0;
+					sums_plain_frames++;
+				}
+			}
+			else
+				sums_hot = 0;   /* little marked: the scroll is over */
+		}
 
 		/* DIE KOSTENSTRUKTUR, aus drei Messungen auf der V1200 (19.09.):
 		 *
@@ -1608,11 +1669,14 @@ int SDL_Flip(SDL_Surface *screen)
 								block_sum(src + (unsigned long)y0 * screen->pitch + bxa,
 								          screen->pitch, zeilen, bw, &a, &b);
 
-								if(sums_fresh || st[0] != a || st[1] != b)
+								unsigned char *v = sums_valid + (long)(y0 >> schub) * gw + bx;
+
+								if(!*v || st[0] != a || st[1] != b)
 								{
 									changed = 1;
 									st[0] = a;
 									st[1] = b;
+									*v = 1;
 								}
 							}
 
@@ -1642,6 +1706,11 @@ int SDL_Flip(SDL_Surface *screen)
 
 						continue;
 					}
+
+					/* a plain frame: these blocks' sums no longer hold */
+					if(sums_keep)
+						memset(sums_valid + (long)(y0 >> schub) * gw + (x0 >> schub), 0,
+						       (size_t)((x1 >> schub) - (x0 >> schub) + 1));
 
 					if(gleicher_abstand && (w - n) <= auffuellen)
 					{
@@ -1678,8 +1747,12 @@ int SDL_Flip(SDL_Surface *screen)
 			}
 		}
 
-		/* the first flip after a new screen copied all: the sums hold now */
-		if(sums_use) sums_fresh = 0;
+		/* a summed frame that marked much: did much of it change? */
+		if(sums_use && (sums_marked - marked_before) * 2 > (unsigned long long)w * h)
+		{
+			if((sums_sent - sent_before) * 2 > (sums_marked - marked_before)) sums_hot++;
+			else sums_hot = 0;
+		}
 
 		if(sums_check && gleicher_abstand)
 		{
