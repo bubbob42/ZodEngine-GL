@@ -141,6 +141,8 @@ static inline void zod_ssec_end(int slot)
 	zod_ssec_mark = jetzt;
 }
 
+extern "C" void zod_bot_sections_report(long frames);   /* zbot.cpp */
+
 extern "C" void zod_server_sections_report(long frames)
 {
 	const unsigned long freq = zod_fineclock_freq();
@@ -175,6 +177,7 @@ extern "C" void zod_server_sections_report(long frames)
 	ZLOG("  server.deletion pass: run %lu times, left out %lu (ZOD_KILLFAST);"
 	     " objects set to die now %lu\n",
 	     zod_killpass_run, zod_killpass_skip, zod_killme_pending);
+	zod_bot_sections_report(frames);
 }
 
 

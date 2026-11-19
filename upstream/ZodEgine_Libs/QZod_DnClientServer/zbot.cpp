@@ -7,11 +7,34 @@
 static int bot_slow_told = 0;
 static unsigned long bot_t_sm, bot_t_ai, bot_t_build;
 
+/* The whole run's bot time by its parts, both bots together (reported
+ * after the server's sections): socket, events, SmoothMove, Stage1AI_3,
+ * ChooseBuildOrders; and how many objects SmoothMove touched. */
+static unsigned long bot_sum[5], bot_sm_objs, bot_ticks, bot_ai_runs;
+
 static unsigned long bot_ms(unsigned long ticks)
 {
 	const unsigned long f = zod_fineclock_freq();
 
 	return f >= 1000 ? ticks / (f / 1000UL) : 0UL;
+}
+
+extern "C" void zod_bot_sections_report(long frames)
+{
+	static const char *const name[5] = {
+		"socket", "events", "SmoothMove", "Stage1AI_3", "ChooseBuildOrders"
+	};
+	const unsigned long freq = zod_fineclock_freq();
+	int i;
+
+	if(freq < 1000 || frames <= 0 || !bot_ticks) return;
+
+	for(i = 0; i < 5; i++)
+		ZLOG("  server.bots.%s = %lu us\n", name[i],
+		     (bot_sum[i] / frames) * 1000UL / (freq / 1000UL));
+
+	ZLOG("  server.bots: %lu ticks, %lu objects moved (%lu a tick), AI %lu times\n",
+	     bot_ticks, bot_sm_objs, bot_sm_objs / bot_ticks, bot_ai_runs);
 }
 
 using namespace COMMON;
@@ -90,6 +113,13 @@ void ZBot::Tick()
 
 	t3 = zod_fineclock_ticks();
 
+	bot_sum[0] += t1 - t0;
+	bot_sum[1] += t2 - t1;
+	bot_sum[2] += bot_t_sm;
+	bot_sum[3] += bot_t_ai;
+	bot_sum[4] += bot_t_build;
+	bot_ticks++;
+
 	if(bot_slow_told < 8 && bot_ms(t3 - t0) >= 100)
 	{
 		bot_slow_told++;
@@ -156,12 +186,14 @@ void ZBot::ProcessAI()
 		for(vector<ZObject*>::iterator o=mlist.begin(); o!=mlist.end(); o++)
 			(*o)->SmoothMove(the_time);
 
+		bot_sm_objs += mlist.size();
 		bot_t_sm = zod_fineclock_ticks() - ts;
 	}
 
 	if(the_time < next_ai_time) return;
 
 	next_ai_time = the_time + 1;
+	bot_ai_runs++;
 
 	//are we ignored?
 	if(OurPInfo().ignored) return;
