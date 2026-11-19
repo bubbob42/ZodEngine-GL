@@ -154,6 +154,9 @@ def main():
     ap.add_argument('--top', type=int, default=40)
     ap.add_argument('--under', help='only the samples with this program function '
                     'at the PC or on the stack (e.g. _G_Ticker: the game logic alone)')
+    ap.add_argument('--addr', help='the PC histogram inside this program function: offsets '
+                    'from its start (match them with m68k-amigaos-objdump -dl of the object '
+                    'built with -g and the same flags)')
     a = ap.parse_args()
 
     data = open(a.samples, 'rb').read()
@@ -267,6 +270,22 @@ def main():
                 seen.add(pnames.name(v - pbase))
         for f in seen:
             incl[f] += 1
+
+    if a.addr:
+        start = [o for o, nm in psyms if nm == a.addr]
+        if not start:
+            raise SystemExit('no program function %r' % a.addr)
+        hist = collections.Counter()
+        for s in running:
+            pc = s[slot]
+            if not (pc & 1) and in_prog(pc) and pnames.name(pc - pbase) == a.addr:
+                hist[pc - pbase - start[0]] += 1
+        n = sum(hist.values())
+        print('--addr %s: %d samples at its own code (%.1f%% of the running samples)'
+              % (a.addr, n, 100.0 * n / max(1, len(running))))
+        for off, c in sorted(hist.items(), key=lambda kv: -kv[1])[:a.top]:
+            print('  +0x%04x %5d  %5.1f%%' % (off, c, 100.0 * c / max(1, n)))
+        return
 
     tot = len(running)
     alln = len(samples)
