@@ -342,31 +342,38 @@ static void choose_n(unsigned long work)
 
 	if(fix_n) { n_cur = fix_n; return; }
 
-	/* up: two of the last 30 frames did not fit N */
-	over_now = 0;
-	for(i = 0; i < work_n && i < 30; i++)
+	/* up: a fifth of the last 30 frames did not fit N. A single spike far
+	 * over it (a path search, a bot's long tick: Hamiller has 0.5..1.5 s
+	 * ones) is late at any N and says nothing about N + 1: not counted.
+	 * (Hamiller 20.11., the first rule -- two of 30 -- climbed to N = 4,
+	 * 12.6 fps, and never came back.) */
+	if(work_n >= 30 && n_cur < 4)
 	{
-		const unsigned long w = work_ring[(work_pos - 1 - i + WORK_WIN) % WORK_WIN];
+		over_now = 0;
+		for(i = 0; i < 30; i++)
+		{
+			const unsigned long w = work_ring[(work_pos - 1 - i + WORK_WIN) % WORK_WIN];
 
-		if((double)w > n_cur * per - margin) over_now++;
+			if((double)w > n_cur * per - margin && (double)w < (n_cur + 2) * per) over_now++;
+		}
+
+		if(over_now >= 6)
+		{
+			n_cur++;
+			st_n_up++;
+			work_n = 0;
+			return;
+		}
 	}
 
-	if(over_now >= 2 && n_cur < 4)
-	{
-		n_cur++;
-		st_n_up++;
-		work_n = 0;
-		return;
-	}
-
-	/* down: the last WORK_WIN frames would all (but one) have fit N - 1 */
+	/* down: 95 % of the last WORK_WIN frames would have fit N - 1 */
 	if(n_cur > 1 && work_n == WORK_WIN)
 	{
 		fits_less = 0;
 		for(i = 0; i < WORK_WIN; i++)
 			if((double)work_ring[i] < (n_cur - 1) * per - margin - 0.0015 * freq) fits_less++;
 
-		if(fits_less >= WORK_WIN - 1)
+		if(fits_less >= (WORK_WIN * 19) / 20)
 		{
 			n_cur--;
 			st_n_down++;

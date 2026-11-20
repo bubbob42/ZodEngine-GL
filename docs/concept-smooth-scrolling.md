@@ -179,6 +179,33 @@ the same run gives it.
   mglEnableSync (above).
 - Later a ZodLaunch choice next to "Display sync" (the vsync item).
 
+### Measured on Hamiller (20.11. night, orig04 tour, 60 s, RadeonGL with the PanPace fix)
+
+The blank clock: 16.71 ms (59.82 Hz) every time, 166..188 of 192 returns
+within 2 ms of the blank (one measurement failed on a single early return
+after a 116 ms hiccup: since then a percentile and up to three tries).
+
+| run | shown for 1 / 2 / 3 / 4+ refreshes | late | view px per refresh: mean, spread | fps |
+|---|---|---|---|---|
+| today (ZOD_SMOOTH=messen) | 551 / 961 / 113 / 114 | -- | 7.37, **2.76** | 28.1 |
+| N = 2 fixed | 0 / 1252 / 154 / 103 | 208 (14 %) | 6.85, **1.84** | 24.3 |
+| N = 3 fixed | 0 / 0 / 886 / 149 | 100 (10 %) | 6.77, **1.38** | 16.4 |
+| N chosen (first rule) | climbed to N = 4 | 61 | 6.74, 1.30 | 12.6 |
+
+- The rhythm works: at N = 3, 86 % of the frames are shown for exactly 3
+  refreshes and the view moves 6.67 px a refresh (bin 6: 782 of 900).
+- But Hamiller's scrolling frames have a heavy tail (fights, path
+  searches, the bots' 0.5..1.5 s ticks): even a 50 ms budget is missed by
+  10 % of them, each a repeated frame and a catch-up step. And a paced
+  frame does more work (the server catches up more game time per frame),
+  so the late share does not fall as fast as the budget grows.
+- The first N rule (up after two late frames of 30, down only when 119 of
+  120 fit N - 1) climbed to 4 and stayed: now up only when a fifth of 30
+  frames miss and are not single spikes, down when 95 % would fit.
+- So: on Hamiller today an even rhythm costs a third of the frame rate. The
+  >30 fps goal is what makes N = 2 (30 fps, 13.3 px steps) hold. The eye
+  decides whether 20 fps even beats 28 fps uneven (eye tests).
+
 ## Software RTG (phase 2, own branch)
 
 From gl-plan 5h: scroll on the card instead of copying the whole view. The
@@ -211,4 +238,7 @@ buffer, the exposed strip through c2p -- described there.
 
 ## Eye tests (morning)
 
-- Smooth on/off, blind A/B, orig04, scrolling by keys and by the edge.
+- Smooth on/off, blind A/B, orig04, scrolling by keys and by the edge:
+  ZOD_SMOOTH=aus (28 fps, uneven) against ZOD_SMOOTH=scroll with
+  ZOD_SMOOTH_N=3 (20 fps, even) and N=2 (24 fps, 14 % late) -- which reads
+  smoother.
