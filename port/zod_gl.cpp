@@ -120,6 +120,10 @@ struct zod_gl_tex
 	int slot_w, slot_h;       /* a run-time slot's size class */
 	unsigned long sum1, sum2; /* a run-time slot's content as uploaded */
 	int sum_ok;               /* 0: changed since, the sums say nothing */
+	/* ZOD_REFDIFF: an 8-bit own texture's pixels as last sent (w * h bytes,
+	 * row by row), to send only what really changed; 0 = none yet */
+	unsigned char *shadow;
+	unsigned char *simtex;    /* ZOD_REFDIFFCHECK: what the texture holds, by what was sent */
 };
 
 static int screen_w = 0, screen_h = 0;
@@ -135,6 +139,14 @@ static int npot_ok = 0;         /* the library takes any size */
 static int copy565_ok = 0;      /* RGB565 words go into an RGB texture as they are */
 static int copy4444_ok = 0;     /* ARGB4444 words go into an RGBA texture as they are */
 static int add_ok = 0;          /* GL_ADD texture mode (GL_EXT_texture_env_add) */
+/* ZOD_REFDIFF (default on): a refresh of an 8-bit own texture (the minimap,
+ * the portrait) compares the marked part with the pixels last sent and sends
+ * only the box around what really differs -- or nothing. The minimap marks
+ * its whole surface at every rebuild (~4 a second, ~4.6 ms each on the
+ * A4000D) though most of it is the same picture again. */
+static int refdiff_ok = -1, refdiffcheck_ok = 0;
+static unsigned long st_rd_checked = 0, st_rd_bad = 0;
+static unsigned long st_rd_n = 0, st_rd_none = 0, st_rd_marked = 0, st_rd_sent = 0;
 static int refused_told = 0;
 
 /* the open batch */
@@ -1867,13 +1879,99 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 	return t;
 }
 
+/* ZOD_REFDIFF: the marked part [dx0, dx1) x [dy0, dy1) narrowed to the box
+ * around the pixels that differ from those last sent; 0 = none differ */
+static int refdiff_narrow(struct zod_gl_tex *t)
+{
+	const SDL_Surface *s = t->s;
+	const unsigned char *px = (const unsigned char *)s->pixels;
+	int y, x0 = t->dx1, x1 = t->dx0, y0 = -1, y1 = -1;
+
+	st_rd_n++;
+	st_rd_marked += (unsigned long)(t->dx1 - t->dx0) * (t->dy1 - t->dy0);
+
+	for(y = t->dy0; y < t->dy1; y++)
+	{
+		const unsigned char *a = px + (size_t)y * s->pitch;
+		const unsigned char *b = t->shadow + (size_t)y * t->w;
+		int l = t->dx0, r = t->dx1 - 1;
+
+		if(!memcmp(a + l, b + l, (size_t)(r - l + 1))) continue;
+
+		while(a[l] == b[l]) l++;
+		while(a[r] == b[r]) r--;
+
+		if(y0 < 0) y0 = y;
+		y1 = y;
+		if(l < x0) x0 = l;
+		if(r + 1 > x1) x1 = r + 1;
+	}
+
+	if(y0 < 0)
+	{
+		st_rd_none++;
+		return 0;
+	}
+
+	t->dx0 = x0; t->dx1 = x1; t->dy0 = y0; t->dy1 = y1 + 1;
+	st_rd_sent += (unsigned long)(x1 - x0) * (y1 + 1 - y0);
+
+	return 1;
+}
+
+/* the box just sent, into the copy (the rest is the same already) */
+static void refdiff_keep(struct zod_gl_tex *t, int x0, int y0, int x1, int y1)
+{
+	const SDL_Surface *s = t->s;
+	int y;
+
+	for(y = y0; y < y1; y++)
+		memcpy(t->shadow + (size_t)y * t->w + x0,
+		       (const unsigned char *)s->pixels + (size_t)y * s->pitch + x0, (size_t)(x1 - x0));
+}
+
 static void tex_refresh(struct zod_gl_tex *t)
 {
 	unsigned char *buf;
 	int c, r, pitch;
 	GLenum type;
+	int rd = 0, rd_new = 0;
 
 	if(t->dx1 <= t->dx0 || t->dy1 <= t->dy0) return;
+
+	if(refdiff_ok < 0)
+	{
+		char b[16];
+		const char *e = zod_env("ZOD_REFDIFF", b, sizeof(b));
+
+		refdiff_ok = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+		e = zod_env("ZOD_REFDIFFCHECK", b, sizeof(b));
+		refdiffcheck_ok = e && (e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'));
+	}
+
+	/* an 8-bit own one-tile texture whose surface still has its size */
+	if(refdiff_ok && !t->atlas && !t->tor && t->rows == 1 && t->cols == 1 &&
+	   t->s && t->s->pixels && t->s->format && t->s->format->BytesPerPixel == 1 &&
+	   t->s->w == t->w && t->s->h == t->h)
+	{
+		if(t->shadow)
+		{
+			rd = 1;
+			if(!refdiff_narrow(t))
+			{
+				t->dx0 = t->dy0 = t->dx1 = t->dy1 = 0;
+				return;
+			}
+		}
+		else
+		{
+			/* the first time: the whole surface, so that the copy and
+			 * the texture start out the same even if something wrote to
+			 * the surface without marking it */
+			rd_new = 1;
+			t->dx0 = 0; t->dy0 = 0; t->dx1 = t->w; t->dy1 = t->h;
+		}
+	}
 
 	/* held: its pixels into the page now, then the change over them */
 	if(held_n)
@@ -1930,6 +2028,51 @@ static void tex_refresh(struct zod_gl_tex *t)
 		}
 
 	cur_name = 0;
+
+	/* ZOD_REFDIFFCHECK: the texture's pixels by what was sent (the whole
+	 * surface when it was made, then each refresh's box), against the
+	 * surface: they must be the same everywhere */
+	if(refdiffcheck_ok && !t->atlas && !t->tor && t->rows == 1 && t->cols == 1 &&
+	   t->s && t->s->format && t->s->format->BytesPerPixel == 1 && t->s->w == t->w && t->s->h == t->h)
+	{
+		const SDL_Surface *ss = t->s;
+		int y, x0 = t->dx0, y0 = t->dy0, x1 = t->dx1, y1 = t->dy1;
+
+		if(!t->simtex)
+		{
+			/* made from the whole surface (tex_make); unmarked writes since
+			 * then are not in the texture -- start from the sent box only
+			 * when this is the first refresh after making: the whole */
+			t->simtex = (unsigned char *)malloc((size_t)t->w * t->h);
+			x0 = 0; y0 = 0; x1 = t->w; y1 = t->h;
+		}
+
+		if(t->simtex)
+		{
+			for(y = y0; y < y1; y++)
+				memcpy(t->simtex + (size_t)y * t->w + x0,
+				       (const unsigned char *)ss->pixels + (size_t)y * ss->pitch + x0, (size_t)(x1 - x0));
+
+			st_rd_checked++;
+			for(y = 0; y < t->h; y++)
+				if(memcmp(t->simtex + (size_t)y * t->w,
+				          (const unsigned char *)ss->pixels + (size_t)y * ss->pitch, (size_t)t->w))
+				{
+					st_rd_bad++;
+					break;
+				}
+		}
+	}
+
+	if(rd)
+		refdiff_keep(t, t->dx0, t->dy0, t->dx1, t->dy1);
+	else if(rd_new)
+	{
+		/* the whole surface was sent just now: the copy is the surface */
+		t->shadow = (unsigned char *)malloc((size_t)t->w * t->h);
+		if(t->shadow) refdiff_keep(t, 0, 0, t->w, t->h);
+	}
+
 	t->dx0 = t->dy0 = t->dx1 = t->dy1 = 0;
 }
 
@@ -1938,6 +2081,8 @@ static void tex_free(struct zod_gl_tex *t)
 	if(!t) return;
 
 	tex_drop_names(t);
+	free(t->shadow);
+	free(t->simtex);
 	free(t);
 }
 
@@ -2237,6 +2382,44 @@ unsigned long zod_gl_lib_ticks(void)
 	return st_lib_ticks;
 }
 
+/* Pages are taken lowest first (atlas_place: a new shelf goes into the
+ * first page with room), so a page made early is used exactly when it
+ * would have been made: the images land where they did. Only the moment of
+ * the clearing moves -- from mid-game (orig04's second page: 16 strips of
+ * ~19 ms, 22 s into a tour) to the loading screen. */
+int zod_gl_atlas_prepare(void)
+{
+	char buf[16];
+	const char *e;
+	int want = 2;
+	const unsigned long t0 = zod_fineclock_ticks();
+	const int before = page_n;
+
+	if(!zod_gl_active || !npot_ok) return page_n;
+
+	e = zod_env("ZOD_GL_PREPAGES", buf, sizeof(buf));
+	if(e)
+	{
+		if(e[0] == 'a' || e[0] == 'A' || (e[0] == 'o' && e[1] == 'f')) want = 0;
+		else if(e[0] >= '0' && e[0] <= '9') want = e[0] - '0';
+	}
+
+	if(want > ATLAS_PAGES) want = ATLAS_PAGES;
+
+	while(page_n < want)
+		if(atlas_page_new() < 0) break;
+
+	if(page_n != before)
+	{
+		const unsigned long f = zod_fineclock_freq();
+
+		ZLOG("GL: atlas pages %d..%d made while loading (ZOD_GL_PREPAGES), %lu ms\n",
+		     before, page_n - 1, f >= 1000 ? (zod_fineclock_ticks() - t0) / (f / 1000UL) : 0UL);
+	}
+
+	return page_n;
+}
+
 void zod_gl_hud_guard(int on, int gx, int gy)
 {
 	guard_on = on;
@@ -2454,6 +2637,13 @@ void zod_gl_report(void)
 	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f,
 	     st_map_parts, st_map_part_px);
 	ZLOG("GL: binds of own textures (not atlas, not map) per frame x10: %lu\n", st_bind_own * 10 / f);
+	if(st_rd_n)
+		ZLOG("GL: refreshes of 8-bit own textures compared with what was sent: %lu (ZOD_REFDIFF),"
+		     " %lu unchanged (nothing sent); %lu px marked, %lu px sent\n",
+		     st_rd_n, st_rd_none, st_rd_marked, st_rd_sent);
+	if(st_rd_checked)
+		ZLOG("GL: ZOD_REFDIFFCHECK: %lu refreshes checked, %lu left the texture unlike its surface\n",
+		     st_rd_checked, st_rd_bad);
 	ZLOG("GL: atlas: %d pages, %lu images packed (%lu px), started again %lu times;"
 	     " run-time slots %lu (%lu of them reused, %lu found with the same pixels: not sent)\n",
 	     page_n, st_atlas_in, st_atlas_px, st_atlas_resets, st_dyn_in, st_dyn_reused, st_dyn_same);

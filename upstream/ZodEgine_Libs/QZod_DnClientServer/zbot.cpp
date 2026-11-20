@@ -11,6 +11,8 @@ static unsigned long bot_t_sm, bot_t_ai, bot_t_build;
  * after the server's sections): socket, events, SmoothMove, Stage1AI_3,
  * ChooseBuildOrders; and how many objects SmoothMove touched. */
 static unsigned long bot_sum[5], bot_sm_objs, bot_ticks, bot_ai_runs;
+/* the packets the bots took from their sockets, by id (both bots) */
+static unsigned long bot_pack[256], bot_pack_bytes[256];
 
 static unsigned long bot_ms(unsigned long ticks)
 {
@@ -35,6 +37,18 @@ extern "C" void zod_bot_sections_report(long frames)
 
 	ZLOG("  server.bots: %lu ticks, %lu objects moved (%lu a tick), AI %lu times\n",
 	     bot_ticks, bot_sm_objs, bot_sm_objs / bot_ticks, bot_ai_runs);
+
+	{
+		unsigned long all = 0;
+
+		for(i = 0; i < 256; i++) all += bot_pack[i];
+
+		ZLOG("  server.bots: %lu packets taken (%lu a frame); by id:", all, all / (unsigned long)frames);
+		for(i = 0; i < 256; i++)
+			if(bot_pack[i] * 50 >= all && bot_pack[i])
+				ZLOG(" %d:%lu(%lu B)", i, bot_pack[i], bot_pack[i] ? bot_pack_bytes[i] / bot_pack[i] : 0UL);
+		ZLOG("\n");
+	}
 }
 
 using namespace COMMON;
@@ -151,7 +165,11 @@ void ZBot::ProcessSocketEvents()
 	else if(shandler->DoRecv())
 	{
 		while(shandler->DoFastProcess(&message, &size, &pack_id))
+		{
+			bot_pack[pack_id & 255]++;
+			bot_pack_bytes[pack_id & 255] += (unsigned long)size;
 			ehandler.ProcessEvent(TCP_EVENT, pack_id, message, size, 0);
+		}
 		shandler->ResetFastProcess();
 
 		//while(shandler->DoProcess(&message, &size, &pack_id))

@@ -709,6 +709,156 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   fps; game 4448 / 4598 against 5177 / 5069 us (the Process pass 2002 /
   2033 against 2239 / 2306: the hut animals), bots' SmoothMove 503 / 534
   against 693 / 699 us.
+- **The atlas pages made while loading** (fps-night2, ZOD_GL_PREPAGES,
+  default 2): a page is cleared in 16 strips of ~19 ms; on an orig04 tour
+  the second page came mid-game (a ~0.3 s hitch). Now both are made in a
+  load step of their own ("TEXTURES", behind the load bar, RadeonGL
+  only); pages are taken lowest first, so every image lands where it did.
+  FS-UAE LoadBar, GLSmoke, GLTour pass (pages 0..1 made in 86..99 ms
+  there). A4000D (pansample, n1, p1 p0 p0 p1, tour): 26.7 / 27.6 against
+  25.0 / 25.5 fps, frames over 100 ms 9 / 10 against 14 / 14, over 50 ms
+  104 / 62 against 119 / 114; the load step takes ~745 ms instead of 84 ms
+  (page clears 640 ms). Part of the fps gap is likely the fights (server
+  time differs too: 7.8 / 7.5 against 8.9 / 9.1 ms) -- the hitch is what
+  it removes for sure.
+- **The water tiles' start timers in a compact array** (fps-night2,
+  ZOD_WATERDUE): DoEffects walked all water tiles' 20-byte records (734 on
+  orig04) every frame for their start timers -- a third of DoEffects in the
+  tour profile, the load of each record's time. Now the times sit in one
+  array in the list's order (rebuilt when the list changes, once a run),
+  the record is touched only when due. FS-UAE EffCheck (the copy against
+  the records every frame): 0 differ; SwSums, NoGL, GLSmoke pass. A4000D
+  (pansample, n2, w1 w0 w0 w1, tour): map effects 3267 / 3255 against
+  3612 / 3483 us; 26.9 / 25.9 against 26.6 / 26.1 fps (the 25.9 run: server
+  9.0 ms).
+- **REJECTED: zod_gl_blit's texture coordinates kept per texture**
+  (ZOD_UVCACHE, n3, not committed): the last four UVs and their source
+  rectangle, place and page size kept in the texture's struct, to skip the
+  four single divisions a quad. Bit-identical (FS-UAE UVCheck: 0 of ~3.9
+  million kept uses differ; kept 91 % on the still view, 66 % scrolling).
+  But A4000D (pansample, u1 u0 u0 u1, tour): 26.3 / 25.9 against 27.3 /
+  26.5 fps, HUD 2740 / 2643 against 2466 / 2530 us -- writing twelve fields
+  to the struct on every miss (card memory) costs more than the divisions.
+  Reverted. Divisions are not the cost; memory traffic is.
+- **Objects beside the view left out of DoRender** (fps-night2,
+  ZOD_XCULL): the objects' band (the rows near the view) spans the whole
+  map's width, the view only part of it. The band census got a sideways
+  part (ZOD_BANDCENSUS): objects that drew lay at most 15 px left of the
+  view (map items) and 1 px right of it (orig01 still, orig04 and p08
+  scrolling, ~1.8 M draws) -- 64 px margins each way. The render view keeps
+  each entry's x and x + w beside its key (read in the same pass,
+  moved by the same sort); the merge leaves out what lies wholly beside
+  the columns. FS-UAE XCullCheck (the left-out ones drawn anyway, every
+  quad counted): 0 of 3.1 M drew; 23 % of the band left out on orig01,
+  43 % on orig04, 82 % on p08; SwSums, NoGL, GLSmoke pass. A4000D
+  (pansample, n4, tour, two series x1 x0 x0 x1 and x0 x1 x1 x0): objects
+  4104 / 4098 / 4136 / 4118 against 4895 / 5100 / 4908 / 4950 us; the sort
+  +0.1..0.2 ms (the x arrays); 27.4 / 26.4 / 27.3 / 27.8 against 26.9 /
+  27.2 / 27.0 / 26.1 fps (means 27.2 against 26.8).
+- **The rocks' pre-render band left out while their shadows are baked**
+  (fps-night2, ZOD_ROCKPRESKIP): baked, every banded entry (only ORock is
+  banded) returns at DoPreRender's first line; the band was still searched
+  (two binary searches reading rocks) and called (~110 virtual calls a
+  frame on orig04). Now one comparison of the map's two generations skips
+  it. FS-UAE RockPreCheck (ZOD_ROCKPRECHECK: the band run anyway in every
+  baked frame, any quad counted): 0 frames drew; SwSums, NoGL, GLSmoke
+  pass. A4000D (pansample, n5, r1 r0 r0 r1, tour): obj_vor 802 / 703
+  against 1118 / 1077 us; 27.1 / 28.4 against 26.7 / 28.3 fps.
+- **8-bit own textures send only what differs** (fps-night2, ZOD_REFDIFF):
+  the minimap marks its whole surface at every rebuild (~4 a second) and
+  was sent whole each time (ARGB4444, ~4.6 ms on the A4000D); the
+  portrait likewise. Now zod_gl keeps the pixels as last sent and sends
+  only the box around what really differs (or nothing); the first refresh
+  sends the whole surface, so the copy and the texture start out the same.
+  FS-UAE RefDiffCheck (ZOD_REFDIFFCHECK: an image of the texture by what
+  was sent, against the surface after every refresh): 0 of 295 unlike;
+  23..35 % of the marked pixels sent. A4000D (pansample, n6, d1 d0 d0 d1,
+  tour): refresh uploads 513 / 494 against 1289 / 1270 ms a run, HUD 2163
+  / 2492 against 2668 / 2675 us; 28.9 / 25.4 against 27.0 / 26.2 fps (the
+  25.4 run: server 8.9 ms).
+- **The map items left out of the server's per-tick passes** (fps-night2,
+  ZOD_SRVMAPSKIP): the process and update passes ran over every object but
+  the rocks, ~300 of them map items (trees, crates, huts, flags, grenade
+  boxes) that all run ZObject's own ProcessServer -- ~10 cache misses each
+  a pass, for nothing. Now both passes run over non_mapitem_olist (the same
+  relative order). FS-UAE SrvMapCheck (ZOD_SRVMAPCHECK: both passes as
+  before, every map item's bytes compared before and after its
+  ProcessServer with its two time stamps put back): 0 of 1 184 284
+  changed; SwSums, NoGL, GLSmoke pass. A4000D (pansample, n7, m1 m0 m0 m1,
+  tour): server.process 2720 / 2552 against 4145 / 4086 us, update 204 /
+  194 against 482 / 465 us; 27.8 / 28.8 against 26.4 / 27.1 fps.
+- **REJECTED: static map objects as fixed sort keys** (ZOD_MAPOBJFIX, n8,
+  not committed): plain map objects, grenade and rocket boxes never move
+  and have an empty Process(), so they could join the rocks in the views'
+  fixed part (sorted once, left out of the Process pass). A4000D
+  (pansample, k1 k0 k0 k1, tour): sorts 653 / 576 against 719 / 794 us,
+  Process pass about the same, 27.9 / 29.2 against 29.6 / 27.9 fps -- and
+  FS-UAE SplitCheck counted ~9 places a frame where a map object and
+  another object tie on the key (idle units stand on the tile grid like
+  the trees) and now draw in the other order. A visible-order change for
+  ~0.15 ms: reverted.
+- **REJECTED: the GL batches as client arrays** (ZOD_GL_ARRAYS, n10, not
+  committed): each batch's quads into vertex / texcoord / colour arrays and
+  one glDrawArrays(GL_QUADS), instead of glTexCoord2f + glVertex3f per
+  vertex -- to save two library calls a vertex. r200view pictures of
+  frame 300 (FS-UAE GLSmoke dumps) the same apart from moving units. But
+  A4000D (pansample, g1 g0 g0 g1, tour): 24.9 / 23.4 against 28.4 / 26.1
+  fps, drawing 27.0 / 27.9 against 21.4 / 22.1 ms, the flush at the present
+  576 against 138 us; FS-UAE showed it too (510 against 663 fps).
+  RadeonGL's unlocked array path (core/array.c: Fetch per attribute, the
+  byte colours converted per vertex) costs more than its immediate calls.
+  Reverted.
+- **The bots' "socket" time is their start**: a packet census in ZBot
+  (FS-UAE, 20 s): ~1 packet a frame for both bots together, most of them
+  ADD_NEW_OBJECT -- the whole map's objects sent to each bot at the start,
+  the one-second peak of server.bots. Averaged over a 60 s run that peak
+  alone is ~0.6 ms "a frame"; the bots' steady cost is well below the
+  1.7 ms average. Not a target.
+- **The waypoint pass left out while no unit shows its waypoints**
+  (fps-night2, ZOD_WPSKIP): DoRenderWaypoints ran for every unit each frame
+  and returned at its first line unless show_waypoints was on (3 s after
+  an order). A count of the objects showing them (ShowWaypoints up,
+  ProcessObject and the destructor down) skips the pass while it is 0.
+  FS-UAE WPCheck (ZOD_WPCHECK: the pass run anyway in those frames, any
+  quad counted): 0 of 31 151 frames drew; SwSums, GLSmoke pass. A4000D
+  (pansample, n11, tour): wegpunkte 28 / 28 against 187 / 177 us; 29.1 /
+  30.7 against 29.4 / 28.7 fps -- the first scrolling run over 30 fps.
+- **REJECTED: the bots move only robots and vehicles** (ZOD_BOTMOVE, n12,
+  not committed): buildings and cannons never move, SmoothMove only wrote
+  their centre again (FS-UAE BotMoveCheck: 0 of 642 296 changed). The bots'
+  SmoothMove 359..370 against 502..523 us in all eight A4000D runs, but the
+  frames over both series (bm1 bm0 bm0 bm1, bm0 bm1 bm1 bm0): 28.9 against
+  30.0 fps on average -- path finding 1.38 against 0.89 ms and the bots'
+  start-up peaks decided it, not SmoothMove. Chance or an indirect effect
+  on the bots' timing cannot be told apart with eight runs; the totals are
+  worse, so not kept (0.15 ms at stake).
+- **fps-night2 as a whole, 20.11 ~03:40** (A4000D, pansample, G0 = gl as
+  pushed 17d5074, N13 = fps-night2 73b3df4; G0 N13 N13 G0 each): orig04
+  scrolling 26.7 / 26.5 against 29.0 / 30.2 fps (frame 37.6 against 33.7
+  ms, drawing 23.8 against 21.0 ms); orig01 still 46.1 / 46.5 against 50.5
+  / 49.4 fps (server 4.8 against 3.4 ms). FS-UAE on the tip: SwSums,
+  NoGL, GLSmoke, GLTour, LoadBar, HudKeep pass.
+- **The draw order reads again only the movers' keys** (fps-night2,
+  ZOD_MOVEKEYS): every frame each view's dynamic entries had their keys
+  (and the render view's x ranges) read again -- but only robots and
+  vehicles move; buildings, cannons, huts, flags and the map objects keep
+  theirs. A flag per entry, moved by the sort, keeps theirs. FS-UAE
+  MoveKeyCheck (ZOD_MOVEKEYCHECK: the kept ones read anyway every frame):
+  0 of ~6.7 M had changed; SplitCheck, XCullCheck, SwSums, GLSmoke pass.
+  A4000D (pansample, n14, two tour series): sorts 519 / 548 / 545 / 534
+  against 768 / 796 / 850 / 803 us; frames 34.13 against 34.17 ms over
+  eight runs (server 5.7..8.1 ms either way).
+- **The software path's dirty grids set only when read, under GL**
+  (fps-night2, ZOD_DIRTYLAZY): ZMap::DoRender called zod_dirty_force_full
+  at every frame the view moved, which set both block grids whole -- ~60
+  small memsets, the profile's memset callers (grid_alles, 0.85 % of the
+  samples) -- though under GL nothing reads them while the game runs. Under
+  GL it now only notes that they are due; every reader (the sweep, the
+  copy's runs, zod_dirty_clear) sets them first, so it sees what it saw
+  before. tools/prof_report.py --callers NAME found the callers. FS-UAE
+  SwSums, GLSmoke, GLTour, LoadBar, NoGL pass. A4000D (pansample, n15, two
+  tour series): map section 2377 / 2603 / 2490 / 2361 against 2952 / 2689
+  / 2758 / 2771 us; 29.2 against 29.25 fps over eight runs.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of

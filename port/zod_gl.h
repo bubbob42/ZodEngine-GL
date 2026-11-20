@@ -40,6 +40,10 @@ unsigned long zod_gl_lib_ticks(void);
 
 /* a kept HUD (ZOD_HUDKEEP): count draws into x > gx or y > gy while on */
 void zod_gl_hud_guard(int on, int gx, int gy);
+/* the first atlas pages made during loading (RadeonGL), not mid-game:
+ * a page is cleared in 16 strips, ~0.3 s; ZOD_GL_PREPAGES (default 2, aus/0:
+ * made when first needed, as before). Returns the pages there. */
+int zod_gl_atlas_prepare(void);
 unsigned long zod_gl_guard_hits(void);
 
 /* frames presented so far (zod_gl_flush): which of the buffers this is */

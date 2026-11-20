@@ -114,9 +114,15 @@ ZObject::ZObject(ZTime *ztime_, ZSettings *zsettings_)
 
 unsigned long zod_killme_pending = 0;   /* see DoKillMe */
 
+/* objects whose show_waypoints is on (ShowWaypoints on, ProcessObject off
+ * after 3 s): while 0, every DoRenderWaypoints without rally points returns
+ * at its first line and ZPlayer leaves the pass out (ZOD_WPSKIP) */
+unsigned long zod_waypoints_shown = 0;
+
 ZObject::~ZObject()
 {
 	if(kill_counted && zod_killme_pending) zod_killme_pending--;
+	if(show_waypoints && zod_waypoints_shown) zod_waypoints_shown--;
 
 	//kill any pathfinding threads
 	if(zmap) cur_wp_info.clear_and_kill(*zmap);
@@ -1054,7 +1060,10 @@ int ZObject::ProcessObject()
 		waypoint_cursor.Process(the_time);
 
 		if(the_time >= render_death_time)
+		{
 			show_waypoints = false;
+			if(zod_waypoints_shown) zod_waypoints_shown--;
+		}
 	}
 
 	TryDropTracks();
@@ -1068,6 +1077,7 @@ void ZObject::ShowWaypoints()
 	vector<waypoint>::iterator i;
 
 	render_death_time = the_time + 3.0;
+	if(!show_waypoints) zod_waypoints_shown++;
 	show_waypoints = true;
 
 	//set cursor

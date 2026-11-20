@@ -1,0 +1,33 @@
+; MoveKeyCheck -- the draw order reads again only the keys of what can move
+; (robots, vehicles; ZOD_MOVEKEYS). ZOD_MOVEKEYCHECK on reads the kept
+; ones too each frame and counts any whose key or x range had changed
+; ("0 kept ones had changed"). GL, orig01 still, orig04 and p08 scrolling
+; (ZOD_TOUR), 40 s each. FS-UAE + RadeonGL's null card.
+; LIMIT 1200
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv ZOD_MOVEKEYCHECK on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod mks 40 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-mks.done
+Type DEV:Test/zod-mks.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod mkt 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-mkt.done
+Type DEV:Test/zod-mkt.log >>DEV:Test/auto.log
+Echo "=== GL, p08, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod mkb 40 -m Data/Maps/Custom/p08_bb_p08m01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-mkb.done
+Type DEV:Test/zod-mkb.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_MOVEKEYCHECK
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

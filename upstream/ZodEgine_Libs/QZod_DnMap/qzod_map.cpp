@@ -41,6 +41,8 @@ SDL_mutex *ZMap::init_mutex = SDL_CreateMutex();
 ZMap::ZMap()
 {
     //full_render = nullptr;
+    water_gen = 1;
+    water_due_gen = 0;
     last_shift_time = 0;
     submerge_info_setup = false;
     rock_list_setup = false;
@@ -904,7 +906,7 @@ void ZMap::ClearMap()
     object_list.clear();
     tile_list.clear();
     map_effect_list.clear();
-    map_water_list.clear();
+    map_water_list.clear(); water_gen++;
 
     shift_x = shift_y = 0;
     view_w = view_h = 0;
@@ -926,7 +928,7 @@ void ZMap::InitEffects()
 {
     unsigned int i;
     map_effect_list.clear();
-    map_water_list.clear();
+    map_water_list.clear(); water_gen++;
 
     ulong new_tile;
 
@@ -946,7 +948,7 @@ void ZMap::InitEffects()
             new_tile = map_water_plist[basic_info.terrain_type][new_tile];
             t.tile = static_cast<ushort>(new_tile);
 
-            map_water_list.push_back(i);
+            map_water_list.push_back(i); water_gen++;
             continue;
         }
 
@@ -955,7 +957,7 @@ void ZMap::InitEffects()
 
         if(t_info.is_water && !t_info.is_effect)
         {
-            map_water_list.push_back(i);
+            map_water_list.push_back(i); water_gen++;
         }
     }
 
@@ -977,7 +979,13 @@ void ZMap::InitEffects()
  * them outside the view: ~1.9 ms of a scrolling A4000D frame on orig04.
  * ZOD_EFFCHECK on: the position and the view test are done the old way as
  * well and compared (zod_effcheck_bad must stay 0). */
-static int effpos = -1, effcheck = -1;
+static int effpos = -1, effcheck = -1, waterdue = -1;
+/* ZOD_WATERDUE (default on): the water tiles' start timers are walked in
+ * a compact array of their due times (ZMap::water_due, the list's order)
+ * instead of the 20-byte records: 734 records a frame on orig04, a third
+ * of DoEffects on the A4000D (the load of each record's time from card
+ * memory). Rebuilt when the list changed (water_gen). */
+unsigned long zod_waterdue_rebuilt = 0, zod_waterdue_frames = 0, zod_waterdue_bad = 0;
 unsigned long zod_effpos_skipped = 0, zod_effcheck_n = 0, zod_effcheck_bad = 0;
 
 static int eff_switch(const char *name, int dflt)
@@ -997,6 +1005,13 @@ static bool effpos_on()
     if(effpos < 0) effpos = eff_switch("ZOD_EFFPOS", 1);
 
     return effpos == 1;
+}
+
+static bool waterdue_on()
+{
+    if(waterdue < 0) waterdue = eff_switch("ZOD_WATERDUE", 1);
+
+    return waterdue == 1;
 }
 
 static bool effcheck_on()
@@ -1172,11 +1187,38 @@ int ZMap::DoEffects(double the_time, SDL_Surface *dest, int shift_x, int shift_y
 
     //start a water effect?
     if(map_water_effect_plist[basic_info.terrain_type].size())
-    for(vector<map_effect_info>::iterator i=map_water_list.begin(); i != map_water_list.end(); ++i)
     {
-        if(the_time < i->next_effect_time) continue;
+    const bool wd = waterdue_on();
+    const size_t wn = map_water_list.size();
+
+    if(wd)
+    {
+        zod_waterdue_frames++;
+
+        if(water_due_gen != water_gen || water_due.size() != wn)
+        {
+            water_due.resize(wn);
+            for(size_t k = 0; k < wn; k++) water_due[k] = map_water_list[k].next_effect_time;
+            water_due_gen = water_gen;
+            zod_waterdue_rebuilt++;
+        }
+
+        /* ZOD_EFFCHECK: the copy against the records, every frame */
+        if(effcheck_on())
+            for(size_t k = 0; k < wn; k++)
+                if(water_due[k] != map_water_list[k].next_effect_time) zod_waterdue_bad++;
+    }
+
+    for(size_t k = 0; k < wn; ++k)
+    {
+        /* the same test as before, on the compact copy; the record only
+         * when due (its time stays the one every other reader sees) */
+        if(wd ? (the_time < water_due[k]) : (the_time < map_water_list[k].next_effect_time)) continue;
+
+        vector<map_effect_info>::iterator i = map_water_list.begin() + k;
 
         i->next_effect_time = the_time + min_interval_time + ((rand() % 4) * 0.033);
+        if(wd) water_due[k] = i->next_effect_time;
 
         unsigned int map_tile = i->tile;
         palette_tile_info &p_info = planet_tile_info[basic_info.terrain_type][tile_list[map_tile].tile];
@@ -1197,6 +1239,7 @@ int ZMap::DoEffects(double the_time, SDL_Surface *dest, int shift_x, int shift_y
 
             tile_list[map_tile].tile = static_cast<ushort>(new_tile);
         }
+    }
     }
 
     return 1;
@@ -1367,7 +1410,10 @@ void ZMap::ChangeTile(unsigned int index, map_tile new_tile)
             {
                 //if(*i == index)
                 if(i->tile == index)
+                {
                     i = map_water_list.erase(i);
+                    water_gen++;
+                }
                 else
                     i++;
             }
@@ -1388,6 +1434,7 @@ void ZMap::ChangeTile(unsigned int index, map_tile new_tile)
         if(t_info.is_water && !t_info.is_effect)
         {
             map_water_list.push_back(index);
+            water_gen++;
         }
     }
 

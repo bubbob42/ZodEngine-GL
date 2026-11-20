@@ -36,6 +36,48 @@ static int rocks_idle_on(void)
 }
 
 extern unsigned long zod_killme_pending;   /* zobject.cpp */
+
+/* ZOD_SRVMAPSKIP (default on): the map items (trees, crates, huts, flags,
+ * grenade boxes; ~300 on orig04) are left out of the per-tick process and
+ * update passes. Every one of them runs ZObject's own ProcessServer, which
+ * for them changes nothing but its two time stamps, and the update pass
+ * acts only on flags they never have set. Each costs ~10 cache misses a
+ * pass on the A4000D. ZOD_SRVMAPCHECK on: both passes over every map item
+ * as before, and each map item's bytes compared before and after its
+ * ProcessServer (the two time stamps put back first): any other change is
+ * counted -- a flag found set, a field written. */
+static int srvmapskip = -1, srvmapcheck = -1;
+unsigned long zod_srvmap_checked = 0, zod_srvmap_bad = 0, zod_srvmap_passes = 0;
+
+static int srv_switch(const char *name, int dflt)
+{
+#ifdef __amigaos__
+	char buf[16];
+	const char *e = zod_env(name, buf, sizeof(buf));
+#else
+	const char *e = getenv(name);
+#endif
+
+	if(!e) return dflt;
+	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
+	if(e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
+
+	return dflt;
+}
+
+static bool srvmapcheck_on()
+{
+	if(srvmapcheck < 0) srvmapcheck = srv_switch("ZOD_SRVMAPCHECK", 0);
+
+	return srvmapcheck == 1;
+}
+
+static bool srvmapskip_on()
+{
+	if(srvmapskip < 0) srvmapskip = srv_switch("ZOD_SRVMAPSKIP", 1);
+
+	return srvmapskip == 1 && !srvmapcheck_on();
+}
 unsigned long zod_killpass_run = 0, zod_killpass_skip = 0;
 static int killfast = -1;
 
@@ -178,6 +220,9 @@ extern "C" void zod_server_sections_report(long frames)
 	ZLOG("  server.SUMME = %ld us (muss `server` oben entsprechen)\n", (long)summe);
 	ZLOG("  server.Takte = %ld bei %ld Bildern\n",
 	     (long)zod_ssec_takte, (long)frames);
+	ZLOG("  server.map items: left out of %lu process and update passes (ZOD_SRVMAPSKIP);"
+	     " ZOD_SRVMAPCHECK: %lu processed and compared, %lu changed\n",
+	     zod_srvmap_passes, zod_srvmap_checked, zod_srvmap_bad);
 	ZLOG("  server.deletion pass: run %lu times, left out %lu (ZOD_KILLFAST);"
 	     " objects set to die now %lu\n",
 	     zod_killpass_run, zod_killpass_skip, zod_killme_pending);
@@ -1402,10 +1447,45 @@ void ZServer::ProcessObjects()
 
 	//process all the objects (the rocks do nothing here: server_olist)
 	{
-		vector<ZObject*> &plist = rocks_idle_on() ? ols.server_olist : object_list;
+		vector<ZObject*> &plist = srvmapskip_on() ? ols.non_mapitem_olist
+		                        : (rocks_idle_on() ? ols.server_olist : object_list);
 
-		for(obj=plist.begin(); obj!=plist.end();obj++)
-			(*obj)->ProcessServer(zmap, ols);
+		if(srvmapskip_on()) zod_srvmap_passes++;
+
+		if(srvmapcheck_on())
+		{
+			static vector<unsigned char> vor;
+
+			for(obj=plist.begin(); obj!=plist.end();obj++)
+			{
+				unsigned char ot, oid;
+
+				(*obj)->GetObjectID(ot, oid);
+
+				if(ot != MAP_ITEM_OBJECT || oid == ROCK_ITEM)
+				{
+					(*obj)->ProcessServer(zmap, ols);
+					continue;
+				}
+
+				{
+					double t0[2], t1[2];
+					const unsigned char *b = (const unsigned char *)(*obj);
+
+					(*obj)->GetServerTimes(t0);
+					vor.assign(b, b + sizeof(ZObject));
+					(*obj)->ProcessServer(zmap, ols);
+					(*obj)->GetServerTimes(t1);
+					(*obj)->SetServerTimes(t0);
+					zod_srvmap_checked++;
+					if(memcmp(&vor[0], b, sizeof(ZObject))) zod_srvmap_bad++;
+					(*obj)->SetServerTimes(t1);
+				}
+			}
+		}
+		else
+			for(obj=plist.begin(); obj!=plist.end();obj++)
+				(*obj)->ProcessServer(zmap, ols);
 	}
 
 	zod_ssec_end(SSEC_PROCESS);
@@ -1446,7 +1526,8 @@ void ZServer::ProcessObjects()
 
 	//check to see what updated and needs to be sent to the clients
 	//(a rock's sflags stay clear: server_olist)
-	vector<ZObject*> &ulist = rocks_idle_on() ? ols.server_olist : object_list;
+	vector<ZObject*> &ulist = srvmapskip_on() ? ols.non_mapitem_olist
+	                        : (rocks_idle_on() ? ols.server_olist : object_list);
 
 	for(obj=ulist.begin(); obj!=ulist.end(); )
 	{

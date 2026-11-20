@@ -1,0 +1,28 @@
+; WPCheck -- while no unit shows its waypoints, the waypoint pass draws nothing
+; and is left out (ZOD_WPSKIP). ZOD_WPCHECK on runs it anyway in those frames
+; and counts the frames where it made a quad ("0 drew"). GL, orig01 still
+; and orig04 scrolling (ZOD_TOUR), 30 s each. FS-UAE + RadeonGL null card.
+; LIMIT 700
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv ZOD_WPCHECK on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod wps 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-wps.done
+Type DEV:Test/zod-wps.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod wpt 30 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-wpt.done
+Type DEV:Test/zod-wpt.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_WPCHECK
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

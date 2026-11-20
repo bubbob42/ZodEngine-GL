@@ -452,6 +452,9 @@ class QZOD_DNOBJECTSSHARED_EXPORT ZObject
 		bool ReachedTarget();
 		void SetTarget(int x, int y);
 		void SetTarget() { SetTarget(cur_wp_info.x, cur_wp_info.y); }
+		/* ZOD_SRVMAPCHECK (zserver.cpp): ProcessServer's own two time stamps */
+		void GetServerTimes(double t[2]) const { t[0] = last_process_server_time; t[1] = next_check_passive_attack_time; }
+		void SetServerTimes(const double t[2]) { last_process_server_time = t[0]; next_check_passive_attack_time = t[1]; }
 		bool KillMe(double the_time)
 		{
 			return (killme && the_time >= killme_time);

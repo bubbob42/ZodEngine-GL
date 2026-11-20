@@ -1,0 +1,30 @@
+; RefDiffCheck -- refreshes of 8-bit own textures (the minimap, the portrait)
+; send only the box around what differs from the pixels last sent (ZOD_REFDIFF).
+; ZOD_REFDIFFCHECK on keeps an image of the texture by what was really sent
+; and compares it with the surface after every refresh ("0 left ... unlike").
+; GL, orig01 still and orig04 scrolling (ZOD_TOUR), 30 s each. FS-UAE +
+; RadeonGL's null card.
+; LIMIT 700
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv ZOD_REFDIFFCHECK on
+Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rds 30 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rds.done
+Type DEV:Test/zod-rds.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== GL, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rdt 30 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rdt.done
+Type DEV:Test/zod-rdt.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_REFDIFFCHECK
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

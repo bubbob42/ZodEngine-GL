@@ -152,6 +152,8 @@ def main():
                     help='code size of the library (with --libfuncs; default 0.11)')
     ap.add_argument('--slot', type=int, help='the PC slot, when the guess is wrong')
     ap.add_argument('--top', type=int, default=40)
+    ap.add_argument('--callers', help='a program function whose samples go to their callers '
+                    'as the library\'s do (the first return address into the program above it)')
     ap.add_argument('--under', help='only the samples with this program function '
                     'at the PC or on the stack (e.g. _G_Ticker: the game logic alone)')
     ap.add_argument('--addr', help='the PC histogram inside this program function: offsets '
@@ -255,7 +257,7 @@ def main():
         flat[w] += 1
         side[w[0]] += 1
         above = stack_words(s, slot)
-        if w[0] != 'prog':
+        if w[0] != 'prog' or (a.callers and w[1] == a.callers):
             for v in above:
                 if is_return(v):
                     caller[(w[0], pnames.name(v - pbase))] += 1
