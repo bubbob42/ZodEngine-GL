@@ -740,6 +740,21 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   26.5 fps, HUD 2740 / 2643 against 2466 / 2530 us -- writing twelve fields
   to the struct on every miss (card memory) costs more than the divisions.
   Reverted. Divisions are not the cost; memory traffic is.
+- **Objects beside the view left out of DoRender** (fps-night2,
+  ZOD_XCULL): the objects' band (the rows near the view) spans the whole
+  map's width, the view only part of it. The band census got a sideways
+  part (ZOD_BANDCENSUS): objects that drew lay at most 15 px left of the
+  view (map items) and 1 px right of it (orig01 still, orig04 and p08
+  scrolling, ~1.8 M draws) -- 64 px margins each way. The render view keeps
+  each entry's x and x + w beside its key (read in the same pass,
+  moved by the same sort); the merge leaves out what lies wholly beside
+  the columns. FS-UAE XCullCheck (the left-out ones drawn anyway, every
+  quad counted): 0 of 3.1 M drew; 23 % of the band left out on orig01,
+  43 % on orig04, 82 % on p08; SwSums, NoGL, GLSmoke pass. A4000D
+  (pansample, n4, tour, two series x1 x0 x0 x1 and x0 x1 x1 x0): objects
+  4104 / 4098 / 4136 / 4118 against 4895 / 5100 / 4908 / 4950 us; the sort
+  +0.1..0.2 ms (the x arrays); 27.4 / 26.4 / 27.3 / 27.8 against 26.9 /
+  27.2 / 27.0 / 26.1 fps (means 27.2 against 26.8).
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of

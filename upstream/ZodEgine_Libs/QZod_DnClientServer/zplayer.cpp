@@ -1588,6 +1588,10 @@ static int zod_switch(const char *name, int dflt)
 	return dflt;
 }
 
+/* ZOD_XCULL's margins and counters, see split_merge_x */
+enum { XCULL_LEFT = 64, XCULL_RIGHT = 64 };
+static unsigned long zod_xcull_seen = 0, zod_xcull_cut = 0, zod_xcull_bad = 0;
+
 /* ZOD_SNDLIST / ZOD_SNDCHECK, see building_sound_flags */
 static int sndlist = -1, sndcheck = -1;
 static unsigned long zod_snd_frames = 0, zod_snd_bad = 0, zod_snd_radar = 0, zod_snd_robot = 0;
@@ -2097,6 +2101,11 @@ extern "C" void zod_render_sections_report(long frames)
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
 		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
 
+	if(zod_xcull_seen)
+		ZLOG("draw.objects sideways: %lu of %lu in the band left out (ZOD_XCULL, margins %d / %d px);"
+		     " ZOD_XCULLCHECK: %lu of them drew\n",
+		     zod_xcull_cut, zod_xcull_seen, (int)XCULL_LEFT, (int)XCULL_RIGHT, zod_xcull_bad);
+
 	if(zod_after_alle)
 		ZLOG("draw.after effects band = %lu of %lu visited (ZOD_AFTERBAND)\n",
 		     zod_after_besucht, zod_after_alle);
@@ -2536,6 +2545,12 @@ static int band_census = -1;
 static int band_above[MAX_MAP_OBJECT_TYPES + 1], band_below[MAX_MAP_OBJECT_TYPES + 1];
 static unsigned long band_drawn[MAX_MAP_OBJECT_TYPES + 1];
 static unsigned long band_missed[MAX_MAP_OBJECT_TYPES + 1];   /* drew, outside the band */
+/* the same sideways: how far left of the view's left edge an object's right
+ * edge (x + w) lay, or right of the view's right edge its left edge (x),
+ * when it drew -- the margins a cull by x would need; and how many of the
+ * band's objects lay outside the view sideways at all (what it would save) */
+static int band_left[MAX_MAP_OBJECT_TYPES + 1], band_right[MAX_MAP_OBJECT_TYPES + 1];
+static unsigned long band_x_in = 0, band_x_out = 0;
 
 static int band_census_on(void)
 {
@@ -2559,10 +2574,18 @@ static int band_census_on(void)
 	return band_census;
 }
 
-static void band_census_note(ZObject *o, int top, int bottom)
+static void band_census_note(ZObject *o, int top, int bottom, int left, int right)
 {
 	unsigned char ot, oid;
 	const int key = o->SortKey();
+	int x, y, w, h;
+	static int init = 0;
+
+	if(!init)
+	{
+		for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++) band_left[k] = band_right[k] = -100000;
+		init = 1;
+	}
 
 	o->GetObjectID(ot, oid);
 	if(ot > MAX_MAP_OBJECT_TYPES) ot = MAX_MAP_OBJECT_TYPES;
@@ -2570,6 +2593,11 @@ static void band_census_note(ZObject *o, int top, int bottom)
 	band_drawn[ot]++;
 	if(top - key > band_above[ot]) band_above[ot] = top - key;
 	if(key - bottom > band_below[ot]) band_below[ot] = key - bottom;
+
+	o->GetCords(x, y);
+	o->GetDimensionsPixel(w, h);
+	if(left - (x + w) > band_left[ot]) band_left[ot] = left - (x + w);
+	if(x - right > band_right[ot]) band_right[ot] = x - right;
 }
 
 /* the same for DoAfterEffects (health bars, countdowns over buildings):
@@ -2610,8 +2638,12 @@ void zod_band_census_report(void)
 	     " below its bottom, at most; negative: never outside):\n");
 	for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++)
 		if(band_drawn[k])
-			ZLOG("  type %d: %lu draws, above %d, below %d; outside the band (it would miss them) %lu\n",
-			     k, band_drawn[k], band_above[k], band_below[k], band_missed[k]);
+			ZLOG("  type %d: %lu draws, above %d, below %d; outside the band (it would miss them) %lu;"
+			     " sideways: right edge left of the view %d, left edge right of it %d\n",
+			     k, band_drawn[k], band_above[k], band_below[k], band_missed[k],
+			     band_left[k], band_right[k]);
+	ZLOG("Band census sideways: of the band's objects %lu lay in the view's columns, %lu outside them\n",
+	     band_x_in, band_x_out);
 }
 #else
 void zod_band_census_report(void) {}
@@ -2915,6 +2947,10 @@ struct split_view
 {
 	vector<ZObject*> fix, dyn;
 	vector<int> fix_keys, dyn_keys;
+	/* SV_RENDER only (ZOD_XCULL): each entry's x and x + w, taken with its
+	 * key (the same fields' cache lines), moved with it by the sort */
+	bool with_x;
+	vector<int> fix_x0, fix_x1, dyn_x0, dyn_x1;
 };
 
 enum { SV_RENDER, SV_PRE, SV_AFTER, SV_BAND, SV_MAX };
@@ -2924,6 +2960,33 @@ static bool split_ready = false;
 static bool split_sync_late = false;   /* made again after this frame's sort */
 
 static int sortsplit = -1, splitcheck = -1;
+
+/* ZOD_XCULL (default on): the objects' band (rows near the view) spans the
+ * whole map's width, the view only part of it; entries whose x range lies
+ * wholly beside the view's columns plus a margin are left out of DoRender.
+ * The margins come from the census (ZOD_BANDCENSUS, sideways): how far
+ * beside its own x range an object that drew anything lay -- at most 15 px
+ * left of the view (map items) and 1 px right of it, on orig01 still and
+ * orig04 and p08 scrolling (~1.8 M draws); 64 px each way here, also for
+ * units that moved after the keys were read. It leaves out 28 % of the
+ * band on orig01, 52 % on orig04, 86 % on p08. ZOD_XCULLCHECK
+ * on: the left-out ones are drawn anyway, after the others, and any quad
+ * they make is counted (must stay 0). */
+static int xcull = -1, xcullcheck = -1;
+
+static int xcull_on(void)
+{
+	if(xcull < 0) xcull = zod_switch("ZOD_XCULL", 1);
+
+	return xcull;
+}
+
+static int xcullcheck_on(void)
+{
+	if(xcullcheck < 0) xcullcheck = zod_switch("ZOD_XCULLCHECK", 0);
+
+	return xcullcheck;
+}
 
 static int sortsplit_on(void)
 {
@@ -2953,8 +3016,9 @@ static bool split_active(void)
 	return sortsplit_on() != 0;
 }
 
-/* stable insertion sort of v by k (moved together) */
-static void split_sort(vector<ZObject*> &v, vector<int> &k)
+/* stable insertion sort of v by k (moved together; x0/x1 too when given) */
+static void split_sort(vector<ZObject*> &v, vector<int> &k,
+                       vector<int> *x0 = 0, vector<int> *x1 = 0)
 {
 	const size_t n = v.size();
 
@@ -2964,15 +3028,23 @@ static void split_sort(vector<ZObject*> &v, vector<int> &k)
 		const int key = k[i];
 		size_t j = i;
 
-		while(j > 0 && key < k[j - 1])
-		{
-			v[j] = v[j - 1];
-			k[j] = k[j - 1];
-			j--;
-		}
+		if(!(key < k[i - 1])) continue;   /* in place already (the usual case) */
 
-		v[j] = o;
-		k[j] = key;
+		{
+			const int a0 = x0 ? (*x0)[i] : 0, a1 = x1 ? (*x1)[i] : 0;
+
+			while(j > 0 && key < k[j - 1])
+			{
+				v[j] = v[j - 1];
+				k[j] = k[j - 1];
+				if(x0) { (*x0)[j] = (*x0)[j - 1]; (*x1)[j] = (*x1)[j - 1]; }
+				j--;
+			}
+
+			v[j] = o;
+			k[j] = key;
+			if(x0) { (*x0)[j] = a0; (*x1)[j] = a1; }
+		}
 	}
 }
 
@@ -2995,9 +3067,29 @@ static void split_carry(vector<ZObject*> &view, const vector<ZObject*> &cur)
 	view.swap(out);
 }
 
-static void split_rekey(vector<ZObject*> &v, vector<int> &k)
+static void split_rekey(vector<ZObject*> &v, vector<int> &k,
+                        vector<int> *x0 = 0, vector<int> *x1 = 0)
 {
 	k.resize(v.size());
+
+	if(x0)
+	{
+		x0->resize(v.size());
+		x1->resize(v.size());
+
+		for(size_t i = 0; i < v.size(); i++)
+		{
+			int x, y, w, h;
+
+			v[i]->GetCords(x, y);
+			v[i]->GetDimensionsPixel(w, h);
+			k[i] = y + h;   /* SortKey() */
+			(*x0)[i] = x;
+			(*x1)[i] = x + w;
+		}
+
+		return;
+	}
 
 	for(size_t i = 0; i < v.size(); i++) k[i] = v[i]->SortKey();
 }
@@ -3011,6 +3103,16 @@ static void split_rebuild(struct split_view *sv, const vector<ZObject*> &list)
 
 	split_carry(sv->fix, cf);
 	split_carry(sv->dyn, cd);
+
+	if(sv->with_x)
+	{
+		split_rekey(sv->fix, sv->fix_keys, &sv->fix_x0, &sv->fix_x1);
+		split_rekey(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
+		split_sort(sv->fix, sv->fix_keys, &sv->fix_x0, &sv->fix_x1);
+		split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
+		return;
+	}
+
 	split_rekey(sv->fix, sv->fix_keys);
 	split_rekey(sv->dyn, sv->dyn_keys);
 	split_sort(sv->fix, sv->fix_keys);
@@ -3025,6 +3127,7 @@ static void split_frame(ZOLists &ols)
 
 	zod_split_frames++;
 	split_sync_late = false;
+	split_views[SV_RENDER].with_x = xcull_on() != 0;
 
 	if(!split_ready || ols.gen != split_gen)
 	{
@@ -3040,8 +3143,16 @@ static void split_frame(ZOLists &ols)
 	{
 		struct split_view *sv = &split_views[i];
 
-		split_rekey(sv->dyn, sv->dyn_keys);
-		split_sort(sv->dyn, sv->dyn_keys);
+		if(sv->with_x)
+		{
+			split_rekey(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
+			split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
+		}
+		else
+		{
+			split_rekey(sv->dyn, sv->dyn_keys);
+			split_sort(sv->dyn, sv->dyn_keys);
+		}
 		zod_split_dynkeys += (unsigned long)sv->dyn.size();
 	}
 }
@@ -3053,6 +3164,7 @@ static void split_sync(ZOLists &ols)
 	if(split_ready && ols.gen == split_gen) return;
 
 	split_sync_late = true;
+	split_views[SV_RENDER].with_x = xcull_on() != 0;
 
 	const vector<ZObject*> *lists[SV_MAX] = { &ols.prender_olist, &ols.prerender_olist,
 	                                          &ols.aftereffect_olist, &ols.prerender_band_olist };
@@ -3101,6 +3213,41 @@ static void split_merge(const struct split_view *sv, size_t fa, size_t fb, size_
 			out.push_back(sv->fix[fa++]);
 		else
 			out.push_back(sv->dyn[da++]);
+	}
+}
+
+/* split_merge, leaving out the entries whose [x0, x1] lies wholly left of
+ * xl or right of xr (ZOD_XCULL); those go to *cut when given (the check) */
+static void split_merge_x(const struct split_view *sv, size_t fa, size_t fb, size_t da, size_t db,
+                          int xl, int xr, vector<ZObject*> &out, vector<ZObject*> *cut)
+{
+	out.clear();
+	if(cut) cut->clear();
+
+	while(fa < fb || da < db)
+	{
+		ZObject *o;
+		int x0, x1;
+
+		if(da >= db || (fa < fb && sv->fix_keys[fa] <= sv->dyn_keys[da]))
+		{
+			o = sv->fix[fa]; x0 = sv->fix_x0[fa]; x1 = sv->fix_x1[fa]; fa++;
+		}
+		else
+		{
+			o = sv->dyn[da]; x0 = sv->dyn_x0[da]; x1 = sv->dyn_x1[da]; da++;
+		}
+
+		zod_xcull_seen++;
+
+		if(x1 < xl || x0 > xr)
+		{
+			zod_xcull_cut++;
+			if(cut) cut->push_back(o);
+			continue;
+		}
+
+		out.push_back(o);
 	}
 }
 
@@ -5087,9 +5234,18 @@ void ZPlayer::RenderObjects()
 
 			o->DoRender(zmap, screen);
 
+			if(i >= a && i < b)
+			{
+				int ox, oy, ow, oh;
+
+				o->GetCords(ox, oy);
+				o->GetDimensionsPixel(ow, oh);
+				if(ox + ow < bx || ox > bx + bw) band_x_out++; else band_x_in++;
+			}
+
 			if(zod_gl_draw_count() != before)
 			{
-				band_census_note(o, by, by + bh);
+				band_census_note(o, by, by + bh, bx, bx + bw);
 
 				if(i < a || i >= b)
 				{
@@ -5107,7 +5263,7 @@ void ZPlayer::RenderObjects()
 	{
 		/* the two views merged in key order: the band's part of each, or all
 		 * of both with ZOD_BAND aus (see the band below for the margins) */
-		static vector<ZObject*> seq;
+		static vector<ZObject*> seq, xcut;
 		struct split_view *sv = &split_views[SV_RENDER];
 		int bx, by, bw, bh;
 
@@ -5120,7 +5276,14 @@ void ZPlayer::RenderObjects()
 
 			split_range(sv->fix_keys, by - BAND_ABOVE, by + bh + BAND_BELOW, &fa, &fb);
 			split_range(sv->dyn_keys, by - BAND_ABOVE, by + bh + BAND_BELOW, &da, &db);
-			split_merge(sv, fa, fb, da, db, seq);
+
+			/* sideways as well (not under ZOD_SPLITCHECK: it compares the
+			 * whole band with the one sorted list) */
+			if(sv->with_x && !splitcheck_on())
+				split_merge_x(sv, fa, fb, da, db, bx - XCULL_LEFT, bx + bw + XCULL_RIGHT, seq,
+				              xcullcheck_on() ? &xcut : 0);
+			else
+				split_merge(sv, fa, fb, da, db, seq);
 
 			zod_band_obj_alle += (unsigned long)(sv->fix.size() + sv->dyn.size());
 			zod_band_obj_besucht += (unsigned long)seq.size();
@@ -5168,6 +5331,19 @@ void ZPlayer::RenderObjects()
 
 		for(size_t i = 0; i < seq.size(); i++)
 			seq[i]->DoRender(zmap, screen);
+
+#ifndef DISABLE_OPENGL
+		/* ZOD_XCULLCHECK: the left-out ones, drawn anyway: none may draw */
+		if(xcullcheck_on() && zod_gl_active)
+			for(size_t i = 0; i < xcut.size(); i++)
+			{
+				const unsigned long before = zod_gl_draw_count();
+
+				xcut[i]->DoRender(zmap, screen);
+				if(zod_gl_draw_count() != before) zod_xcull_bad++;
+			}
+#endif
+		xcut.clear();
 	}
 	else
 	if(band_on() && prender_keys_n == ols.prender_olist.size() && prender_keys_n > 0)
