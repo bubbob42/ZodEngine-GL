@@ -797,6 +797,23 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   another object tie on the key (idle units stand on the tile grid like
   the trees) and now draw in the other order. A visible-order change for
   ~0.15 ms: reverted.
+- **REJECTED: the GL batches as client arrays** (ZOD_GL_ARRAYS, n10, not
+  committed): each batch's quads into vertex / texcoord / colour arrays and
+  one glDrawArrays(GL_QUADS), instead of glTexCoord2f + glVertex3f per
+  vertex -- to save two library calls a vertex. r200view pictures of
+  frame 300 (FS-UAE GLSmoke dumps) the same apart from moving units. But
+  A4000D (pansample, g1 g0 g0 g1, tour): 24.9 / 23.4 against 28.4 / 26.1
+  fps, drawing 27.0 / 27.9 against 21.4 / 22.1 ms, the flush at the present
+  576 against 138 us; FS-UAE showed it too (510 against 663 fps).
+  RadeonGL's unlocked array path (core/array.c: Fetch per attribute, the
+  byte colours converted per vertex) costs more than its immediate calls.
+  Reverted.
+- **The bots' "socket" time is their start**: a packet census in ZBot
+  (FS-UAE, 20 s): ~1 packet a frame for both bots together, most of them
+  ADD_NEW_OBJECT -- the whole map's objects sent to each bot at the start,
+  the one-second peak of server.bots. Averaged over a 60 s run that peak
+  alone is ~0.6 ms "a frame"; the bots' steady cost is well below the
+  1.7 ms average. Not a target.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
