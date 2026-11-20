@@ -48,10 +48,25 @@ extern unsigned long zod_dirty_frames;
 
 static int check_on = -1;
 static int sums_on = -1;            /* ZOD_AGA_SUMS (default on) */
-static ULONG *sums = 0;             /* two per 16x16 block: what the planes hold */
-static UBYTE *sums_valid = 0;
+static int dbuf_on = -1;            /* ZOD_AGA_DBUF (default on) */
+
+/* Two buffers (phase 2): the frame goes into the hidden bitmap, then
+ * ChangeScreenBuffer shows it at the next blank -- no block is ever seen
+ * half old, half new. Each buffer has its own block sums (what its planes
+ * hold); a block converted into one is stale in the other, which gets it
+ * the next time it is drawn into even when that frame does not mark it. */
+enum { NBUF = 2 };
+static struct ScreenBuffer *sbuf[NBUF];
+static struct MsgPort *safe_port = 0, *disp_port = 0;
+static int dbuf = 0;                /* double buffered now */
+static int cur = 0;                 /* the buffer the next frame goes into */
+static int safe_ok = 1, disp_ok = 1;
+static ULONG *sums[NBUF];           /* two per 16x16 block */
+static UBYTE *sums_valid[NBUF];
+static UBYTE *stale[NBUF];
 static int sums_gw = 0, sums_gh = 0;
 static unsigned long st_frames = 0, st_groups = 0, st_ticks = 0, st_skipped = 0;
+static unsigned long st_stale = 0, st_safe_waits = 0, st_change_failed = 0;
 static unsigned long st_check_frames = 0, st_check_differ = 0;
 
 static int env_on(const char *name)
@@ -136,23 +151,98 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		sums_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
 	}
 
-	free(sums);
-	free(sums_valid);
-	sums = 0;
-	sums_valid = 0;
-	sums_gw = w / 16;
-	sums_gh = (h + 15) / 16;
-
-	if(sums_on)
+	if(dbuf_on < 0)
 	{
-		sums = (ULONG *)malloc((size_t)sums_gw * sums_gh * 2 * sizeof(ULONG));
-		sums_valid = (UBYTE *)calloc((size_t)sums_gw * sums_gh, 1);
-		if(!sums || !sums_valid) { free(sums); free(sums_valid); sums = 0; sums_valid = 0; }
+		char buf[16];
+		const char *e = zod_env("ZOD_AGA_DBUF", buf, sizeof(buf));
+
+		dbuf_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+	}
+
+	dbuf = 0;
+
+	if(dbuf_on)
+	{
+		safe_port = CreateMsgPort();
+		disp_port = CreateMsgPort();
+		sbuf[0] = AllocScreenBuffer(scr, 0, SB_SCREEN_BITMAP);
+		sbuf[1] = AllocScreenBuffer(scr, 0, SB_COPY_BITMAP);
+
+		if(safe_port && disp_port && sbuf[0] && sbuf[1])
+		{
+			int i;
+
+			for(i = 0; i < NBUF; i++)
+			{
+				sbuf[i]->sb_DBufInfo->dbi_SafeMessage.mn_ReplyPort = safe_port;
+				sbuf[i]->sb_DBufInfo->dbi_DispMessage.mn_ReplyPort = disp_port;
+			}
+
+			dbuf = 1;
+			cur = 1;            /* buffer 0 is on display */
+			safe_ok = disp_ok = 1;
+		}
+		else
+		{
+			ZLOG("AGA: no second buffer (chip RAM?) -- one buffer\n");
+			if(sbuf[1]) FreeScreenBuffer(scr, sbuf[1]);
+			if(sbuf[0]) FreeScreenBuffer(scr, sbuf[0]);
+			sbuf[0] = sbuf[1] = 0;
+			if(safe_port) DeleteMsgPort(safe_port);
+			if(disp_port) DeleteMsgPort(disp_port);
+			safe_port = disp_port = 0;
+		}
+	}
+
+	{
+		int i;
+
+		sums_gw = w / 16;
+		sums_gh = (h + 15) / 16;
+
+		for(i = 0; i < NBUF; i++)
+		{
+			free(sums[i]); free(sums_valid[i]); free(stale[i]);
+			sums[i] = 0; sums_valid[i] = 0; stale[i] = 0;
+		}
+
+		for(i = 0; sums_on && i < (dbuf ? NBUF : 1); i++)
+		{
+			sums[i] = (ULONG *)malloc((size_t)sums_gw * sums_gh * 2 * sizeof(ULONG));
+			sums_valid[i] = (UBYTE *)calloc((size_t)sums_gw * sums_gh, 1);
+
+			if(!sums[i] || !sums_valid[i])
+			{
+				ZLOG("AGA: no memory for the block sums -- without them\n");
+				sums_on = 0;
+			}
+		}
+
+		if(!sums_on)
+			for(i = 0; i < NBUF; i++)
+			{
+				free(sums[i]); free(sums_valid[i]);
+				sums[i] = 0; sums_valid[i] = 0;
+			}
+
+		/* two buffers need the stale marks, with or without the sums */
+		for(i = 0; dbuf && i < NBUF; i++)
+		{
+			stale[i] = (UBYTE *)calloc((size_t)sums_gw * sums_gh, 1);
+
+			if(!stale[i])
+			{
+				ZLOG("AGA: no memory for the stale marks -- one buffer\n");
+				zod_aga_close(scr);   /* frees the second buffer */
+				break;
+			}
+		}
 	}
 
 	ZLOG("AGA: PAL HiRes Laced 640x512, 8 planes, the picture %dx%d from row %d; "
-	     "chunky to planar by dirty blocks into the shown bitmap%s\n",
-	     w, h, *dy, check_on ? "; every frame read back (ZOD_AGA_CHECK)" : "");
+	     "chunky to planar by dirty blocks, %s%s\n",
+	     w, h, *dy, dbuf ? "two buffers (ChangeScreenBuffer)" : "into the shown bitmap",
+	     check_on ? "; every frame read back (ZOD_AGA_CHECK)" : "");
 
 	return scr;
 }
@@ -271,19 +361,73 @@ static unsigned long check_all(const SDL_Surface *cs, UBYTE *const *pl, int bpr,
 	return differ;
 }
 
+/* block k (16x16 at gx, gy) of the compose surface into buffer b's planes,
+ * when its pixels are not what they hold already; 1 = converted */
+static int block_out(const SDL_Surface *cs, UBYTE *const *pl, int bpr, int dy, int b,
+                     int gx, int gy, int rows)
+{
+	const UBYTE *src = (const UBYTE *)cs->pixels + (long)gy * 16 * cs->pitch;
+	const long k = (long)gy * sums_gw + gx;
+
+	if(sums[b])
+	{
+		ULONG x, y;
+
+		block_sum16(src + gx * 16, cs->pitch, rows, &x, &y);
+
+		/* the other buffer: stale wherever it does not hold these pixels --
+		 * whether or not this buffer needs them (the pointer gone from a
+		 * place this buffer already shows bare must still go from the
+		 * other one) */
+		if(dbuf && stale[b ^ 1])
+		{
+			const int o = b ^ 1;
+
+			if(!sums_valid[o][k] || sums[o][2 * k] != x || sums[o][2 * k + 1] != y)
+				stale[o][k] = 1;
+		}
+
+		if(sums_valid[b][k] && sums[b][2 * k] == x && sums[b][2 * k + 1] == y)
+		{
+			st_skipped += (unsigned long)rows;
+			return 0;
+		}
+
+		sums[b][2 * k] = x;
+		sums[b][2 * k + 1] = y;
+		sums_valid[b][k] = 1;
+	}
+	else if(dbuf && stale[b ^ 1])
+		stale[b ^ 1][k] = 1;    /* without sums: the other one gets it too */
+
+	c2p_rows(src, cs->pitch, pl, bpr, gy * 16 + dy, rows, gx, gx);
+	st_groups += (unsigned long)rows;
+
+	return 1;
+}
+
 void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 {
 	enum { MAX_RUNS = 24 };
-	struct BitMap *bm = scr->RastPort.BitMap;
+	struct BitMap *bm;
 	UBYTE *pl[8];
 	short rx0[MAX_RUNS], rx1[MAX_RUNS];
 	const int schub = zod_dirty_block_shift();
 	const int block = 1 << schub;
 	const int w = cs->w, h = cs->h;
 	const unsigned long t0 = zod_fineclock_ticks();
+	const int b = dbuf ? cur : 0;
 	unsigned long bytes = 0;
 	int p, y0, i;
 
+	/* the buffer about to be drawn into may still be on display */
+	if(dbuf && !safe_ok)
+	{
+		while(!GetMsg(safe_port)) { WaitPort(safe_port); st_safe_waits++; }
+		safe_ok = 1;
+	}
+
+	bm = dbuf ? sbuf[b]->sb_BitMap : scr->RastPort.BitMap;
 	for(p = 0; p < 8; p++) pl[p] = (UBYTE *)bm->Planes[p];
 
 	for(y0 = 0; y0 < h; y0 += block)
@@ -299,43 +443,15 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 			if(x1 > w - 1) x1 = w - 1;
 			if(x1 < x0) continue;
 
-			if(sums && block == 16)
+			if(block == 16 && (sums[b] || dbuf))
 			{
-				/* block by block: only those whose pixels changed */
-				const UBYTE *row = (const UBYTE *)cs->pixels + (long)y0 * cs->pitch;
-				int g, run0 = -1;
+				int g;
 
-				for(g = x0 >> 4; g <= (x1 >> 4) + 1; g++)
+				for(g = x0 >> 4; g <= (x1 >> 4); g++)
 				{
-					int changed = 0;
-
-					if(g <= (x1 >> 4))
-					{
-						const long k = (long)(y0 >> 4) * sums_gw + g;
-						ULONG a, b;
-
-						block_sum16(row + g * 16, cs->pitch, rows, &a, &b);
-
-						if(!sums_valid[k] || sums[2 * k] != a || sums[2 * k + 1] != b)
-						{
-							changed = 1;
-							sums[2 * k] = a;
-							sums[2 * k + 1] = b;
-							sums_valid[k] = 1;
-						}
-						else
-							st_skipped += (unsigned long)rows;
-					}
-
-					if(changed && run0 < 0) run0 = g;
-
-					if(!changed && run0 >= 0)
-					{
-						c2p_rows(row, cs->pitch, pl, bm->BytesPerRow, y0 + dy, rows, run0, g - 1);
-						st_groups += (unsigned long)(g - run0) * rows;
-						bytes += (unsigned long)(g - run0) * 16 * rows;
-						run0 = -1;
-					}
+					if(stale[b]) stale[b][(long)(y0 >> 4) * sums_gw + g] = 0;
+					if(block_out(cs, pl, bm->BytesPerRow, dy, b, g, y0 >> 4, rows))
+						bytes += 16UL * rows;
 				}
 
 				continue;
@@ -349,18 +465,90 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 		}
 	}
 
+	/* the blocks the other buffer got last time and this one has not */
+	if(dbuf && stale[b])
+	{
+		const long nk = (long)sums_gw * sums_gh;
+		long k;
+
+		for(k = 0; k < nk; k++)
+			if(stale[b][k])
+			{
+				const int gy = (int)(k / sums_gw);
+				const int rows = (h - gy * 16 < 16) ? h - gy * 16 : 16;
+
+				stale[b][k] = 0;
+				st_stale++;
+
+				if(block_out(cs, pl, bm->BytesPerRow, dy, b, (int)(k % sums_gw), gy, rows))
+					bytes += 16UL * rows;
+			}
+	}
+
 	zod_dirty_bytes += bytes;
 	zod_dirty_frames++;
 	zod_dirty_sweep();
 	zod_dirty_clear();
 
-	st_ticks += zod_fineclock_ticks() - t0;
-	st_frames++;
-
 	if(check_on > 0)
 	{
 		st_check_differ += check_all(cs, pl, bm->BytesPerRow, dy);
 		st_check_frames++;
+	}
+
+	/* show it at the next blank; the old one is written again only after
+	 * its safe message */
+	if(dbuf)
+	{
+		if(!disp_ok)
+		{
+			while(!GetMsg(disp_port)) WaitPort(disp_port);
+			disp_ok = 1;
+		}
+
+		if(ChangeScreenBuffer(scr, sbuf[b]))
+		{
+			safe_ok = 0;
+			disp_ok = 0;
+			cur = b ^ 1;
+		}
+		else
+			st_change_failed++;
+	}
+
+	st_ticks += zod_fineclock_ticks() - t0;
+	st_frames++;
+}
+
+void zod_aga_close(struct Screen *scr)
+{
+	int i;
+
+	if(dbuf)
+	{
+		/* the screen's own bitmap back on display, every message home */
+		if(!disp_ok) { while(!GetMsg(disp_port)) WaitPort(disp_port); disp_ok = 1; }
+		if(!safe_ok) { while(!GetMsg(safe_port)) WaitPort(safe_port); safe_ok = 1; }
+
+		if(cur == 0 && ChangeScreenBuffer(scr, sbuf[0]))
+		{
+			while(!GetMsg(disp_port)) WaitPort(disp_port);
+			while(!GetMsg(safe_port)) WaitPort(safe_port);
+		}
+
+		FreeScreenBuffer(scr, sbuf[1]);
+		FreeScreenBuffer(scr, sbuf[0]);
+		sbuf[0] = sbuf[1] = 0;
+		DeleteMsgPort(safe_port);
+		DeleteMsgPort(disp_port);
+		safe_port = disp_port = 0;
+		dbuf = 0;
+	}
+
+	for(i = 0; i < NBUF; i++)
+	{
+		free(sums[i]); free(sums_valid[i]); free(stale[i]);
+		sums[i] = 0; sums_valid[i] = 0; stale[i] = 0;
 	}
 }
 
@@ -371,9 +559,11 @@ void zod_aga_report(void)
 	if(!st_frames) return;
 
 	ZLOG("AGA: %lu frames, %lu 16-pixel groups a frame through c2p, %lu left out "
-	     "(their block unchanged, ZOD_AGA_SUMS %s), %lu us a frame (sums, c2p and the "
-	     "chip RAM writes)%s",
-	     st_frames, st_groups / st_frames, st_skipped / st_frames, sums ? "on" : "off",
+	     "(their block unchanged, ZOD_AGA_SUMS %s), %lu stale blocks a frame from the other "
+	     "buffer; waits for a safe buffer %lu, failed changes %lu; %lu us a frame (sums, c2p "
+	     "and the chip RAM writes)%s",
+	     st_frames, st_groups / st_frames, st_skipped / st_frames, sums_on ? "on" : "off",
+	     st_stale / st_frames, st_safe_waits, st_change_failed,
 	     f >= 1000 ? (st_ticks / st_frames) * 1000UL / (f / 1000UL) : 0UL,
 	     check_on > 0 ? "" : "\n");
 

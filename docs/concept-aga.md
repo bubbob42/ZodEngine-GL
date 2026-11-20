@@ -112,7 +112,17 @@ phase: after the static AGA screen works.
    frame through c2p, 0 pixels differ in every frame read back; orig04
    tour (the fallback), 595 frames, 18838 groups a frame (the whole view),
    0 differ. SwSums (software RTG) still 0 differ.
-2. Double buffering; c2p in assembler.
+2. Double buffering; c2p in assembler. -- Double buffering DONE 20.11.
+   night (ZOD_AGA_DBUF, default on): AllocScreenBuffer + ChangeScreenBuffer
+   with the safe/display messages; per-buffer block sums; a block whose
+   pixels the other buffer does not hold is marked stale there (also when
+   this buffer already holds them -- the first version missed the pointer
+   leaving a place: 200 pixels differed; since then 0). FS-UAE AgaCheck: 0
+   pixels differ in every frame of both runs. On PAL HiRes Laced a buffer
+   change waits for a whole frame: the game shows at most 25 frames a
+   second there (the display's own rate). Block sums (ZOD_AGA_SUMS, default
+   on): the still view converts ~650 instead of 4850 groups a frame. The
+   c2p in assembler waits for a real AGA machine to measure on.
 3. The flicker-free modes; ZodLaunch choice.
 4. Hardware scrolling (with the smooth-scrolling concept).
 

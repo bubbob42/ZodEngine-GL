@@ -19,6 +19,9 @@ struct Screen *zod_aga_open(int w, int h, int *dy);
  * swept and cleared as SDL_Flip does on RTG) */
 void zod_aga_flip(SDL_Surface *compose, struct Screen *scr, int dy);
 
+/* before CloseScreen: the screen's own bitmap back, the buffers freed */
+void zod_aga_close(struct Screen *scr);
+
 /* the report line at the end */
 void zod_aga_report(void);
 
