@@ -133,6 +133,29 @@ phase: after the static AGA screen works.
    tested, the two modes themselves wait for a real AGA machine.
 4. Hardware scrolling (with the smooth-scrolling concept).
 
+## First real AGA (20.11. 23:36-23:40)
+
+The PiStorm CM4 sits in an A1200: its chipset is real AGA, the CPU is
+Emu68, chip RAM goes over the A1200's own bus. aga branch, software (-o),
+-C pal, two buffers, block sums, 30 s each:
+
+| run | fps | groups through c2p a frame | work a frame (sums, c2p, chip writes) |
+|---|---|---|---|
+| orig01 still | 48.8 | 549 of 19 200 | 4.5 ms |
+| orig04 tour | 8.2 | 14 416 (230 KB) | 101 ms |
+| RTG reference, orig04 tour (same binary, no -C) | 185.5 | -- | 0.2 ms copy |
+
+- The screen works on real AGA: 1484 frames, no failed buffer change, 8
+  waits for a safe buffer in the still view.
+- The still view is fine thanks to the block sums.
+- Scrolling is chip-bound: ~2.3 MB/s of chip writes through the PiStorm,
+  a whole view a frame -> 8 fps. A real 040/060 accelerator writes chip RAM
+  at ~7..14 MB/s (the concept's estimate): ~20..35 fps at best. So the step
+  that matters on AGA is hardware scrolling (milestone 4), not a faster
+  c2p: the c2p's CPU part is small against the chip writes here.
+- The picture itself (colours, flicker) waits for someone looking at the
+  A1200's native output.
+
 ## Open questions (recommendation first)
 
 1. 640x480 **centred in 640x512** -- or the full 640x512 with 32 more map
