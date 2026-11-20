@@ -217,6 +217,40 @@ way (a memmove) so the dirty-block sums stay valid; the HUD is outside the
 blit. The same rhythm and step as GL, with WaitTOF/the RTG library's own
 vblank wait for the blank where the board has one.
 
+### Built (20.11. night, branch rtg-scroll, ZOD_RTGSCROLL, off by default)
+
+port/amiga/zod_rtgscroll.cpp: ZMap::DoRender reports the view's offset and
+screen rect each frame; when it moved within the same rect, SDL_Flip moves
+the map area's screen content with one BltBitMap inside the screen bitmap
+before the lock, then compares each dirty 16x16 block with the previous
+frame (kept in fast RAM, following the same dirty runs) at the moved place
+and sends only the blocks that differ. No compose-surface shift is needed:
+the comparison is against the previous frame directly.
+
+FS-UAE RtgScrollCheck (software, ZOD_FLIP_SUMS pruefen reads the whole
+screen back after every flip): orig04 tour 0 differ; 1087 of 1103 flips
+moved the map on the card, 69 % of the dirty blocks kept; 94 196 bytes a
+frame to the screen instead of 304 645 (-69 %), but 791 copy calls a frame
+instead of 31 (block spans). orig01 still: no scroll frames, 0 differ.
+FS-UAE's card makes bytes nearly free, so its times say nothing; on the
+A4000D's bus (~120 ns a byte into card memory, measured) ~36 ms of copying
+would become ~11 ms plus the calls and a ~300 KB compare in fast RAM. An
+A/B on a real RTG Amiga decides the default (A4000T, A4000D without GL).
+
+**PiStorm A/B (20.11. 23:27-23:32, Emu68 RTG, software, orig04 tour, 40 s,
+on/off/off/on): it LOSES there -- 55.2 / 55.5 fps against 187.3 / 183.0.**
+Bytes to the PiStorm's RTG screen are nearly free (307 KB in 0.22 ms), but
+BltBitMap inside the screen costs ~7 ms (LockBitMap waits for it: "sperren"
+7.1..7.3 ms against 0.05), and the compare and the 780 small copies ~5 ms.
+So the move pays off only where a byte to the card is dear AND the board
+blits fast (a Zorro card with a real blitter). Default stays off. An
+automatic choice would measure both at screen open: the price of a byte
+(measure_gap does that already) and one map-sized BltBitMap of the black
+screen.
+
+Kept for the A4000T / A4000D (without GL) A/B; the next step if it wins
+there: that automatic choice.
+
 ## AGA
 
 With the AGA item (PAL HiRes Laced): ScrollVPort over a larger planar

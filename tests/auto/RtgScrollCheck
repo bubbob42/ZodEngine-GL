@@ -1,0 +1,36 @@
+; RtgScrollCheck -- scrolling on the card for the software RTG path
+; (ZOD_RTGSCROLL, port/amiga/zod_rtgscroll.cpp): while the view scrolls the
+; map area is moved with BltBitMap in the screen bitmap and only the blocks
+; that differ from the moved previous frame are sent. ZOD_FLIP_SUMS pruefen
+; reads the whole screen back after every flip and compares it with the
+; compose surface: "0 differ". orig04 tour (ZOD_TOUR) with ZOD_RTGSCROLL ein,
+; then the still view orig01 (no scroll frames: the previous frame only
+; follows), then the tour without it for the bytes. Software (-o), 20 s each.
+; LIMIT 900
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_FLIP_SUMS pruefen
+SetEnv ZOD_RTGSCROLL ein
+SetEnv ZOD_TOUR on
+Echo "=== software, ZOD_RTGSCROLL, orig04 tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rst 20 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rst.done
+Type DEV:Test/zod-rst.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+Echo "=== software, ZOD_RTGSCROLL, orig01 still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rss 20 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rss.done
+Type DEV:Test/zod-rss.log >>DEV:Test/auto.log
+UnSetEnv ZOD_RTGSCROLL
+SetEnv ZOD_TOUR on
+Echo "=== software, without, orig04 tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rsn 20 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rsn.done
+Type DEV:Test/zod-rsn.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_FLIP_SUMS
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

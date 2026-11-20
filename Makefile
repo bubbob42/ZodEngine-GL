@@ -159,7 +159,7 @@ else ifeq ($(PLATFORM),amiga)
   ENGINE_SRCS += port/amiga/sdl_addons.cpp port/amiga/net_bsdsocket.cpp \
                  port/amiga/sdl_video.cpp port/amiga/sdl_screen.cpp \
                  port/amiga/sdl_misc.cpp port/amiga/ammx.cpp \
-                 port/amiga/fastcopy.cpp
+                 port/amiga/fastcopy.cpp port/amiga/zod_rtgscroll.cpp
   # Drawing through minigl.library 29.1 (RadeonGL, PiStorm3D): chosen at run
   # time -- without the library, or with -o, the game draws as before.
   # ZOD_NO_GL=1 builds the old binary without any GL code.
