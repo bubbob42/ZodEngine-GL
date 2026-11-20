@@ -1588,6 +1588,13 @@ static int zod_switch(const char *name, int dflt)
 	return dflt;
 }
 
+/* ZOD_ROCKPRESKIP / ZOD_ROCKPRECHECK, see RenderObjects */
+static unsigned long zod_rockpre_skipped = 0, zod_rockpre_bad = 0;
+static int rockpreskip = -1, rockprecheck = -1;
+static int zod_switch(const char *name, int dflt);
+static int rockpreskip_on(void) { if(rockpreskip < 0) rockpreskip = zod_switch("ZOD_ROCKPRESKIP", 1); return rockpreskip; }
+static int rockprecheck_on(void) { if(rockprecheck < 0) rockprecheck = zod_switch("ZOD_ROCKPRECHECK", 0); return rockprecheck; }
+
 /* ZOD_XCULL's margins and counters, see split_merge_x */
 enum { XCULL_LEFT = 64, XCULL_RIGHT = 64 };
 static unsigned long zod_xcull_seen = 0, zod_xcull_cut = 0, zod_xcull_bad = 0;
@@ -2100,6 +2107,10 @@ extern "C" void zod_render_sections_report(long frames)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
 		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
+
+	if(zod_rockpre_skipped || zod_rockpre_bad || rockprecheck == 1)
+		ZLOG("rock pre-render band: left out in %lu frames (shadows baked, ZOD_ROCKPRESKIP);"
+		     " ZOD_ROCKPRECHECK: %lu frames drew\n", zod_rockpre_skipped, zod_rockpre_bad);
 
 	if(zod_xcull_seen)
 		ZLOG("draw.objects sideways: %lu of %lu in the band left out (ZOD_XCULL, margins %d / %d px);"
@@ -5103,6 +5114,21 @@ void ZPlayer::RenderObjects()
 
 	if(split_active()) split_sync(ols);
 
+	/* ZOD_ROCKPRESKIP (default on): with the shadows baked, every banded
+	 * entry (only ORock is banded) returns at the first line of DoPreRender
+	 * (RockBakedGen() == RockGen()) -- the band is not looked for at all
+	 * then: two binary searches that read rocks and ~110 virtual calls a
+	 * frame on orig04. ZOD_ROCKPRECHECK on: the band runs anyway and any
+	 * quad it makes is counted (must stay 0). */
+	const bool rocks_baked = zmap.RockBakedGen() == zmap.RockGen();
+	const bool band_skip = rocks_baked && rockpreskip_on() && !rockprecheck_on();
+#ifndef DISABLE_OPENGL
+	const unsigned long band_draws0 = (rocks_baked && rockprecheck_on()) ? zod_gl_draw_count() : 0;
+#endif
+
+	if(band_skip)
+		zod_rockpre_skipped++;
+	else
 	{
 		vector<ZObject*> &band = split_active() ? split_views[SV_BAND].fix : ols.prerender_band_olist;
 		int bx, by, bw, bh;
@@ -5155,12 +5181,17 @@ void ZPlayer::RenderObjects()
 
 		for(size_t i = a; i < b; i++)
 			band[i]->DoPreRender(zmap, screen);
-
-		/* banded ones that are no rocks (none today: only ORock is banded) */
-		if(split_active())
-			for(size_t i = 0; i < split_views[SV_BAND].dyn.size(); i++)
-				split_views[SV_BAND].dyn[i]->DoPreRender(zmap, screen);
 	}
+
+#ifndef DISABLE_OPENGL
+	if(rocks_baked && rockprecheck_on() && zod_gl_active && zod_gl_draw_count() != band_draws0)
+		zod_rockpre_bad++;
+#endif
+
+	/* banded ones that are no rocks (none today: only ORock is banded) */
+	if(split_active())
+		for(size_t i = 0; i < split_views[SV_BAND].dyn.size(); i++)
+			split_views[SV_BAND].dyn[i]->DoPreRender(zmap, screen);
 
 	//draw objects pre stuff -- nur die Klassen, die eines haben
 	/* The rest: every entry not banded. Only ORock answers PreRenderBanded()

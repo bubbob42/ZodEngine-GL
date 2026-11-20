@@ -755,6 +755,15 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   4104 / 4098 / 4136 / 4118 against 4895 / 5100 / 4908 / 4950 us; the sort
   +0.1..0.2 ms (the x arrays); 27.4 / 26.4 / 27.3 / 27.8 against 26.9 /
   27.2 / 27.0 / 26.1 fps (means 27.2 against 26.8).
+- **The rocks' pre-render band left out while their shadows are baked**
+  (fps-night2, ZOD_ROCKPRESKIP): baked, every banded entry (only ORock is
+  banded) returns at DoPreRender's first line; the band was still searched
+  (two binary searches reading rocks) and called (~110 virtual calls a
+  frame on orig04). Now one comparison of the map's two generations skips
+  it. FS-UAE RockPreCheck (ZOD_ROCKPRECHECK: the band run anyway in every
+  baked frame, any quad counted): 0 frames drew; SwSums, NoGL, GLSmoke
+  pass. A4000D (pansample, n5, r1 r0 r0 r1, tour): obj_vor 802 / 703
+  against 1118 / 1077 us; 27.1 / 28.4 against 26.7 / 28.3 fps.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
