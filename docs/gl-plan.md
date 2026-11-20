@@ -832,6 +832,12 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   start-up peaks decided it, not SmoothMove. Chance or an indirect effect
   on the bots' timing cannot be told apart with eight runs; the totals are
   worse, so not kept (0.15 ms at stake).
+- **fps-night2 as a whole, 20.11 ~03:40** (A4000D, pansample, G0 = gl as
+  pushed 17d5074, N13 = fps-night2 73b3df4; G0 N13 N13 G0 each): orig04
+  scrolling 26.7 / 26.5 against 29.0 / 30.2 fps (frame 37.6 against 33.7
+  ms, drawing 23.8 against 21.0 ms); orig01 still 46.1 / 46.5 against 50.5
+  / 49.4 fps (server 4.8 against 3.4 ms). FS-UAE on the tip: SwSums,
+  NoGL, GLSmoke, GLTour, LoadBar, HudKeep pass.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
