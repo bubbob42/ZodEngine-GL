@@ -141,7 +141,14 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
    toolchain (the gcc 6.5 one has no MUI headers); its window not yet seen
    in an emulator.
 4. M4: PrismaMIDI's port wait; real-hardware runs (Prisma's machines,
-   with Prisma's word), the mt32-pi.
+   with Prisma's word), the mt32-pi. -- The port wait DONE 20.11. night: a
+   cluster named prisma* makes the player wait for the public port
+   "PrismaSynth" (FindPort under a short Forbid every 20 ms, at most 3 s),
+   then play; the log says how long. FS-UAE (MidiCamdMT32's last run, -K
+   prisma.out.0, no Prisma card): "not there -- the music goes out anyway
+   after 3000 ms", rc 0. The real-hardware runs wait for the user and the
+   Prisma session (voltago and arkon are Prisma's; Zod's 24 MB of game data
+   would have to go up first).
 
 ## Open questions (recommendation first)
 

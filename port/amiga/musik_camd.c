@@ -63,6 +63,8 @@ static int m_art = MIDI_GM;
 static char m_cluster[64];
 static UWORD m_camd_ver = 0, m_camd_rev = 0;
 static int m_heard = 0;            /* MidiLinkConnected at the start */
+static volatile int m_prisma_ms = -1;  /* PrismaSynth's port: ms waited, -1 not asked */
+static volatile int m_prisma_ok = 0;
 
 /* Test aid (tests/auto/MidiCamd): ZOD_MIDI_TESTJUMP=<step>@<seconds> -- once
  * a song has played that long, a jump to that step, as the game's danger
@@ -75,6 +77,24 @@ static double p_song_start = 0.0;
 static ULONG s_events = 0, s_notes = 0, s_songs = 0, s_jumps = 0, s_loops = 0;
 static double s_late_sum = 0.0, s_late_max = 0.0;
 static ULONG s_late_n = 0;
+
+/* "prisma" at the start of a cluster name, any case */
+static int strnicmp_(const char *a, const char *b, int n)
+{
+	int i;
+
+	for(i = 0; i < n; i++)
+	{
+		char x = a[i], y = b[i];
+
+		if(x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+		if(y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
+		if(x != y) return x - y;
+		if(!x) return 0;
+	}
+
+	return 0;
+}
 
 /* ---- the process's own state ------------------------------------------------ */
 
@@ -555,6 +575,35 @@ static void midi_proc(void)
 		p_clock_last = ev.ev_lo;
 	}
 
+	/* PrismaMIDI (the Prisma session's rule): its driver takes the card when
+	 * a client links to its cluster and shows the public port "PrismaSynth"
+	 * ~0.7 s later; the first notes wait for it -- every 20 ms, at most 3 s
+	 * (the card may be busy), then the music goes out anyway */
+	if((m_cluster[0] == 'p' || m_cluster[0] == 'P') && !strnicmp_(m_cluster, "prisma", 6))
+	{
+		int ms = 0;
+
+		for(;;)
+		{
+			struct MsgPort *port;
+
+			Forbid();
+			port = FindPort((CONST_STRPTR)"PrismaSynth");
+			Permit();
+
+			if(port) { m_prisma_ok = 1; break; }
+			if(ms >= 3000) break;
+
+			treq->tr_node.io_Command = TR_ADDREQUEST;
+			treq->tr_time.tv_secs = 0;
+			treq->tr_time.tv_micro = 20000;
+			DoIO((struct IORequest *)treq);
+			ms += 20;
+		}
+
+		m_prisma_ms = ms;
+	}
+
 	/* General MIDI on, or the MT-32's "all parameters reset" (system area
 	 * 7F 00 00, Roland checksum 01) and the time it takes */
 	for(ch_i = 0; ch_i < 16; ch_i++) p_out[ch_i] = (signed char)ch_i;
@@ -717,6 +766,10 @@ int midi_start(int art, const char *cluster)
 		m_done_sig = -1;
 		return 0;
 	}
+
+	if(m_prisma_ms >= 0)
+		ZLOG("MIDI: PrismaSynth's port %s after %d ms\n",
+		     m_prisma_ok ? "there" : "not there -- the music goes out anyway", m_prisma_ms);
 
 	ZLOG("MIDI: camd.library %u.%u, cluster %s%s, %s\n", m_camd_ver, m_camd_rev, m_cluster,
 	     m_heard ? "" : " (no receiver linked yet)",

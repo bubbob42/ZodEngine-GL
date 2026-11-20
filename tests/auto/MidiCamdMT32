@@ -26,6 +26,12 @@ Run >NIL: Execute DEV:Test/RunZodMidi mt 40 -M mt32 -o -m Data/Campaing/Z_origin
 Execute DEV:Test/WaitDone DEV:Test/zod-mt.done
 Type DEV:Test/zod-mt.log >>DEV:Test/auto.log
 UnSetEnv ZOD_MIDI_TESTJUMP
+; PrismaMIDI's cluster (-K prisma.out.0): no PrismaSynth port in FS-UAE, so the
+; player must give up after 3 s and say so ("not there ... after 3000 ms")
+Echo "=== -M gm -K prisma.out.0: the PrismaSynth port wait ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodMidi prw 10 -K prisma.out.0 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-prw.done
+Type DEV:Test/zod-prw.log >>DEV:Test/auto.log
 Delete >NIL: DEV:Zod/music/#?.zmu
 Delete >NIL: DEV:Zod/music
 Echo "=== done ===" >>DEV:Test/auto.log

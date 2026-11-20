@@ -371,7 +371,8 @@ def main():
         late = None
         for line in open(a.log, encoding='latin-1', errors='replace'):
             if 'MIDI:' in line and 'at most' in line:
-                late = int(line.split('at most')[1].split()[0])
+                v = int(line.split('at most')[1].split()[0])
+                late = v if late is None else max(late, v)   # the worst run
         if late is None:
             print('FAIL: no lateness line in %s' % a.log)
             ok = False
