@@ -859,6 +859,22 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   SwSums, GLSmoke, GLTour, LoadBar, NoGL pass. A4000D (pansample, n15, two
   tour series): map section 2377 / 2603 / 2490 / 2361 against 2952 / 2689
   / 2758 / 2771 us; 29.2 against 29.25 fps over eight runs.
+- **REJECTED: zone tiles, the view test for water tiles only**
+  (ZOD_ZONEWATER, 6684790, reverted in 701d668): DoZoneEffects asked
+  GetBlitInfo for every tile of the zones in view with water (~130 a frame
+  on orig04) though only the ~14 water tiles do anything after it. Exact by
+  the code; FS-UAE SwSums, GLSmoke, GLTour passed. On the rebooted Hamiller
+  (pansample, two tour series): zones 1047 / 1004 / 1055 / 1057 against
+  1338 / 1263 / 1276 / 1269 us -- but the frames 34.78 against 33.87 ms
+  on average over the eight runs (server +0.4, game +0.25, the other
+  drawing +0.15 ms). Code this change does not touch got slower; on the
+  060 a small change can move the layout of unrelated hot loops. Measured
+  worse, so reverted, like the bots' SmoothMove.
+- **Hamiller's drops** (~23:28 and ~04:04, both during zod_run.py's setup
+  while a ~2.4 MB binary went up in one write; its network is USB on a
+  ~4.8 V rail): zod_run.py now sends programs in 256 KB pieces with pauses
+  and joins them on the Amiga -- the next binary went up in 10 pieces
+  without a drop.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
