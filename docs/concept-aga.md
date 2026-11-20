@@ -123,7 +123,14 @@ phase: after the static AGA screen works.
    second there (the display's own rate). Block sums (ZOD_AGA_SUMS, default
    on): the still view converts ~650 instead of 4850 groups a frame. The
    c2p in assembler waits for a real AGA machine to measure on.
-3. The flicker-free modes; ZodLaunch choice.
+3. The flicker-free modes; ZodLaunch choice. -- DONE 20.11. night: the
+   game's -C pal|dblpal|prod (the screen size from the mode's nominal
+   dimensions; a mode without its monitor driver falls back to PAL HiRes
+   Laced, logged); ZodLaunch's Renderer gets "AGA (native screen)" and an
+   "AGA mode" choice, ghosted otherwise; the start line -o -C <mode>;
+   tests/launcher passes; ZodLaunch builds (cego's Docker toolchain).
+   FS-UAE's test system has no DblPAL/Multiscan driver: the fallback is
+   tested, the two modes themselves wait for a real AGA machine.
 4. Hardware scrolling (with the smooth-scrolling concept).
 
 ## Open questions (recommendation first)
