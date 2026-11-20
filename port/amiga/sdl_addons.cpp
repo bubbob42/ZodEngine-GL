@@ -414,6 +414,7 @@ int zod_musik_weg = MUSIK_AHI;
  * port/amiga/musik_camd.c): MIDI_GM / MIDI_MT32, 0 = the mixer as before.
  * The effects keep zod_musik_weg (AHI unless -M paula). */
 int zod_musik_midi = 0;
+char zod_midi_cluster[64] = "";    /* -K (the launcher's "MIDI cluster") */
 static int midi_bereit = 0;        /* 0 not tried, 1 running, -1 failed */
 
 static int midi_aufsetzen(void)
@@ -423,10 +424,15 @@ static int midi_aufsetzen(void)
 
 	if(midi_bereit) return midi_bereit > 0;
 
-	/* ZOD_MIDI_CLUSTER: the camd cluster (default out.0, the serial port;
-	 * PrismaMIDI's is prisma.out.0) */
-	n = GetVar((CONST_STRPTR)"ZOD_MIDI_CLUSTER", (STRPTR)cluster, sizeof(cluster), 0);
-	if(n <= 0) strcpy(cluster, "out.0");
+	/* the camd cluster: -K, else ZOD_MIDI_CLUSTER, else out.0 (the serial
+	 * port); PrismaMIDI's is prisma.out.0 */
+	if(zod_midi_cluster[0])
+		strcpy(cluster, zod_midi_cluster);
+	else
+	{
+		n = GetVar((CONST_STRPTR)"ZOD_MIDI_CLUSTER", (STRPTR)cluster, sizeof(cluster), 0);
+		if(n <= 0) strcpy(cluster, "out.0");
+	}
 
 	midi_bereit = midi_start(zod_musik_midi, cluster) ? 1 : -1;
 

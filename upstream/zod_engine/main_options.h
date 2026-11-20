@@ -58,6 +58,7 @@ public:
      * wirksam; anderswo liest es niemand. */
     bool read_musik_weg;
     int  musik_weg;
+    char midi_cluster[64];   /* -K: camd's cluster for -M gm|mt32 */
     /* Verzeichnis der Zwischensequenzen (-V). Leer = keine Filme. Der
      * externe Player jvplay bekommt Bild- und Tonweg aus denselben
      * Einstellungen wie das Spiel selbst. */

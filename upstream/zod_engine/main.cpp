@@ -284,6 +284,11 @@ int main(int argc, char **argv)
 
         /* 2 gm, 3 mt32: the songs through camd.library (MIDI_GM 1,
          * MIDI_MT32 2), the effects on AHI */
+        extern char zod_midi_cluster[64];
+
+        if(starting_conditions.midi_cluster[0])
+            strcpy(zod_midi_cluster, starting_conditions.midi_cluster);
+
         zod_musik_weg = starting_conditions.musik_weg == 1 ? 1 : 0;
         zod_musik_midi = starting_conditions.musik_weg >= 2 ? starting_conditions.musik_weg - 1 : 0;
 

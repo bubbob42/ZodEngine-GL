@@ -131,7 +131,15 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
    2..9 in the order of first use, programs through mt32_prog, drum keys
    outside 35..76 dropped) passes. The program table is a first guess from
    the two preset lists: ear test.
-3. M3: ZodLaunch choice and cluster field.
+3. M3: ZodLaunch choice and cluster field -- DONE 20.11. night: Music
+   output AHI / Paula / General MIDI (camd) / MT-32 (camd), a "MIDI
+   cluster" string ghosted unless camd (default out.0), saved as
+   musikweg=0..3 and midicluster=; the start line gets -M gm|mt32 and
+   -K <cluster> (a new game option; ZOD_MIDI_CLUSTER stays for tests).
+   tests/launcher (gmake launchtest): the four outputs, -K only with camd,
+   the cluster round trip -- passes. ZodLaunch builds in cego's Docker
+   toolchain (the gcc 6.5 one has no MUI headers); its window not yet seen
+   in an emulator.
 4. M4: PrismaMIDI's port wait; real-hardware runs (Prisma's machines,
    with Prisma's word), the mt32-pi.
 
