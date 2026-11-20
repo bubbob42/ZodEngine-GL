@@ -5,6 +5,7 @@
 ; tools/zmu_test_song.py into DEV:Test/midi-songs, go into DEV:Zod/music for
 ; this run and out again. A 40 s bot match on orig01 in software. Then on the
 ; Mac: tools/zmu_midi_check.py build/autotest/MidiCamd.serial dist/Test/midi-songs
+;      --log build/autotest/MidiCamd.out
 ; LIMIT 600
 ; SERIAL_RAW
 FailAt 1000

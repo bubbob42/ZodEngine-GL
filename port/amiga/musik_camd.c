@@ -91,7 +91,32 @@ static double p_paused_at = 0.0;
 static int p_vol = 128;
 static UBYTE p_cc7[16];
 static int p_prog[16];
-static UBYTE p_on[16][16];         /* notes sounding: a bit per key */
+static UBYTE p_on[16][16];         /* notes sounding (output channel): a bit per key */
+static signed char p_out[16];      /* the song's channel -> the output channel, -1 dropped */
+static ULONG s_dropped = 0;        /* events of channels or drum keys the MT-32 lacks */
+
+/* MT-32 (-M mt32): the closest MT-32 preset for each General MIDI program.
+ * A FIRST TABLE from the two preset lists, to be set by ear (concept: ear
+ * tests). tools/zmu_midi_check.py --mt32 reads it from here. */
+static const UBYTE mt32_prog[128] =
+{
+	  0,   1,   2,   7,   3,   4,  16,  19,   /*   0 pianos, harpsichord, clavinet */
+	 22, 101, 101,  97, 104, 103, 102, 105,   /*   8 celesta .. dulcimer */
+	  8,   9,  10,  12,  14,  15,  87,  15,   /*  16 organs, accordion, harmonica */
+	 59,  60,  61,  61,  61,  62,  62,  61,   /*  24 guitars */
+	 64,  66,  67,  70,  68,  69,  28,  29,   /*  32 basses */
+	 52,  53,  54,  56,  50,  51,  57, 112,   /*  40 strings, harp, timpani */
+	 48,  49,  50,  50,  34,  34,  39, 122,   /*  48 ensembles, choir, voice, hit */
+	 88,  90,  94,  89,  92,  95,  24,  25,   /*  56 brass */
+	 78,  79,  80,  81,  84,  85,  86,  82,   /*  64 saxes, double reeds, clarinet */
+	 74,  72,  76,  77, 110, 107, 108,  73,   /*  72 pipes */
+	 47,  44,  42,  47,  62,  39,  44,  28,   /*  80 synth leads */
+	 32,  33,  32,  34,  35,  38,  41,  43,   /*  88 synth pads */
+	 41,  36,  35,  37,  40,  37,  43,  36,   /*  96 synth effects */
+	 63,  60, 105, 105,  99,  84,  52,  84,   /* 104 ethnic */
+	100, 115,  99, 120, 117, 113, 115, 119,   /* 112 percussive */
+	 59, 111, 119, 124, 123, 116, 119, 114    /* 120 sound effects */
+};
 
 static double p_clock_us = 0.0;
 static ULONG p_clock_last = 0;
@@ -106,6 +131,36 @@ static double clock_us(void)
 	p_clock_us += (double)(ULONG)(ev.ev_lo - p_clock_last) * 1e6 / (double)f;
 	p_clock_last = ev.ev_lo;
 	return p_clock_us;
+}
+
+static void send(UBYTE status, UBYTE d1, UBYTE d2);
+static int event_read(ULONG *pos, ULONG *wait, UBYTE *ev);
+
+/* the output channels of a song: General MIDI as they are; MT-32: the
+ * melodic channels in the order the song first uses them onto parts 2..9
+ * (channels 1..8 counted from 0), the rhythm stays on 10 (9). Once per
+ * song, so a jump keeps the same parts. */
+static void channels_map(void)
+{
+	ULONG pos = 16, w;
+	UBYTE ev[4];
+	int ch, next = 1;
+
+	for(ch = 0; ch < 16; ch++) p_out[ch] = (m_art == MIDI_MT32) ? -1 : (signed char)ch;
+
+	if(m_art != MIDI_MT32) return;
+
+	p_out[9] = 9;
+
+	while(event_read(&pos, &w, ev) && ev[0] != 4)
+	{
+		if(ev[0] > 3) continue;
+
+		ch = ev[1] & 15;
+
+		if(ch != 9 && p_out[ch] < 0 && next <= 8)
+			p_out[ch] = (signed char)next++;
+	}
 }
 
 static void send(UBYTE status, UBYTE d1, UBYTE d2)
@@ -151,10 +206,19 @@ static void notes_off(void)
 
 static void volumes_out(void)
 {
-	int ch;
+	int oc, ch;
 
-	for(ch = 0; ch < 16; ch++)
-		send((UBYTE)(0xB0 | ch), 7, scaled(p_cc7[ch]));
+	/* all 16 output channels: the volume of the song's channel on it, 100
+	 * where none is */
+	for(oc = 0; oc < 16; oc++)
+	{
+		int v = 100;
+
+		for(ch = 0; ch < 16; ch++)
+			if(p_out[ch] == oc) { v = p_cc7[ch]; break; }
+
+		send((UBYTE)(0xB0 | oc), 7, scaled(v));
+	}
 }
 
 /* the event at *pos: its wait (steps) and its kind and data (ev[0..3]);
@@ -215,36 +279,54 @@ static void next_peek(void)
 	if(p_have_next) p_next = p_step + w;
 }
 
+static UBYTE prog_out(int prog)
+{
+	return (UBYTE)(m_art == MIDI_MT32 ? mt32_prog[prog & 127] : (prog & 127));
+}
+
 static void event_do(const UBYTE *ev)
 {
-	const UBYTE ch = (UBYTE)(ev[1] & 15);
+	const int ch = ev[1] & 15;
+	const int oc = p_out[ch];
+	const UBYTE key = (UBYTE)(ev[2] & 127);
+
+	/* the state goes on even for a channel the MT-32 has no part for */
+	if(ev[0] == 2) p_prog[ch] = ev[2] & 127;
+	else if(ev[0] == 3) p_cc7[ch] = (UBYTE)(ev[2] & 127);
+
+	if(oc < 0) { s_dropped++; return; }
+
+	/* the MT-32's rhythm part knows keys 35..76 */
+	if(m_art == MIDI_MT32 && oc == 9 && ev[0] <= 1 && (key < 35 || key > 76))
+	{
+		s_dropped++;
+		return;
+	}
 
 	switch(ev[0])
 	{
 	case 0:
 		if(ev[3])
 		{
-			send((UBYTE)(0x90 | ch), (UBYTE)(ev[2] & 127), (UBYTE)(ev[3] & 127));
-			p_on[ch][(ev[2] & 127) >> 3] |= (UBYTE)(1 << (ev[2] & 7));
+			send((UBYTE)(0x90 | oc), key, (UBYTE)(ev[3] & 127));
+			p_on[oc][key >> 3] |= (UBYTE)(1 << (key & 7));
 			s_notes++;
 		}
 		else
 		{
-			send((UBYTE)(0x80 | ch), (UBYTE)(ev[2] & 127), 0);
-			p_on[ch][(ev[2] & 127) >> 3] &= (UBYTE)~(1 << (ev[2] & 7));
+			send((UBYTE)(0x80 | oc), key, 0);
+			p_on[oc][key >> 3] &= (UBYTE)~(1 << (key & 7));
 		}
 		break;
 	case 1:
-		send((UBYTE)(0x80 | ch), (UBYTE)(ev[2] & 127), 0);
-		p_on[ch][(ev[2] & 127) >> 3] &= (UBYTE)~(1 << (ev[2] & 7));
+		send((UBYTE)(0x80 | oc), key, 0);
+		p_on[oc][key >> 3] &= (UBYTE)~(1 << (key & 7));
 		break;
 	case 2:
-		p_prog[ch] = ev[2] & 127;
-		send((UBYTE)(0xC0 | ch), (UBYTE)(ev[2] & 127), 0);
+		send((UBYTE)(0xC0 | oc), prog_out(p_prog[ch]), 0);
 		break;
 	case 3:
-		p_cc7[ch] = (UBYTE)(ev[2] & 127);
-		send((UBYTE)(0xB0 | ch), 7, scaled(p_cc7[ch]));
+		send((UBYTE)(0xB0 | oc), 7, scaled(p_cc7[ch]));
 		break;
 	default:
 		break;
@@ -290,7 +372,8 @@ static void song_chase(ULONG target)
 	}
 
 	for(ch = 0; ch < 16; ch++)
-		if(p_prog[ch] >= 0) send((UBYTE)(0xC0 | ch), (UBYTE)p_prog[ch], 0);
+		if(p_prog[ch] >= 0 && p_out[ch] >= 0)
+			send((UBYTE)(0xC0 | p_out[ch]), prog_out(p_prog[ch]), 0);
 
 	/* p_step stays the step of the last event read: the next one's wait
 	 * counts from it; the caller sets the clock so that `target` is now */
@@ -336,6 +419,7 @@ static void commands_take(void)
 		p_len = len;
 		p_loop = loop;
 		song_reset_state();
+		channels_map();
 		volumes_out();
 		p_t0 = clock_us();
 		p_song_start = p_t0;
@@ -425,6 +509,7 @@ static void midi_proc(void)
 	struct MidiNode *node = 0;
 	struct TagItem tags[4];
 	int topen = 0;
+	int ch_i;
 	ULONG tsig = 0;
 
 	memset(p_on, 0, sizeof(p_on));
@@ -470,7 +555,21 @@ static void midi_proc(void)
 		p_clock_last = ev.ev_lo;
 	}
 
-	/* General MIDI on (the MT-32 flavour follows in M2) */
+	/* General MIDI on, or the MT-32's "all parameters reset" (system area
+	 * 7F 00 00, Roland checksum 01) and the time it takes */
+	for(ch_i = 0; ch_i < 16; ch_i++) p_out[ch_i] = (signed char)ch_i;
+
+	if(m_art == MIDI_MT32)
+	{
+		static const UBYTE mt_reset[] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x7F, 0x00, 0x00, 0x00, 0x01, 0xF7 };
+
+		send_sysex(mt_reset, sizeof(mt_reset));
+		treq->tr_node.io_Command = TR_ADDREQUEST;
+		treq->tr_time.tv_secs = 0;
+		treq->tr_time.tv_micro = 300000;
+		DoIO((struct IORequest *)treq);
+	}
+	else
 	{
 		static const UBYTE gm_on[] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 };
 
@@ -520,6 +619,13 @@ static void midi_proc(void)
 	}
 
 	notes_off();
+
+	if(m_art == MIDI_MT32)
+	{
+		static const UBYTE mt_reset[] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x7F, 0x00, 0x00, 0x00, 0x01, 0xF7 };
+
+		send_sysex(mt_reset, sizeof(mt_reset));
+	}
 
 done:
 	if(topen) CloseDevice((struct IORequest *)treq);
@@ -614,7 +720,7 @@ int midi_start(int art, const char *cluster)
 
 	ZLOG("MIDI: camd.library %u.%u, cluster %s%s, %s\n", m_camd_ver, m_camd_rev, m_cluster,
 	     m_heard ? "" : " (no receiver linked yet)",
-	     m_art == MIDI_MT32 ? "MT-32 (General MIDI until M2)" : "General MIDI");
+	     m_art == MIDI_MT32 ? "MT-32 (programs mapped, parts 2..9, rhythm on 10)" : "General MIDI");
 
 	return 1;
 }
@@ -701,9 +807,9 @@ void midi_bericht(void)
 {
 	if(!s_songs && !s_events) return;
 
-	ZLOG("MIDI: %lu songs, %lu events sent, %lu notes, %lu jumps, %lu loops; "
+	ZLOG("MIDI: %lu songs, %lu events sent, %lu notes, %lu jumps, %lu loops, %lu dropped; "
 	     "events late on average %lu us, at most %lu us\n",
 	     (unsigned long)s_songs, (unsigned long)s_events, (unsigned long)s_notes,
-	     (unsigned long)s_jumps, (unsigned long)s_loops,
+	     (unsigned long)s_jumps, (unsigned long)s_loops, (unsigned long)s_dropped,
 	     (unsigned long)(s_late_n ? s_late_sum / s_late_n : 0.0), (unsigned long)s_late_max);
 }

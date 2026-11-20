@@ -10,7 +10,8 @@ played; otherwise the same 20 s pattern:
     fixed pseudo-random sequence (no stretch repeats: a jump's place is found);
     a second, overlapping note every 120 steps;
   - channel 2: program 33, CC7 90, long notes of 90 steps;
-  - channel 10: drum key 36 every 60 steps, key 38 every 120;
+  - channel 10: drum key 36 every 60 steps, key 38 every 120, key 81 (outside
+    the MT-32's rhythm keys) every 240;
   - at step 1200: CC7 64 on channel 1; a wait of 300 steps (the u16 escape)
     before the last note.
 Format: tools/cd/xmi2zmu.py.
@@ -52,6 +53,11 @@ def events(song_no):
         if i % 120 == 60:
             ev.append((i, ON, (9, 38, 100)))
             ev.append((i + 8, OFF, (9, 38)))
+        if i % 240 == 180:
+            # a key outside the MT-32's rhythm range 35..76: GM plays it,
+            # -M mt32 drops it
+            ev.append((i + 2, ON, (9, 81, 90)))
+            ev.append((i + 6, OFF, (9, 81)))
     ev.append((1200, VOL, (0, 64)))
     ev.append((2400, ON, (0, 72, 100)))     # after a wait of > 254 steps
     ev.append((2410, OFF, (0, 72)))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""zmu_midi_check.py <capture> <song drawer> [--min-notes N]
+"""zmu_midi_check.py <capture> <song drawer> [--min-notes N] [--mt32]
 
 Checks the MIDI the game sent through camd.library (tests/auto/MidiCamd:
 tools/serial_capture.py's capture of FS-UAE's serial port) against the
@@ -21,6 +21,12 @@ The song that plays is found by its first program change on channel 1
 against the song from the place its first notes are found at; every
 message must follow in order, every note on must get its note off, and the
 times must keep the song's 1/120 s steps.
+
+With --mt32 (-M mt32): first the MT-32's reset (F0 41 10 16 12 7F 00 00 00
+01 F7) instead of GM System On; the song's melodic channels in the order
+of first use onto channels 2..9, the rhythm on 10; programs through the
+table mt32_prog in port/amiga/musik_camd.c (read from there); drum keys
+outside 35..76 dropped.
 
 Prints what matched, the first difference, and the timing.
 """
@@ -99,30 +105,69 @@ def zmu_events(data):
     return ev
 
 
+def mt32_table(src):
+    """mt32_prog[128] from port/amiga/musik_camd.c"""
+    text = open(src).read()
+    a = text.index('mt32_prog[128] =')
+    body = text[text.index('{', a) + 1:text.index('};', a)]
+    vals = []
+    for line in body.splitlines():
+        line = line.split('/*')[0]
+        vals += [int(x) for x in line.replace(',', ' ').split()]
+    assert len(vals) == 128, len(vals)
+    return vals
+
+
+def channel_map(ev, mt32):
+    if not mt32:
+        return {ch: ch for ch in range(16)}
+    out = {9: 9}
+    nxt = 1
+    for step, kind, d in ev:
+        if kind > 3:
+            continue
+        ch = d[0] & 15
+        if ch != 9 and ch not in out and nxt <= 8:
+            out[ch] = nxt
+            nxt += 1
+    return out
+
+
 def scaled(v, vol):
     return (v * vol + 64) // 128
 
 
-def reference(ev, passes=4):
-    """the song's messages as the player sends them, unscaled CC7 marked:
-    [(step, bytes, is_cc7_value)] over several passes (it loops)"""
+def reference(ev, passes=4, mt32=None):
+    """the song's messages as the player sends them (CC7 unscaled), over
+    several passes (it loops); mt32: the program table (channels mapped,
+    drum keys outside 35..76 dropped)"""
     out = []
     base = 0
+    cmap = channel_map(ev, mt32 is not None)
     for _ in range(passes):
         end = 0
         for step, kind, d in ev:
             t = base + step
-            if kind == 0:
-                ch, key, vel = d[0] & 15, d[1] & 127, d[2] & 127
-                out.append((t, bytes([0x90 | ch, key, vel]) if vel else bytes([0x80 | ch, key, 0])))
-            elif kind == 1:
-                out.append((t, bytes([0x80 | (d[0] & 15), d[1] & 127, 0])))
-            elif kind == 2:
-                out.append((t, bytes([0xc0 | (d[0] & 15), d[1] & 127])))
-            elif kind == 3:
-                out.append((t, bytes([0xb0 | (d[0] & 15), 7, d[1] & 127])))
-            elif kind == 4:
+            if kind == 4:
                 end = step
+                continue
+            if kind > 3:
+                continue
+            oc = cmap.get(d[0] & 15)
+            if oc is None:
+                continue
+            if kind in (0, 1) and mt32 is not None and oc == 9 and not 35 <= (d[1] & 127) <= 76:
+                continue
+            if kind == 0:
+                key, vel = d[1] & 127, d[2] & 127
+                out.append((t, bytes([0x90 | oc, key, vel]) if vel else bytes([0x80 | oc, key, 0])))
+            elif kind == 1:
+                out.append((t, bytes([0x80 | oc, d[1] & 127, 0])))
+            elif kind == 2:
+                prog = d[1] & 127
+                out.append((t, bytes([0xc0 | oc, mt32[prog] if mt32 is not None else prog])))
+            elif kind == 3:
+                out.append((t, bytes([0xb0 | oc, 7, d[1] & 127])))
         base += end
     return out
 
@@ -143,11 +188,18 @@ def main():
     ap.add_argument('capture')
     ap.add_argument('songs')
     ap.add_argument('--min-notes', type=int, default=50)
+    ap.add_argument('--mt32', action='store_true')
+    ap.add_argument('--log', help="the game's log (dist/Test/auto.log): its own "
+                    "lateness line 'events late ... at most N us' must stay under 5 ms")
     a = ap.parse_args()
+    here = os.path.dirname(os.path.abspath(__file__))
+    mt = mt32_table(os.path.join(here, '..', 'port', 'amiga', 'musik_camd.c')) if a.mt32 else None
 
-    songs = {}
+    songs = {}      # the first program on the first melodic output channel -> song
     for n, name in enumerate(NAMES, 1):
-        songs[10 + n] = (name, zmu_events(open(os.path.join(a.songs, name + '.zmu'), 'rb').read()))
+        ev = zmu_events(open(os.path.join(a.songs, name + '.zmu'), 'rb').read())
+        songs[mt[10 + n] if mt else 10 + n] = (name, ev)
+    first_ch = 1 if a.mt32 else 0
 
     msgs = decode(read_capture(a.capture))
     ok = True
@@ -156,11 +208,30 @@ def main():
         print('FAIL: nothing came over the serial port')
         return 1
 
-    if msgs[0][1] == bytes([0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7]):
-        print('ok: GM System On first')
+    start_msg = (bytes([0xf0, 0x41, 0x10, 0x16, 0x12, 0x7f, 0, 0, 0, 0x01, 0xf7]) if a.mt32
+                 else bytes([0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7]))
+    what = 'the MT-32 reset' if a.mt32 else 'GM System On'
+    if msgs[0][1] == start_msg:
+        print('ok: %s first' % what)
     else:
-        print('FAIL: the first message is %s, not GM System On' % msgs[0][1].hex())
+        print('FAIL: the first message is %s, not %s' % (msgs[0][1].hex(), what))
         ok = False
+    if a.mt32:
+        if msgs[-1][1] == start_msg:
+            print('ok: the MT-32 reset last')
+        else:
+            print('FAIL: the last message is %s, not the MT-32 reset' % msgs[-1][1].hex())
+            ok = False
+        msgs = msgs[:-1]
+    drum_hi = sum(1 for t, b in msgs if len(b) == 3 and b[0] in (0x89, 0x99) and not 35 <= b[1] <= 76)
+    if a.mt32 and drum_hi:
+        print('FAIL: %d drum keys outside 35..76 went out' % drum_hi)
+        ok = False
+    elif not a.mt32 and drum_hi == 0:
+        print('FAIL: no drum key 81 went out (General MIDI plays it)')
+        ok = False
+    else:
+        print('ok: drum keys outside 35..76: %d (%s)' % (drum_hi, 'dropped' if a.mt32 else 'played'))
 
     # parts between All Notes Off bursts
     parts = []
@@ -199,13 +270,13 @@ def main():
                 if k == 'VOL':
                     vols = {x for x in range(129) if scaled(100, x) == v}
             continue
-        prog0 = [m for m in msgs_p if m[1][0] == 0xc0]
+        prog0 = [m for m in msgs_p if m[1][0] == 0xc0 | first_ch]
         if not prog0 or prog0[0][1][1] not in songs:
-            print('FAIL: part %d: %d notes but no song program on channel 1' % (pi, len(notes)))
+            print('FAIL: part %d: %d notes but no song program on channel %d' % (pi, len(notes), first_ch + 1))
             ok = False
             continue
         name, ev = songs[prog0[0][1][1]]
-        ref = reference(ev)
+        ref = reference(ev, mt32=mt)
 
         # where in the song: the first eight note messages, found in the
         # song; the part plays from the first message of that step
@@ -291,8 +362,24 @@ def main():
         print('timing: %d messages, off the song steps by median %.1f ms, 95 %% %.1f ms, max %.1f ms'
               % (len(devs), devs[len(devs) // 2] * 1000, p95 * 1000, devs[-1] * 1000))
         if p95 > 0.060:
-            print('FAIL: the timing spreads more than 60 ms (95 %)')
+            # the Mac's clock against FS-UAE's: when the host is loaded the
+            # emulated clock lags it and the bytes arrive in bursts -- a
+            # warning; the player's own E-clock measure (--log) decides
+            print("WARN: on the Mac's clock the timing spreads more than 60 ms (95 %): "
+                  "FS-UAE lagging the host?")
+    if a.log:
+        late = None
+        for line in open(a.log, encoding='latin-1', errors='replace'):
+            if 'MIDI:' in line and 'at most' in line:
+                late = int(line.split('at most')[1].split()[0])
+        if late is None:
+            print('FAIL: no lateness line in %s' % a.log)
             ok = False
+        elif late > 5000:
+            print('FAIL: the player sent an event %d us late (its own E-clock)' % late)
+            ok = False
+        else:
+            print("ok: the player's own lateness at most %d us" % late)
     print('PASS' if ok else 'FAIL')
     return 0 if ok else 1
 
