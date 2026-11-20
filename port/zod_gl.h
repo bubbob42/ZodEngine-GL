@@ -34,6 +34,10 @@ void zod_gl_flush(void);
 /* quads and fills drawn so far (a census can tell whether a call drew) */
 unsigned long zod_gl_draw_count(void);
 
+/* the frame drew something since the last present (quads, fills, clears) */
+int zod_gl_frame_drew(void);
+void zod_gl_frame_presented(void);
+
 /* E-clock ticks spent so far in the library's glEnd and in texture uploads:
  * where it draws and waits for the card (never cleared) */
 unsigned long zod_gl_lib_ticks(void);

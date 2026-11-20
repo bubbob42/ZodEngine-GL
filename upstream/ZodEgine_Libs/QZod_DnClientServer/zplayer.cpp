@@ -644,7 +644,9 @@ void ZPlayer::Setup()
 	/* the atlas pages now, behind the load bar, not mid-game (zod_gl.cpp) */
 	if(use_opengl)
 	{
+		ZLOG("Start: atlas pages ...\n");
 		zod_gl_atlas_prepare();
+		ZLOG("Start: atlas pages made\n");
 		zod_lade_schritt("TEXTURES", ZOD_LADE_SCHRITTE, ZOD_LADE_SCHRITTE);
 	}
 #endif

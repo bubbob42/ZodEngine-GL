@@ -180,6 +180,7 @@ static char flip_var_text[16];
 static int  gl_oeffnen(int w, int h);
 static void gl_schliessen(void);
 static void gl_bild_zeigen(void);
+static unsigned long gl_leer_ausgelassen = 0;   /* empty frames not shown */
 #endif
 
 /* ---- Den ECHTEN Zeiger bewegen ------------------------------------------
@@ -1216,6 +1217,15 @@ static void gl_bild_zeigen(void)
 {
 	unsigned long t0, ta, tb;
 
+	/* A frame that drew nothing is not shown: the buffer it would show holds
+	 * an older frame (the load bar came back for a moment after loading:
+	 * the game's first frame, before the map arrived, drew nothing) */
+	if(!zod_gl_frame_drew())
+	{
+		gl_leer_ausgelassen++;
+		return;
+	}
+
 	/* The pointer last, at the position of now -- what the software path's
 	 * late pointer does (zeiger_einsetzen). */
 	if(zeig_bild && screen_ptr)
@@ -1224,7 +1234,29 @@ static void gl_bild_zeigen(void)
 
 	t0 = zod_fineclock_ticks();
 
+	/* ZOD_PRESENTLOG (a measuring aid): every present with what it drew */
+	{
+		static int plog = -1;
+		static unsigned long pn = 0, pdraws = 0;
+
+		if(plog < 0)
+		{
+			char b[8];
+
+			plog = zod_env("ZOD_PRESENTLOG", b, sizeof(b)) ? 1 : 0;
+		}
+
+		if(plog)
+		{
+			const unsigned long d = zod_gl_draw_count();
+
+			ZLOG("present %lu: %lu quads/fills since the last\n", pn++, d - pdraws);
+			pdraws = d;
+		}
+	}
+
 	zod_gl_flush();
+	zod_gl_frame_presented();
 	ta = zod_fineclock_ticks();
 	mglSwitchDisplay();
 	tb = zod_fineclock_ticks();
@@ -1293,6 +1325,7 @@ extern "C" void zod_present_cadence_report(void)
 
 	if(cad_frames < 2) return;
 
+	ZLOG("GL: frames that drew nothing, not shown: %lu\n", gl_leer_ausgelassen);
 	ZLOG("GL present cadence (%lu presents), ms bucket upper edges:", cad_frames);
 	for(i = 0; i < CAD_B - 1; i++) ZLOG(" %u", cad_edge_ms[i]);
 	ZLOG(" more\n  work between presents:");

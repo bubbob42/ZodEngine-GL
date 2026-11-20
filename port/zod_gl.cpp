@@ -2372,6 +2372,24 @@ void zod_gl_flush(void)
 	dyn_retired_n = j;
 }
 
+/* clears count as drawing too (zod_gl_frame_drew) */
+static unsigned long st_clears = 0, drew_mark = 0;
+
+/* something drawn since the last present: a quad, a fill or a clear. A
+ * frame with nothing in it must not be presented: with three buffers the
+ * one it would show holds an older frame (the load bar came back for a
+ * moment after the loading, 20.11.: the game's first frame drew nothing
+ * before the map arrived) */
+int zod_gl_frame_drew(void)
+{
+	return st_quads + st_fills + st_clears != drew_mark;
+}
+
+void zod_gl_frame_presented(void)
+{
+	drew_mark = st_quads + st_fills + st_clears;
+}
+
 unsigned long zod_gl_draw_count(void)
 {
 	return st_quads + st_fills;
@@ -2439,6 +2457,7 @@ unsigned long zod_gl_frame_no(void)
 
 void zod_gl_clear(Uint8 r, Uint8 g, Uint8 b)
 {
+	st_clears++;
 	batch_end();
 	glClearColor(r / 255.0f, g / 255.0f, b / 255.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
