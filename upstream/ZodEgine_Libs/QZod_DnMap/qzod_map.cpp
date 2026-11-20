@@ -2213,6 +2213,15 @@ void ZMap::BakeZoneMarkers()
     }
 }
 
+static int zonewater = -1;
+
+static bool zonewater_on()
+{
+    if(zonewater < 0) zonewater = eff_switch("ZOD_ZONEWATER", 1);
+
+    return zonewater == 1;
+}
+
 void ZMap::DoZoneEffects(double the_time, SDL_Surface *dest, int shift_x, int shift_y)
 {
     zod_zone_bilder++;
@@ -2247,6 +2256,12 @@ void ZMap::DoZoneEffects(double the_time, SDL_Surface *dest, int shift_x, int sh
             SDL_Rect from_rect, to_rect;
 
             zod_zone_kacheln++;
+
+            /* ZOD_ZONEWATER (default on): only a water tile does anything
+             * below (the others are baked into the map surface), so the
+             * view test is asked for water tiles only -- ~114 of 128 calls
+             * a frame on orig04 were for nothing */
+            if(!j->is_water && zonewater_on()) continue;
 
             if(GetBlitInfo(zone_marker[0].GetBaseSurface(),
                            j->render_loc.x, j->render_loc.y, from_rect, to_rect))
