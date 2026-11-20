@@ -170,7 +170,14 @@ static LONG aufloesung_platz(const char *wert)
  * beiden Faellen derselbe -- nur der Weg zur Hardware unterscheidet sich.
  * Gespeichert wird der LISTENPLATZ; es gibt hier keine Zahl mit eigener
  * Bedeutung, die man verwechseln koennte. */
-static const char *musikwege[] = { "AHI", "Paula", NULL };
+static const char *musikwege[] = { "AHI", "Paula", "General MIDI (camd)", "MT-32 (camd)", NULL };
+
+/* The two camd entries (docs/concept-midi-camd.md): the songs as MIDI to a
+ * camd cluster -- PrismaMIDI, an mt32-pi, any MIDI module -- and the sound
+ * effects on AHI. The cluster: out.0 is camd's serial port (camd 37's own
+ * driver); PrismaMIDI's is prisma.out.0. */
+#define MUSIKWEG_GM   2
+#define MUSIKWEG_MT32 3
 
 /* How the game draws. Software is cego's 8-bit RTG path; MiniGL draws
  * through minigl.library (RadeonGL on a Radeon, PiStorm3D on a PiStorm)
@@ -369,7 +376,8 @@ struct einstellungen
     ULONG ahi_modus;        /* 0 = Vorgabe, sonst AHI-Modusnummer       */
     LONG  variante;         /* 0 = Story Mode, 1 = ZodEngine Mode       */
     BOOL  fps;              /* Bildrate oben links anzeigen             */
-    LONG  musikweg;         /* 0 = AHI, 1 = Paula                       */
+    LONG  musikweg;         /* 0 AHI, 1 Paula, 2 General MIDI, 3 MT-32  */
+    char  midi_cluster[MAX_TEXT];   /* camd's cluster for 2 and 3          */
     /* Zwischensequenzen. Wirkt nur, wenn beim Installieren auch
      * welche kopiert wurden -- ohne das Verzeichnis passiert nichts,
      * und das Spiel verhaelt sich wie ganz ohne Filme. */
@@ -403,6 +411,7 @@ static void cfg_vorgaben(void)
     cfg.ton         = TRUE;
     cfg.musik       = FALSE;             /* Musik ist nicht mitgeliefert  */
     cfg.musikweg    = 0;                 /* AHI                           */
+    strcpy(cfg.midi_cluster, "out.0");   /* camd's serial port            */
     cfg.videos      = TRUE;              /* wirkt nur, wenn cuts/ da ist  */
     cfg.skalierung  = 12;                /* 6,0 = kein Deckel             */
     cfg.variante    = 0;                 /* Original Z Story Mode         */
@@ -521,7 +530,16 @@ static void cfg_laden(void)
         else if(!strcmp(zeile, "ahimodus"))    cfg.ahi_modus  = strtoul(wert, NULL, 0);
         else if(!strcmp(zeile, "variante"))    cfg.variante   = (atoi(wert) == 1) ? 1 : 0;
         else if(!strcmp(zeile, "fps"))        cfg.fps        = (BOOL)atoi(wert);
-        else if(!strcmp(zeile, "musikweg"))    cfg.musikweg   = (atol(wert) == 1) ? 1 : 0;
+        else if(!strcmp(zeile, "musikweg"))
+        {
+            cfg.musikweg = atol(wert);
+            if(cfg.musikweg < 0 || cfg.musikweg > MUSIKWEG_MT32) cfg.musikweg = 0;
+        }
+        else if(!strcmp(zeile, "midicluster") && wert[0])
+        {
+            strncpy(cfg.midi_cluster, wert, MAX_TEXT - 1);
+            cfg.midi_cluster[MAX_TEXT - 1] = 0;
+        }
         /* Aeltere Dateien kennen den Schluessel nicht -- dann bleibt er leer,
          * und der Launcher verlangt beim Starten eine Auswahl. */
         else if(!strcmp(zeile, "binaer"))      { binaer_setzen(wert); }
@@ -563,6 +581,7 @@ static void cfg_speichern(void)
     snprintf(zeile, sizeof(zeile), "variante=%ld\n", (long)cfg.variante);  FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "fps=%d\n", cfg.fps ? 1 : 0);           FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "musikweg=%ld\n", (long)cfg.musikweg); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "midicluster=%s\n", cfg.midi_cluster); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "binaer=%s\n", cfg.binaer);             FPuts(f, zeile);
 
     for(i = 0; i < 8; i++)
@@ -663,8 +682,18 @@ static void befehlszeile_bauen(char *aus, size_t platz)
      * sonst stuende in der Vorschau eine Einstellung, die nichts tut. */
     if(cfg.musik)
     {
-        snprintf(teil, sizeof(teil), "-M %s ", cfg.musikweg == 1 ? "paula" : "ahi");
+        static const char *const wege[] = { "ahi", "paula", "gm", "mt32" };
+
+        snprintf(teil, sizeof(teil), "-M %s ",
+                 wege[cfg.musikweg >= 0 && cfg.musikweg <= MUSIKWEG_MT32 ? cfg.musikweg : 0]);
         strncat(aus, teil, platz - strlen(aus) - 1);
+
+        /* the cluster only where camd plays the songs */
+        if(cfg.musikweg >= MUSIKWEG_GM && cfg.midi_cluster[0])
+        {
+            snprintf(teil, sizeof(teil), "-K %s ", cfg.midi_cluster);
+            strncat(aus, teil, platz - strlen(aus) - 1);
+        }
     }
     /* Zwischensequenzen. Der Pfad steht hier fest und NICHT als
      * Einstellung: der Installer legt sie neben das Spiel, und ein zweiter
@@ -1023,6 +1052,7 @@ int main(int argc, char **argv)
     Object *o_skalierung, *o_skalierung_text;
     Object *o_ton, *o_musik, *o_videos, *o_musikweg;
     Object *o_sync, *o_sync_label, *o_smooth, *o_smooth_label;
+    Object *o_cluster, *o_cluster_label;
     Object *o_ahi, *o_ahi_label, *o_ahi_gruppe, *o_ahi_waehlen, *o_ahi_vorgabe;
     Object *o_liste, *o_karte, *o_karte_an, *o_extra;
     Object *o_liste_waehlen, *o_karte_waehlen;
@@ -1039,6 +1069,7 @@ int main(int argc, char **argv)
     char    ahi_anzeige[80];
     LONG    ahi_aus = -1;        /* zuletzt gesetzter Ausgrauzustand */
     LONG    sync_aus = -1;       /* the same for display sync and smooth */
+    LONG    cluster_aus = -1;    /* the same for the MIDI cluster */
 
     (void)argc; (void)argv;
 
@@ -1261,14 +1292,28 @@ int main(int argc, char **argv)
                         Child, o_musikweg = CycleObject,
                             MUIA_Cycle_Entries, (ULONG)musikwege,
                             MUIA_Cycle_Active,  cfg.musikweg,
-                            MUIA_ShortHelp, (ULONG)"Where the music goes. The "
-                                "mixer is the same either way -- only the path "
-                                "to the hardware differs.\n"
+                            MUIA_ShortHelp, (ULONG)"Where the music goes.\n"
                                 "AHI: one stereo stream to the sound card or "
                                 "SAGA, 16 bit.\n"
                                 "Paula: audio.device claims the channels and "
                                 "writes the registers directly, 8 bit -- the "
-                                "sound of the original hardware.",
+                                "sound of the original hardware.\n"
+                                "General MIDI / MT-32 (camd): the songs as MIDI "
+                                "to a synthesizer through camd.library -- "
+                                "PrismaMIDI, an mt32-pi, any MIDI module; the "
+                                "sound effects stay on AHI.",
+                        End,
+
+                        /* Ghosted unless a camd entry is chosen. */
+                        Child, o_cluster_label = Label2("MIDI cluster"),
+                        Child, o_cluster = StringObject,
+                            StringFrame,
+                            MUIA_String_Contents, (ULONG)cfg.midi_cluster,
+                            MUIA_String_MaxLen,   MAX_TEXT,
+                            MUIA_ShortHelp, (ULONG)"The camd cluster the music "
+                                "goes to: out.0 is the serial port (camd 37's "
+                                "own driver: an mt32-pi or a MIDI interface); "
+                                "PrismaMIDI's is prisma.out.0.",
                         End,
 
                         /* Ausgegraut, sobald Paula gewaehlt ist: der Modus
@@ -1388,6 +1433,9 @@ int main(int argc, char **argv)
 
             get(o_team,  MUIA_Cycle_Active, &l); cfg.team       = l;
             get(o_musikweg, MUIA_Cycle_Active, &l); cfg.musikweg = l;
+
+            get(o_cluster, MUIA_String_Contents, &s);
+            if(s) { strncpy(cfg.midi_cluster, (char*)s, MAX_TEXT-1); cfg.midi_cluster[MAX_TEXT-1] = 0; }
             get(o_variante, MUIA_Cycle_Active, &l); cfg.variante = (l == 1) ? 1 : 0;
             get(o_aufl,  MUIA_Cycle_Active, &l); cfg.aufloesung = l;
             get(o_renderer, MUIA_Cycle_Active, &l); cfg.renderer = l ? 1 : 0;
@@ -1436,6 +1484,16 @@ int main(int argc, char **argv)
                     ahi_aus = aus;
                     set(o_ahi_label,  MUIA_Disabled, aus);
                     set(o_ahi_gruppe, MUIA_Disabled, aus);
+                }
+
+                /* the cluster belongs to the camd entries */
+                aus = (cfg.musikweg >= MUSIKWEG_GM) ? FALSE : TRUE;
+
+                if(aus != cluster_aus)
+                {
+                    cluster_aus = aus;
+                    set(o_cluster_label, MUIA_Disabled, aus);
+                    set(o_cluster,       MUIA_Disabled, aus);
                 }
             }
 

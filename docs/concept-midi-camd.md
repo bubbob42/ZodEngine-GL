@@ -33,9 +33,12 @@ Ear tests in the morning (list at the end).
 
 ## The camd output
 
-A third way out behind the same interface (musik_ausgabe.h): `MUSIK_GM`
-and `MUSIK_MT32`. No mixer, no bank, no AHI stream for the music; the
-sound effects keep their AHI/Paula path.
+A third way out for the songs: `-M gm` / `-M mt32`. The mixer
+(musik_mischer.c) mixes the sound effects AND the music into one AHI or
+Paula stream today; with camd it keeps mixing the effects (AHI) but no
+music voices (up to 18 of its 32) and loads no MIDIBANK (~100 KB). The
+songs' calls (Mix_PlayMusic, Mix_SetMusicPosition, Mix_VolumeMusic,
+Mix_HaltMusic -- port/amiga/sdl_addons.cpp) go to port/amiga/musik_camd.c.
 
 - **Module** `port/amiga/musik_camd.c`: opens camd.library (V37+),
   `CreateMidi`, `AddMidiLink(MLTYPE_Sender)` to a cluster (default
@@ -116,11 +119,36 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
 
 ## Milestones
 
-1. M1: the camd output, GM flavour, FS-UAE byte check.
-2. M2: MT-32 flavour (program table, part mapping, reset).
-3. M3: ZodLaunch choice and cluster field.
+1. M1: the camd output, GM flavour, FS-UAE byte check -- DONE 20.11.
+   night (branch midi-camd): tests/auto/MidiCamd, its own test songs
+   (tools/zmu_test_song.py: pseudo-random keys, a drum key outside the
+   MT-32's range, a CC7 change, a 300-step wait), a jump
+   (ZOD_MIDI_TESTJUMP=1500@6), tools/zmu_midi_check.py: every message in
+   order against a reference player, notes paired; the player's own
+   lateness at most 0.55 ms.
+2. M2: MT-32 flavour (program table, part mapping, reset) -- DONE 20.11.
+   night: tests/auto/MidiCamdMT32 (reset first and last, channels on parts
+   2..9 in the order of first use, programs through mt32_prog, drum keys
+   outside 35..76 dropped) passes. The program table is a first guess from
+   the two preset lists: ear test.
+3. M3: ZodLaunch choice and cluster field -- DONE 20.11. night: Music
+   output AHI / Paula / General MIDI (camd) / MT-32 (camd), a "MIDI
+   cluster" string ghosted unless camd (default out.0), saved as
+   musikweg=0..3 and midicluster=; the start line gets -M gm|mt32 and
+   -K <cluster> (a new game option; ZOD_MIDI_CLUSTER stays for tests).
+   tests/launcher (gmake launchtest): the four outputs, -K only with camd,
+   the cluster round trip -- passes. ZodLaunch builds in cego's Docker
+   toolchain (the gcc 6.5 one has no MUI headers); its window not yet seen
+   in an emulator.
 4. M4: PrismaMIDI's port wait; real-hardware runs (Prisma's machines,
-   with Prisma's word), the mt32-pi.
+   with Prisma's word), the mt32-pi. -- The port wait DONE 20.11. night: a
+   cluster named prisma* makes the player wait for the public port
+   "PrismaSynth" (FindPort under a short Forbid every 20 ms, at most 3 s),
+   then play; the log says how long. FS-UAE (MidiCamdMT32's last run, -K
+   prisma.out.0, no Prisma card): "not there -- the music goes out anyway
+   after 3000 ms", rc 0. The real-hardware runs wait for the user and the
+   Prisma session (voltago and arkon are Prisma's; Zod's 24 MB of game data
+   would have to go up first).
 
 ## Open questions (recommendation first)
 
@@ -129,8 +157,8 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
 2. MT-32 program table: **a standard GM -> MT-32 table** (the closest
    presets), refined by ear -- or the original game's MT-32 driver data if
    the CD carries any (to be looked for: Miles .MT timbre files).
-3. The mixer process stays off while camd plays music (**yes**, that is
-   the saving) -- the sound effects keep AHI/Paula.
+3. The mixer keeps mixing the effects only while camd plays the music
+   (**yes**: the music voices are the saving).
 
 ## Ear tests (morning)
 
