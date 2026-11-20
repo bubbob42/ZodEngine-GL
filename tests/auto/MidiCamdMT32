@@ -1,0 +1,38 @@
+; MidiCamdMT32 -- MidiCamd with -M mt32 (port/amiga/musik_camd.c): the MT-32
+; reset first and last, the songs' channels on parts 2..9, programs mapped,
+; drum keys outside 35..76 dropped. Otherwise as MidiCamd:
+; camd 37.14's built-in serial driver sends cluster out.0 to FS-UAE's serial
+; port, captured raw (SERIAL_RAW: tools/serial_capture.py). The install has
+; no songs (they come from the user's CD): the test's own, made by
+; tools/zmu_test_song.py into DEV:Test/midi-songs, go into DEV:Zod/music for
+; this run and out again. A 40 s bot match on orig01 in software. Then on the
+; Mac: tools/zmu_midi_check.py --mt32 build/autotest/MidiCamdMT32.serial dist/Test/midi-songs
+;      --log build/autotest/MidiCamdMT32.out
+; LIMIT 600
+; SERIAL_RAW
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+MakeDir >NIL: DEV:Zod/music
+Copy DEV:Test/midi-songs/#?.zmu DEV:Zod/music/ QUIET
+List DEV:Zod/music/#?.zmu >>DEV:Test/auto.log
+Echo "=== software, orig01, music through camd (-M mt32) ===" >>DEV:Test/auto.log
+; a jump as the danger levels make them: to step 1500 (past the song's
+; CC7 change at 1200) once a song has played 6 s
+SetEnv ZOD_MIDI_TESTJUMP 1500@6
+Run >NIL: Execute DEV:Test/RunZodMidi mt 40 -M mt32 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-mt.done
+Type DEV:Test/zod-mt.log >>DEV:Test/auto.log
+UnSetEnv ZOD_MIDI_TESTJUMP
+; PrismaMIDI's cluster (-K prisma.out.0): no PrismaSynth port in FS-UAE, so the
+; player must give up after 3 s and say so ("not there ... after 3000 ms")
+Echo "=== -M gm -K prisma.out.0: the PrismaSynth port wait ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodMidi prw 10 -K prisma.out.0 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-prw.done
+Type DEV:Test/zod-prw.log >>DEV:Test/auto.log
+Delete >NIL: DEV:Zod/music/#?.zmu
+Delete >NIL: DEV:Zod/music
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

@@ -46,12 +46,14 @@
 #include "amiga_startup.h"
 #include "ammx.h"
 #include "fineclock.h"
+#include "zod_aga.h"
 
 #ifndef DISABLE_OPENGL
 #include <dos/var.h>
 #include <SDL/SDL_opengl.h>
 #include "zod_gl.h"
 #include "zod_present.h"
+#include "zod_smooth.h"
 #endif
 
 /* port/amiga/sdl_video.cpp -- Schmutzspuren je Zeile */
@@ -123,6 +125,7 @@ extern unsigned long long zod_dirty_bytes;
 extern unsigned long zod_dirty_frames;
 extern unsigned long zod_dirty_calls;
 #include "fastcopy.h"
+#include "zod_rtgscroll.h"
 
 /* Die Basis selbst halten: libstubs.a traegt fuer cybergraphics den falschen
  * Bibliotheksnamen ("CyberGfx.library" statt "cybergraphics.library"). */
@@ -146,6 +149,8 @@ static SDL_VideoInfo video_info;
 static SDL_PixelFormat video_format;
 
 static int screen_bpp = 0;        /* Tiefe des RTG-Schirms */
+static int aga_aktiv = 0;         /* the AGA screen (zod_aga.cpp) instead of RTG */
+static int aga_dy = 0;            /* its rows above the picture */
 static int screen_swapped = 0;    /* 16 Bit byte-vertauscht (RGB16PC) */
 
 static int mouse_x = 0, mouse_y = 0;
@@ -173,6 +178,9 @@ static int wheel_pending = 0;     /* +1 hoch, -1 runter */
  * software, and SDL_Flip shows them as one texture. */
 static int mgl_offen  = 0;       /* MiniGLOpen succeeded */
 static int gl_sync    = 1;       /* wait for the beam (ZOD_GL_SYNC) */
+/* -Y (the launcher's "Display sync"): pan, blank, now; empty: as before
+ * (pan, sync from ZOD_GL_SYNC) -- docs/concept-display-sync.md */
+char zod_display_sync[8] = "";
 static int gl_kontext = 0;       /* a context is open */
 static int flip_var_vorher = -1; /* RadeonGLFlip before us: -1 untouched, 0 none, 1 flip_var_text */
 static char flip_var_text[16];
@@ -180,6 +188,7 @@ static char flip_var_text[16];
 static int  gl_oeffnen(int w, int h);
 static void gl_schliessen(void);
 static void gl_bild_zeigen(void);
+static unsigned long gl_leer_ausgelassen = 0;   /* empty frames not shown */
 #endif
 
 /* ---- Den ECHTEN Zeiger bewegen ------------------------------------------
@@ -288,9 +297,12 @@ static void close_all(void)
 
 	if(screen_ptr)
 	{
+		if(aga_aktiv) zod_aga_close(screen_ptr);
 		CloseScreen(screen_ptr);
 		screen_ptr = 0;
 	}
+
+	aga_aktiv = 0;
 
 	if(KeymapBaseOwn)
 	{
@@ -414,6 +426,9 @@ void zod_flip_report(void)
 {
 	const unsigned long f = zod_fineclock_freq();
 
+	zod_rtgscroll_report();
+	zod_aga_report();
+
 	if(!f || !flip_bilder) return;
 
 	/* Ticks -> us, ohne Ueberlauf. */
@@ -471,11 +486,9 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	{
 		CyberGfxBase = OpenLibrary((CONST_STRPTR)CYBERGFXNAME, 41L);
 
+		/* no RTG: the AGA screen is the way left (zod_aga.cpp) */
 		if(!CyberGfxBase)
-		{
-			ZLOG("Schirm: cybergraphics.library nicht zu oeffnen -- RTG noetig\n");
-			return 0;
-		}
+			ZLOG("Schirm: cybergraphics.library nicht zu oeffnen -- kein RTG, AGA wird versucht\n");
 	}
 
 	if(!KeymapBaseOwn)
@@ -503,19 +516,34 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	ULONG id = INVALID_ID;
 	int got = 0;
 
-	for(int i = 0; i < n && id == INVALID_ID; i++)
+	/* AGA (docs/concept-aga.md): asked for (ZOD_AGA), or no RTG at all */
+	int use_aga = zod_aga_wanted() || !CyberGfxBase;
+
+	for(int i = 0; !use_aga && i < n && id == INVALID_ID; i++)
 	{
 		id = find_mode(w, h, want[i]);
 
 		if(id != INVALID_ID) got = want[i];
 	}
 
-	if(id == INVALID_ID)
+	if(!use_aga && id == INVALID_ID)
 	{
-		ZLOG("Schirm: kein RTG-Modus fuer %dx%d gefunden\n", w, h);
-		return 0;
+		ZLOG("Schirm: kein RTG-Modus fuer %dx%d gefunden -- AGA wird versucht\n", w, h);
+		use_aga = 1;
 	}
 
+	if(use_aga)
+	{
+		screen_ptr = zod_aga_open(w, h, &aga_dy);
+
+		if(!screen_ptr) return 0;
+
+		aga_aktiv = 1;
+		screen_bpp = 8;
+		screen_swapped = 0;
+	}
+	else
+	{
 	ULONG err = 0;
 	struct TagItem sa[] = {
 		{ SA_DisplayID,  id },
@@ -545,10 +573,13 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	ULONG pixfmt = GetCyberMapAttr(screen_ptr->RastPort.BitMap, CYBRMATTR_PIXFMT);
 
 	screen_swapped = (pixfmt == PIXFMT_RGB16PC || pixfmt == PIXFMT_RGB15PC);
+	}
 
+	/* on AGA the window covers the picture's rows: the mouse's window
+	 * coordinates are the picture's */
 	struct TagItem wa[] = {
 		{ WA_CustomScreen, (ULONG)screen_ptr },
-		{ WA_Left, 0 }, { WA_Top, 0 },
+		{ WA_Left, 0 }, { WA_Top, (ULONG)(aga_aktiv ? aga_dy : 0) },
 		{ WA_Width, (ULONG)w }, { WA_Height, (ULONG)h },
 		{ WA_Flags, WFLG_BACKDROP | WFLG_BORDERLESS | WFLG_ACTIVATE |
 		            WFLG_RMBTRAP | WFLG_REPORTMOUSE | WFLG_NOCAREREFRESH },
@@ -614,7 +645,8 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 		              : "Laeufe je Blockzeile (Vorgabe)");
 
 		/* the gap from this machine's own prices (ZOD_LUECKE fixes it) */
-		measure_gap(compose);
+		/* both lock the RTG bitmap: not on AGA */
+		if(!aga_aktiv) measure_gap(compose);
 
 		/* the block sums: on where a byte into the screen is dear;
 		 * ZOD_FLIP_SUMS=ein / aus / pruefen. A new screen: record all. */
@@ -633,7 +665,7 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 
 		if(GetVar((CONST_STRPTR)"ZOD_COPYBENCH", (STRPTR)wahl, sizeof(wahl), 0) > 0
 		   && (wahl[0] == '1' || wahl[0] == 'j' || wahl[0] == 'J'))
-			copy_bench(compose);
+			if(!aga_aktiv) copy_bench(compose);
 
 		char wunsch[160];
 
@@ -1083,7 +1115,11 @@ static int gl_oeffnen(int w, int h)
 	{
 		mglChooseWindowMode(GL_FALSE);
 		mglChoosePixelDepth(16);
-		mglChooseNumberOfBuffers(3);
+		/* -Y blank / now: the copy path -- RadeonGL copies the frame to the
+		 * screen (behind the beam with sync on) when a program asks for
+		 * fewer than three buffers (lib/cardflip.c: three = the flip,
+		 * RadeonGLFlip only picks pan or csb there) */
+		mglChooseNumberOfBuffers((zod_display_sync[0] == 'b' || zod_display_sync[0] == 'n') ? 2 : 3);
 
 		if(!mglCreateContext(0, 0, w, h))
 		{
@@ -1129,15 +1165,23 @@ static int gl_oeffnen(int w, int h)
 		gl_sync = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
 		                  (e[0] == 'o' && e[1] == 'f')));
 
+		/* -Y now: no wait; blank and pan: wait (pan ignores it anyway) */
+		if(zod_display_sync[0]) gl_sync = zod_display_sync[0] != 'n';
+
 		mglEnableSync(gl_sync ? GL_TRUE : GL_FALSE);
 		ZLOG("GL: %s, %dx%d screen, %s, sync %s\n",
 		     (const char *)glGetString(GL_RENDERER), w, h,
-		     zod_present_active() ? "own present (two halves of one screen)" : "3 buffers",
+		     zod_present_active() ? "own present (two halves of one screen)" :
+		     (zod_display_sync[0] == 'b' || zod_display_sync[0] == 'n') ? "2 buffers, copied" :
+		     "3 buffers, panned",
 		     gl_sync ? "on" : "off");
 	}
 
 	zod_gl_active = 1;
 	zod_gl_init(w, h);
+
+	/* ZOD_SMOOTH: the blank clock, on the library's own panned buffers only */
+	if(!zod_present_active()) zod_smooth_open();
 
 	return 1;
 }
@@ -1156,6 +1200,7 @@ static void gl_schliessen(void)
 		if(!zod_present_active()) mglClearPointer();
 	}
 
+	zod_smooth_close();
 	mglDeleteContext();
 	gl_kontext = 0;
 
@@ -1190,7 +1235,7 @@ enum { CAD_BLOCKS = 10, CAD_BLOCK = 200 };
 static unsigned long cad_held_blk[CAD_BLOCKS + 1];
 /* Inside the present by its parts, whole-run E clock ticks: the last
  * batch's flush, mglSwitchDisplay, zod_present_show. */
-static unsigned long cad_in_flush = 0, cad_in_switch = 0, cad_in_show = 0;
+static unsigned long cad_in_flush = 0, cad_in_switch = 0, cad_in_show = 0, cad_in_pace = 0;
 static int cad_raw_n = 0;
 
 static unsigned long cad_us(unsigned long ticks)
@@ -1214,7 +1259,16 @@ static int cad_bucket(unsigned long us)
 
 static void gl_bild_zeigen(void)
 {
-	unsigned long t0, ta, tb;
+	unsigned long t0, ts, ta, tb;
+
+	/* A frame that drew nothing is not shown: the buffer it would show holds
+	 * an older frame (the load bar came back for a moment after loading:
+	 * the game's first frame, before the map arrived, drew nothing) */
+	if(!zod_gl_frame_drew())
+	{
+		gl_leer_ausgelassen++;
+		return;
+	}
 
 	/* The pointer last, at the position of now -- what the software path's
 	 * late pointer does (zeiger_einsetzen). */
@@ -1224,17 +1278,44 @@ static void gl_bild_zeigen(void)
 
 	t0 = zod_fineclock_ticks();
 
+	/* ZOD_PRESENTLOG (a measuring aid): every present with what it drew */
+	{
+		static int plog = -1;
+		static unsigned long pn = 0, pdraws = 0;
+
+		if(plog < 0)
+		{
+			char b[8];
+
+			plog = zod_env("ZOD_PRESENTLOG", b, sizeof(b)) ? 1 : 0;
+		}
+
+		if(plog)
+		{
+			const unsigned long d = zod_gl_draw_count();
+
+			ZLOG("present %lu: %lu quads/fills since the last\n", pn++, d - pdraws);
+			pdraws = d;
+		}
+	}
+
 	zod_gl_flush();
+	zod_gl_frame_presented();
+	ts = zod_fineclock_ticks();
+	/* ZOD_SMOOTH: the wait for the blank this frame's predecessor is due on */
+	zod_smooth_before_switch();
 	ta = zod_fineclock_ticks();
 	mglSwitchDisplay();
 	tb = zod_fineclock_ticks();
+	zod_smooth_after_switch();
 
 	if(zod_present_active()) zod_present_show(gl_sync);
 
 	{
 		const unsigned long t1 = zod_fineclock_ticks();
 
-		cad_in_flush += ta - t0;
+		cad_in_flush += ts - t0;
+		cad_in_pace += ta - ts;
 		cad_in_switch += tb - ta;
 		cad_in_show += t1 - tb;
 
@@ -1293,6 +1374,7 @@ extern "C" void zod_present_cadence_report(void)
 
 	if(cad_frames < 2) return;
 
+	ZLOG("GL: frames that drew nothing, not shown: %lu\n", gl_leer_ausgelassen);
 	ZLOG("GL present cadence (%lu presents), ms bucket upper edges:", cad_frames);
 	for(i = 0; i < CAD_B - 1; i++) ZLOG(" %u", cad_edge_ms[i]);
 	ZLOG(" more\n  work between presents:");
@@ -1309,8 +1391,9 @@ extern "C" void zod_present_cadence_report(void)
 	     cad_long_n, cad_long_n ? cad_long_server / cad_long_n : 0UL,
 	     cad_long_n ? cad_long_game / cad_long_n : 0UL,
 	     cad_long_n ? cad_long_up / cad_long_n : 0UL);
-	ZLOG("  inside the present by its parts, us a present: flush %lu, mglSwitchDisplay %lu,"
-	     " present_show %lu\n", cad_us(cad_in_flush / cad_frames),
+	ZLOG("  inside the present by its parts, us a present: flush %lu, wait for the blank (ZOD_SMOOTH) %lu,"
+	     " mglSwitchDisplay %lu, present_show %lu\n", cad_us(cad_in_flush / cad_frames),
+	     cad_us(cad_in_pace / cad_frames),
 	     cad_us(cad_in_switch / cad_frames), cad_us(cad_in_show / cad_frames));
 	ZLOG("  presents of 8 ms and more by %d-frame block from the first:", CAD_BLOCK);
 	for(i = 0; i <= CAD_BLOCKS; i++) ZLOG(" %lu", cad_held_blk[i]);
@@ -1319,6 +1402,8 @@ extern "C" void zod_present_cadence_report(void)
 	for(i = 0; i < cad_raw_n; i++)
 		ZLOG("    %5u %5u %5u %5u %5u\n", cad_raw[i][0], cad_raw[i][1], cad_raw[i][2],
 		     cad_raw[i][3], cad_raw[i][4]);
+
+	zod_smooth_report();
 }
 
 void SDL_GL_SwapBuffers(void)
@@ -1583,6 +1668,139 @@ extern "C" void zod_sdl_flip_teil(int x, int y, int w, int h)
 	flip_tx = x; flip_ty = y; flip_tw = w; flip_th = h;
 }
 
+/* ZOD_RTGSCROLL (zod_rtgscroll.cpp): a scrolled frame. The map area was
+ * moved on the card by (-dx, -dy) before the lock; every dirty block whose
+ * pixels are the previous frame's at the moved place stays, the others go
+ * over the bus. Returns the bytes sent. */
+static unsigned long rtgscroll_copy(SDL_Surface *screen, unsigned char *dst, ULONG bpr,
+                                    int dx, int dy, int rx, int ry, int vw, int vh)
+{
+	enum { MAX_RUNS = 24 };
+	const int w = screen->w, h = screen->h;
+	const long pitch = screen->pitch;
+	const unsigned char *src = (const unsigned char *)screen->pixels;
+	const int schub = zod_dirty_block_shift();
+	const int block = 1 << schub;
+	/* the rect the blit wrote: what it holds is the previous frame's */
+	const int bx0 = rx + (dx < 0 ? -dx : 0), by0 = ry + (dy < 0 ? -dy : 0);
+	const int bw = vw - (dx < 0 ? -dx : dx), bh = vh - (dy < 0 ? -dy : dy);
+	short lx0[MAX_RUNS], lx1[MAX_RUNS];
+	unsigned long bytes = 0, sent = 0, kept = 0;
+	int valid;
+	unsigned char *pv = zod_rtgscroll_prev(w, h, &valid);
+
+	for(int y0 = 0; y0 < h; y0 += block)
+	{
+		const int rows = (h - y0 < block) ? h - y0 : block;
+		const int n = zod_dirty_out_runs(y0 >> schub, lx0, lx1, MAX_RUNS);
+
+		for(int i = 0; i < n; i++)
+		{
+			int x0 = lx0[i], x1 = lx1[i];
+
+			if(x0 < 0) x0 = 0;
+			if(x1 > w - 1) x1 = w - 1;
+			if(x1 < x0) continue;
+
+			int span0 = -1;
+
+			for(int xb = x0 - (x0 % block); xb <= x1 + 1; xb += block)
+			{
+				int keep = 0;
+				const int bwid = (xb + block <= w) ? block : w - xb;
+
+				if(xb <= x1 && pv && xb >= bx0 && xb + bwid <= bx0 + bw && y0 >= by0 && y0 + rows <= by0 + bh)
+				{
+					keep = 1;
+
+					for(int r = 0; r < rows && keep; r++)
+						if(memcmp(src + (y0 + r) * pitch + xb,
+						          pv + (long)(y0 + r + dy) * w + xb + dx, (size_t)bwid))
+							keep = 0;
+				}
+
+				if(xb <= x1 && !keep)
+				{
+					if(span0 < 0) span0 = xb;
+					sent++;
+					continue;
+				}
+
+				if(xb <= x1) kept++;
+
+				if(span0 >= 0)
+				{
+					const int cx1 = (xb < w) ? xb : w;
+
+					for(int r = 0; r < rows; r++)
+						zod_copy_row(dst + (unsigned long)(y0 + r) * bpr + span0,
+						             src + (y0 + r) * pitch + span0, cx1 - span0);
+
+					zod_dirty_calls += (unsigned long)rows;
+					bytes += (unsigned long)(cx1 - span0) * rows;
+					span0 = -1;
+				}
+			}
+		}
+	}
+
+	zod_rtgscroll_count(sent, kept);
+
+	/* the previous frame is now this one, all of it */
+	if(pv)
+	{
+		for(int y = 0; y < h; y++) memcpy(pv + (long)y * w, src + y * pitch, (size_t)w);
+		zod_rtgscroll_prev_set_valid(1);
+	}
+
+	/* the block sums no longer know what the moved blocks hold */
+	if(sums_valid) memset(sums_valid, 0, (size_t)sums_w * sums_h);
+
+	return bytes;
+}
+
+/* ZOD_RTGSCROLL: the previous frame follows the screen in an ordinary
+ * flip -- the same dirty runs (all of it while it is not valid yet) */
+static void rtgscroll_prev_follow(SDL_Surface *screen)
+{
+	enum { MAX_RUNS = 24 };
+	const int w = screen->w, h = screen->h;
+	const long pitch = screen->pitch;
+	const unsigned char *src = (const unsigned char *)screen->pixels;
+	const int schub = zod_dirty_block_shift();
+	const int block = 1 << schub;
+	short lx0[MAX_RUNS], lx1[MAX_RUNS];
+	int valid;
+	unsigned char *pv = zod_rtgscroll_prev(w, h, &valid);
+
+	if(!pv) return;
+
+	if(!valid)
+	{
+		for(int y = 0; y < h; y++) memcpy(pv + (long)y * w, src + y * pitch, (size_t)w);
+		zod_rtgscroll_prev_set_valid(1);
+		return;
+	}
+
+	for(int y0 = 0; y0 < h; y0 += block)
+	{
+		const int rows = (h - y0 < block) ? h - y0 : block;
+		const int n = zod_dirty_out_runs(y0 >> schub, lx0, lx1, MAX_RUNS);
+
+		for(int i = 0; i < n; i++)
+		{
+			int x0 = lx0[i], x1 = lx1[i];
+
+			if(x0 < 0) x0 = 0;
+			if(x1 > w - 1) x1 = w - 1;
+			if(x1 < x0) continue;
+
+			for(int r = 0; r < rows; r++)
+				memcpy(pv + (long)(y0 + r) * w + x0, src + (y0 + r) * pitch + x0, (size_t)(x1 - x0 + 1));
+		}
+	}
+}
+
 int SDL_Flip(SDL_Surface *screen)
 {
 #ifndef DISABLE_OPENGL
@@ -1606,6 +1824,21 @@ int SDL_Flip(SDL_Surface *screen)
 
 	if(!screen || !screen_ptr) return -1;
 
+	/* AGA: the dirty blocks through chunky to planar into the planes
+	 * (zod_aga.cpp); the late pointer as on RTG */
+	if(aga_aktiv)
+	{
+		if(screen->format->BytesPerPixel != 1) return -1;
+
+		if(zod_zeiger_spaet()) zeiger_einsetzen(screen);
+
+		zod_aga_flip(screen, screen_ptr, aga_dy);
+
+		if(zod_zeiger_spaet()) zeiger_entfernen(screen);
+
+		return 0;
+	}
+
 	APTR base = 0;
 	ULONG bpr = 0;
 	struct TagItem lbmi[] = {
@@ -1622,6 +1855,25 @@ int SDL_Flip(SDL_Surface *screen)
 
 	const unsigned long t_vor = zod_fineclock_ticks();
 
+	/* ZOD_RTGSCROLL: the view moved -- the map area's screen content moves
+	 * on the card first (BltBitMap in the screen bitmap: the board's
+	 * blitter, overlapping rects allowed), before the lock */
+	int rs = 0, rdx = 0, rdy = 0, rrx = 0, rry = 0, rvw = 0, rvh = 0;
+
+	if(screen_bpp == 8 && screen->format->BytesPerPixel == 1 && !breit_an)
+		rs = zod_rtgscroll_plan(screen->w, screen->h, &rdx, &rdy, &rrx, &rry, &rvw, &rvh);
+
+	if(rs)
+	{
+		const int adx = rdx < 0 ? -rdx : rdx, ady = rdy < 0 ? -rdy : rdy;
+
+		BltBitMap(screen_ptr->RastPort.BitMap,
+		          rrx + (rdx > 0 ? rdx : 0), rry + (rdy > 0 ? rdy : 0),
+		          screen_ptr->RastPort.BitMap,
+		          rrx + (rdx < 0 ? adx : 0), rry + (rdy < 0 ? ady : 0),
+		          rvw - adx, rvh - ady, 0xC0, 0xFF, 0);
+	}
+
 	APTR lock = LockBitMapTagList(screen_ptr->RastPort.BitMap, lbmi);
 
 	if(!lock) return -1;
@@ -1635,7 +1887,26 @@ int SDL_Flip(SDL_Surface *screen)
 	const int w = screen->w;
 
 
-	if(screen_bpp == 8 && screen->format->BytesPerPixel == 1)
+	if(rs)
+	{
+		const unsigned long n = rtgscroll_copy(screen, dst, bpr, rdx, rdy, rrx, rry, rvw, rvh);
+
+		if(sums_check && (int)bpr == screen->pitch)
+		{
+			const unsigned long all = (unsigned long)h * bpr;
+
+			for(unsigned long i = 0; i < all; i++)
+				if(dst[i] != src[i]) check_differ++;
+
+			check_bytes += all;
+		}
+
+		zod_dirty_bytes += n;
+		zod_dirty_frames++;
+		zod_dirty_sweep();
+		zod_dirty_clear();
+	}
+	else if(screen_bpp == 8 && screen->format->BytesPerPixel == 1)
 	{
 		/* Nur die vermerkten Bereiche kopieren. Die Anzeige (100 Punkte
 		 * rechts, 36 unten = 67 440 von 307 200 Byte) aendert sich meist gar
@@ -1924,6 +2195,9 @@ int SDL_Flip(SDL_Surface *screen)
 
 			check_bytes += all;
 		}
+
+		/* ZOD_RTGSCROLL: the previous frame follows what was sent */
+		if(zod_rtgscroll_on()) rtgscroll_prev_follow(screen);
 
 		zod_dirty_bytes += gezaehlt;
 		zod_dirty_frames++;

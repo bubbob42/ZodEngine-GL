@@ -1,0 +1,22 @@
+.KEY tag/A,secs/A,args/F
+.BRA {
+.KET }
+; RunZodCensus -- RunZod against RadeonGL's census minigl.library (it draws
+; nothing and counts what the game asks for). The library comes from
+; DEV:Libs/Census (copied there from RadeonGL's dist/Libs/Census by hand),
+; added to LIBS: for this run only. Its CSVs go to DEV:Test/zod-census-{tag}
+; (.csv per frame, -slots.csv per dispatch slot); the game's log to
+; DEV:Test/zod-{tag}.log; a done marker follows when the run is over.
+FailAt 1000
+Stack 262144
+CD DEV:Zod
+Delete >NIL: DEV:Test/zod-census-{tag}#?
+SetEnv MiniGLCensus DEV:Test/zod-census-{tag}
+Assign LIBS: DEV:Libs/Census ADD
+Version LIBS:minigl.library FULL >DEV:Test/zod-{tag}.log
+DEV:Zod/zod_040 -t null -b red -b blue -e psettings_nopause.txt -r 640x480 -s -u -G zod -F on -B {secs} {args} >>DEV:Test/zod-{tag}.log
+Echo "zod rc=$RC" >>DEV:Test/zod-{tag}.log
+Assign LIBS: DEV:Libs/Census REMOVE
+UnSetEnv MiniGLCensus
+List DEV:Test/zod-census-{tag}#? >>DEV:Test/zod-{tag}.log
+Echo >DEV:Test/zod-{tag}.done done

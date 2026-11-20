@@ -20,6 +20,10 @@ input_options::input_options()
         ahi_mode = 0;
         read_musik_weg = false;
         musik_weg = 0;
+        display_sync[0] = 0;
+        smooth = -1;
+        midi_cluster[0] = 0;
+        aga_mode[0] = 0;
         read_video_dir = false;
         video_dir.clear();
         read_settings = false;
@@ -131,7 +135,7 @@ int input_options::getoptions(int argc, char **argv)
     extern char *optarg;
     extern int optind;
 
-    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:")) != -1)
+    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:Y:X:K:C:")) != -1)
     {
         switch(c)
         {
@@ -305,7 +309,44 @@ int input_options::getoptions(int argc, char **argv)
                  * des Launchers lesbar, "-M 1" waere es nicht. */
                 if(!optarg) return 0;
                 read_musik_weg = true;
-                musik_weg = (optarg[0] == 'p' || optarg[0] == 'P') ? 1 : 0;
+                /* 0 ahi, 1 paula, 2 gm, 3 mt32 (the last two: the songs
+                 * through camd.library, the effects on AHI) */
+                musik_weg = (optarg[0] == 'p' || optarg[0] == 'P') ? 1
+                          : (optarg[0] == 'g' || optarg[0] == 'G') ? 2
+                          : (optarg[0] == 'm' || optarg[0] == 'M') ? 3 : 0;
+                break;
+
+            case 'K':
+                /* camd's cluster for the music (-M gm|mt32), e.g. out.0 or
+                 * prisma.out.0 (docs/concept-midi-camd.md) */
+                if(!optarg) return 0;
+                strncpy(midi_cluster, optarg, sizeof(midi_cluster) - 1);
+                midi_cluster[sizeof(midi_cluster) - 1] = 0;
+                break;
+
+            case 'Y':
+                /* how a GL frame reaches the screen (docs/concept-display-
+                 * sync.md): pan (three buffers panned, tear-free on RadeonGL
+                 * 0.15+), blank (copied behind the beam), now (copied at
+                 * once, tears) */
+                if(!optarg) return 0;
+                strncpy(display_sync, optarg, sizeof(display_sync) - 1);
+                display_sync[sizeof(display_sync) - 1] = 0;
+                break;
+
+            case 'X':
+                /* smooth scrolling (docs/concept-smooth-scrolling.md) */
+                if(!optarg) return 0;
+                smooth = (optarg[0] == 'o' && optarg[1] == 'n') || optarg[0] == '1' ||
+                         optarg[0] == 'e' || optarg[0] == 'E';
+                break;
+
+            case 'C':
+                /* the AGA screen instead of RTG: pal (PAL HiRes Laced),
+                 * dblpal, prod (the flicker-free ones) -- docs/concept-aga.md */
+                if(!optarg) return 0;
+                strncpy(aga_mode, optarg, sizeof(aga_mode) - 1);
+                aga_mode[sizeof(aga_mode) - 1] = 0;
                 break;
 
             case 'F':

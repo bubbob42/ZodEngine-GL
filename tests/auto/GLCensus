@@ -1,0 +1,25 @@
+; GLCensus -- the game against RadeonGL's census minigl.library (MiniGL
+; session's request): what Zod asks the library for, per frame and per
+; dispatch slot. One still view (orig01) and one scrolling tour (orig04,
+; ZOD_TOUR), 60 s each. Output: DEV:Test/zod-census-still.csv / -slots.csv
+; and DEV:Test/zod-census-tour.csv / -slots.csv. Needs DEV:Libs/Census.
+; LIMIT 900
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+Echo "=== census, orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodCensus still 60 -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-still.done
+Type DEV:Test/zod-still.log >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+Echo "=== census, orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodCensus tour 60 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-tour.done
+Type DEV:Test/zod-tour.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

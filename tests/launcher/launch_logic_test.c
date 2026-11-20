@@ -89,8 +89,11 @@ int main(void)
         {
             { 0, TRUE,  "-M ahi "   },
             { 1, TRUE,  "-M paula " },
+            { 2, TRUE,  "-M gm -K out.0 " },     /* camd: the cluster with it */
+            { 3, TRUE,  "-M mt32 -K out.0 " },
             { 0, FALSE, NULL        },   /* ohne Musik kein -M */
-            { 1, FALSE, NULL        }
+            { 1, FALSE, NULL        },
+            { 2, FALSE, NULL        }
         };
 
         for(h = 0; h < (int)(sizeof(faelle) / sizeof(faelle[0])); h++)
@@ -115,7 +118,7 @@ int main(void)
             if(!p) { printf("FEHLER: kein -M (Fall %d)\n", h); fehler++; continue; }
 
             {
-                char stueck[16];
+                char stueck[32];
                 size_t n = strlen(faelle[h].soll);
 
                 strncpy(stueck, p, n);
@@ -124,8 +127,44 @@ int main(void)
             }
         }
 
-        /* Rundlauf: was gespeichert wird, muss zurueckkommen. */
+        /* AHI and Paula: no cluster in the line */
         for(h = 0; h <= 1; h++)
+        {
+            cfg_vorgaben();
+            cfg.musik = TRUE;
+            cfg.musikweg = h;
+            befehlszeile_bauen(zeile, sizeof(zeile));
+
+            if(strstr(zeile, "-K "))
+            {
+                printf("FEHLER: -K ohne camd (Musikweg %d)\n", h);
+                fehler++;
+            }
+        }
+
+        /* the cluster round trip, and in the line */
+        {
+            cfg_vorgaben();
+            cfg.musik = TRUE;
+            cfg.musikweg = 2;
+            strcpy(cfg.midi_cluster, "prisma.out.0");
+            cfg_speichern();
+
+            cfg_vorgaben();
+            cfg_laden();
+
+            pruefe("MIDI-Cluster", cfg.midi_cluster, "prisma.out.0");
+            befehlszeile_bauen(zeile, sizeof(zeile));
+
+            if(!strstr(zeile, "-M gm -K prisma.out.0 "))
+            {
+                printf("FEHLER: Cluster nicht in der Zeile: %s\n", zeile);
+                fehler++;
+            }
+        }
+
+        /* Rundlauf: was gespeichert wird, muss zurueckkommen. */
+        for(h = 0; h <= 3; h++)
         {
             cfg_vorgaben();
             cfg.musikweg = h;
@@ -423,6 +462,66 @@ int main(void)
         cfg_laden();
         if(cfg.renderer != 0)
         { printf("FEHLER renderer does not survive saving\n"); fehler++; }
+
+        /* MiniGL: -Y and -X always, with the choice's words; software: none */
+        {
+            static const char *const wort[] = { "-Y pan -X on ", "-Y blank -X off ", "-Y now -X on " };
+            int m;
+
+            for(m = 0; m < 3; m++)
+            {
+                cfg_vorgaben();
+                cfg.renderer = 1;
+                cfg.anzeige_sync = m;
+                cfg.smooth = (m != 1);
+                befehlszeile_bauen(z, sizeof(z));
+
+                if(!strstr(z, wort[m]))
+                { printf("FEHLER display sync %d: '%s'\n", m, z); fehler++; }
+
+                cfg_speichern();
+                cfg_vorgaben();
+                cfg_laden();
+
+                if(cfg.anzeige_sync != m || cfg.smooth != (m != 1))
+                { printf("FEHLER display sync %d does not survive saving\n", m); fehler++; }
+            }
+
+            cfg_vorgaben();
+            cfg.renderer = 0;
+            befehlszeile_bauen(z, sizeof(z));
+            if(strstr(z, "-Y ") || strstr(z, "-X "))
+            { printf("FEHLER -Y/-X with software: '%s'\n", z); fehler++; }
+        }
+
+        /* AGA: -o and -C with the mode's word; both survive saving */
+        {
+            static const char *const wort[] = { "-C pal ", "-C dblpal ", "-C prod " };
+            int m;
+
+            for(m = 0; m < 3; m++)
+            {
+                cfg_vorgaben();
+                cfg.renderer = RENDERER_AGA;
+                cfg.aga_modus = m;
+                befehlszeile_bauen(z, sizeof(z));
+
+                if(!strstr(z, "-o ") || !strstr(z, wort[m]))
+                { printf("FEHLER AGA mode %d: '%s'\n", m, z); fehler++; }
+
+                cfg_speichern();
+                cfg_vorgaben();
+                cfg_laden();
+
+                if(cfg.renderer != RENDERER_AGA || cfg.aga_modus != m)
+                { printf("FEHLER AGA mode %d does not survive saving\n", m); fehler++; }
+            }
+
+            cfg_vorgaben();
+            befehlszeile_bauen(z, sizeof(z));
+            if(strstr(z, "-C "))
+            { printf("FEHLER -C without AGA: '%s'\n", z); fehler++; }
+        }
 
         cfg_vorgaben();
     }

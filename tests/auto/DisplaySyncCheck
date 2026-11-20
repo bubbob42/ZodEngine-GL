@@ -1,0 +1,23 @@
+; DisplaySyncCheck -- the launcher's display options reach the game
+; (docs/concept-display-sync.md): -Y now (copied at once: RadeonGLFlip copy,
+; sync off) with -X on (smooth scrolling: on FS-UAE's null card the blank
+; clock is not there, so it switches itself off), then -Y blank -X off
+; (copied, sync on). GL, orig01, 20 s each. FS-UAE + RadeonGL's null card.
+; LIMIT 600
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv RadeonGLHeapMax 16
+Echo "=== GL, -Y now -X on ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod dsn 20 -Y now -X on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-dsn.done
+Type DEV:Test/zod-dsn.log >>DEV:Test/auto.log
+Echo "=== GL, -Y blank -X off ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod dsb 20 -Y blank -X off -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-dsb.done
+Type DEV:Test/zod-dsb.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

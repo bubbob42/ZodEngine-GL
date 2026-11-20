@@ -53,12 +53,23 @@ done
 # Every line gets the host time: in an idle or countdown test the CADENCE
 # is the result.
 START=$(date +%s)
+# SERIAL_RAW=1 (or "; SERIAL_RAW" in the test): the bytes as they come,
+# timed, in hex -- MIDI from camd.library's serial driver
+# (tools/serial_capture.py, read by tools/zmu_midi_check.py).
+if [ -z "$SERIAL_RAW" ] && LC_ALL=C grep -q '^; *SERIAL_RAW' "tests/auto/$NAME"; then
+    SERIAL_RAW=1
+fi
+if [ -n "$SERIAL_RAW" ]; then
+    python3 tools/serial_capture.py 127.0.0.1 $PORT "$OUT/$NAME.serial" &
+    CAP=$!
+else
 # (No tr in the pipe: it buffers, and the tail of the trace dies with it.)
 ( tail -f /dev/null | nc 127.0.0.1 $PORT | while IFS= read -r line; do
       line=$(printf '%s' "$line" | tr -d '\r')
       [ -n "$line" ] && printf '%4ds %s\n' "$(( $(date +%s) - START ))" "$line"
   done > "$OUT/$NAME.serial" ) &
 CAP=$!
+fi
 
 secs=0
 while [ ! -f dist/Test/AutoDone ]; do
@@ -77,5 +88,9 @@ cat dist/Test/AutoRun.out 2>/dev/null | LC_ALL=C tr '\r' '\n'
 echo "=== DEV:Test/auto.log ==="
 cat dist/Test/auto.log 2>/dev/null | LC_ALL=C tr '\r' '\n'
 echo "=== serial ($OUT/$NAME.serial) ==="
+if [ -n "$SERIAL_RAW" ]; then
+    echo "(raw capture: $(wc -l < "$OUT/$NAME.serial" 2>/dev/null) chunks)"
+else
 LC_ALL=C tr '\r' '\n' < "$OUT/$NAME.serial" 2>/dev/null
+fi
 test -f dist/Test/AutoDone

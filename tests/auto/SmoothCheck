@@ -1,0 +1,38 @@
+; SmoothCheck -- smooth scrolling (ZOD_SMOOTH, port/amiga/zod_smooth.cpp) in
+; FS-UAE, orig04 tour, 40 s each. RadeonGL's null card holds no pan, so:
+; (1) ZOD_SMOOTH scroll must find no blank clock and switch itself off
+;     ("Smooth: no blank clock ... smooth off"), the game running as without;
+; (2) with ZOD_SMOOTH_HZ 60 (a nominal clock) the paced path runs: the report
+;     must show the frames in the rhythm at N refreshes and the view's steps;
+; (3) ZOD_SMOOTH messen with the nominal clock: counted, nothing paced.
+; LIMIT 1200
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_GL_SYNC aus
+SetEnv RadeonGLHeapMax 16
+SetEnv ZOD_TOUR on
+SetEnv ZOD_SMOOTH scroll
+Echo "=== GL, orig04, tour, ZOD_SMOOTH scroll (measured clock) ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sm1 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm1.done
+Type DEV:Test/zod-sm1.log >>DEV:Test/auto.log
+SetEnv ZOD_SMOOTH_HZ 60
+Echo "=== GL, orig04, tour, ZOD_SMOOTH scroll, nominal 60 Hz ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sm2 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm2.done
+Type DEV:Test/zod-sm2.log >>DEV:Test/auto.log
+SetEnv ZOD_SMOOTH messen
+Echo "=== GL, orig04, tour, ZOD_SMOOTH messen, nominal 60 Hz ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sm3 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm3.done
+Type DEV:Test/zod-sm3.log >>DEV:Test/auto.log
+UnSetEnv ZOD_SMOOTH_HZ
+UnSetEnv ZOD_SMOOTH
+UnSetEnv ZOD_TOUR
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_GL_SYNC
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

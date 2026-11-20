@@ -159,7 +159,7 @@ else ifeq ($(PLATFORM),amiga)
   ENGINE_SRCS += port/amiga/sdl_addons.cpp port/amiga/net_bsdsocket.cpp \
                  port/amiga/sdl_video.cpp port/amiga/sdl_screen.cpp \
                  port/amiga/sdl_misc.cpp port/amiga/ammx.cpp \
-                 port/amiga/fastcopy.cpp
+                 port/amiga/fastcopy.cpp port/amiga/zod_rtgscroll.cpp port/amiga/zod_aga.cpp
   # Drawing through minigl.library 29.1 (RadeonGL, PiStorm3D): chosen at run
   # time -- without the library, or with -o, the game draws as before.
   # ZOD_NO_GL=1 builds the old binary without any GL code.
@@ -171,7 +171,7 @@ else ifeq ($(PLATFORM),amiga)
     MGL_SDK  ?= ../RadeonGL/sdk/minigl-29.1
     INCLUDES += -I$(MGL_SDK)/minigl-shared-library/include
     LIBS     := -L$(MGL_SDK)/lib -lminigl $(LIBS)
-    ENGINE_SRCS += port/zod_gl.cpp port/amiga/zod_present.cpp
+    ENGINE_SRCS += port/zod_gl.cpp port/amiga/zod_present.cpp port/amiga/zod_smooth.cpp
     # the own present on PiStorm3D opens its screen without a mouse sprite
     # (Picasso96API, optional at run time); the headers as Doom64 takes them
     P96_SDK  ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop
@@ -183,7 +183,7 @@ else ifeq ($(PLATFORM),amiga)
   # Der Mischerkern ist reines 68020 und gehoert in ALLE drei CPU-Baeume --
   # anders als AMMX, das nur der 080er bekommt.
   ASM_SRCS      += port/amiga/musik_kern.s
-  ENGINE_C_SRCS += port/amiga/musik_mischer.c port/amiga/musik_ausgabe.c
+  ENGINE_C_SRCS += port/amiga/musik_mischer.c port/amiga/musik_ausgabe.c port/amiga/musik_camd.c
   # the PC sampler behind ZOD_PROFILE (RadeonGL's glsmoke/pcprof.c)
   ENGINE_C_SRCS += port/amiga/pcprof.c
   DEFINES       += -DZOD_MIX_ASM
@@ -563,20 +563,31 @@ clean:
 ZOD_GCC6       ?= $(HOME)/amiga-gcc6/bin
 KICKSTART_FILE ?= $(HOME)/Developer/AmigaEmu/ROMs/kick32.rom
 AUTOTEST_CONFIG := fsuae/local/ZodEngine-autotest-040.fs-uae
+# the same machine without the RTG card: AGA only (docs/concept-aga.md); a
+# test with a "; MACHINE aga" line runs there
+AUTOTEST_AGA_CONFIG := fsuae/local/ZodEngine-autotest-aga.fs-uae
 
 $(AUTOTEST_CONFIG): fsuae/autotest-040.fs-uae.in
 	mkdir -p fsuae/local
 	sed -e 's|@KICKSTART_FILE@|$(KICKSTART_FILE)|g' -e 's|@PROJECT_PATH@|$(CURDIR)|g' \
 	    -e 's|@PROJECT_DIST@|$(CURDIR)/dist|g' -e 's|@PROJECT_NAME@|ZodEngine|g' $< > $@
 
+$(AUTOTEST_AGA_CONFIG): fsuae/autotest-040.fs-uae.in
+	mkdir -p fsuae/local
+	sed -e 's|@KICKSTART_FILE@|$(KICKSTART_FILE)|g' -e 's|@PROJECT_PATH@|$(CURDIR)|g' \
+	    -e 's|@PROJECT_DIST@|$(CURDIR)/dist|g' -e 's|@PROJECT_NAME@|ZodEngine|g' \
+	    -e 's|^graphics_card = .*|graphics_card = none|' -e 's|^graphics_card_memory = .*|graphics_card_memory = 0|' \
+	    -e 's|^title = .*|title = ZodEngine autotest 68040, AGA only (no RTG card)|' $< > $@
+
 .PHONY: autotest gl-builds
 gl-builds:
 	PATH=$(ZOD_GCC6):$$PATH $(MAKE) PLATFORM=amiga CPU=68040 BUILD=build/amiga-g6 all
 	PATH=$(ZOD_GCC6):$$PATH $(MAKE) PLATFORM=amiga CPU=68060 BUILD=build/amiga-g6 all
 
-autotest: $(AUTOTEST_CONFIG)
+autotest: $(AUTOTEST_CONFIG) $(AUTOTEST_AGA_CONFIG)
 	@test -n "$(T)" || { echo "usage: gmake autotest T=<name in tests/auto>"; exit 2; }
 	@test -f fsuae/local/autotest-System-040.hdf || { echo "no fsuae/local/autotest-System-040.hdf (copy GLTron's)"; exit 2; }
 	@if pgrep -x fs-uae >/dev/null; then echo "autotest: FS-UAE is already running"; exit 2; fi
 	tools/stage_dist.sh
-	tools/autotest.sh $(AUTOTEST_CONFIG) $(T)
+	@cfg=$(AUTOTEST_CONFIG); if grep -q '^; *MACHINE aga' tests/auto/$(T); then cfg=$(AUTOTEST_AGA_CONFIG); fi; \
+	 tools/autotest.sh $$cfg $(T)

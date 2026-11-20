@@ -58,6 +58,10 @@ public:
      * wirksam; anderswo liest es niemand. */
     bool read_musik_weg;
     int  musik_weg;
+    char display_sync[8];    /* -Y pan|blank|now (RadeonGL) */
+    int  smooth;             /* -X on|off: 1, 0; -1 not given */
+    char midi_cluster[64];   /* -K: camd's cluster for -M gm|mt32 */
+    char aga_mode[16];       /* -C: the AGA screen (pal, dblpal, prod) */
     /* Verzeichnis der Zwischensequenzen (-V). Leer = keine Filme. Der
      * externe Player jvplay bekommt Bild- und Tonweg aus denselben
      * Einstellungen wie das Spiel selbst. */
