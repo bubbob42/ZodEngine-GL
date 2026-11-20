@@ -295,15 +295,18 @@ static int measure_clock(void)
 			res[i] = (double)(long)(t[CAL_SKIP + i] - t0) - (a + b * r[i]);
 	}
 
-	/* the blank: the earliest returns */
-	minres = res[0];
-	for(i = 1; i < n; i++) if(res[i] < minres) minres = res[i];
+	/* the blank: the early returns -- a low percentile, not the earliest
+	 * one: a single return out of line (a hold that ended early after a
+	 * system hiccup, Hamiller 20.11.) must not move the phase */
+	for(i = 0; i < n; i++) tmp[i] = res[i];
+	qsort(tmp, n, sizeof(tmp[0]), cmp_d);
+	minres = tmp[n / 5];
 
 	lo = 0.002 * freq;
 	near = 0;
-	for(i = 0; i < n; i++) if(res[i] - minres < lo) near++;
+	for(i = 0; i < n; i++) if(res[i] - minres < lo && res[i] - minres > -lo) near++;
 
-	if(b < 0.008 * freq || b > 0.040 * freq || near < n / 2)
+	if(b < 0.008 * freq || b > 0.040 * freq || near < (n * 3) / 5)
 	{
 		ZLOG("Smooth: the blank clock does not fit (period %ld us, %d of %d returns within 2 ms "
 		     "of the blank) -- smooth off\n", (long)(b * 1000000.0 / freq), near, n);
@@ -505,7 +508,14 @@ void zod_smooth_open(void)
 		ZLOG("Smooth: a nominal blank clock of %d Hz (ZOD_SMOOTH_HZ), not measured\n", atoi(e));
 	}
 	else
-		clock_ok = measure_clock();
+	{
+		int tries;
+
+		/* a measurement disturbed by the system (a disk, the network) is
+		 * taken again, at most three times */
+		for(tries = 0; tries < 3 && !clock_ok; tries++)
+			clock_ok = measure_clock();
+	}
 
 	if(!clock_ok)
 	{
