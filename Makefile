@@ -183,7 +183,7 @@ else ifeq ($(PLATFORM),amiga)
   # Der Mischerkern ist reines 68020 und gehoert in ALLE drei CPU-Baeume --
   # anders als AMMX, das nur der 080er bekommt.
   ASM_SRCS      += port/amiga/musik_kern.s
-  ENGINE_C_SRCS += port/amiga/musik_mischer.c port/amiga/musik_ausgabe.c
+  ENGINE_C_SRCS += port/amiga/musik_mischer.c port/amiga/musik_ausgabe.c port/amiga/musik_camd.c
   # the PC sampler behind ZOD_PROFILE (RadeonGL's glsmoke/pcprof.c)
   ENGINE_C_SRCS += port/amiga/pcprof.c
   DEFINES       += -DZOD_MIX_ASM

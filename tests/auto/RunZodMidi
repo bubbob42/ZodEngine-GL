@@ -1,0 +1,22 @@
+.KEY tag/A,secs/A,args/F
+.BRA {
+.KET }
+; RunZodMidi -- RunZod with the music on and sent through camd.library
+; (-M gm; the effects on AHI): no -s, no -u. camd.library from
+; DEV:Libs/camd (37.14, staged by hand like Doom 64's, not in the
+; repository) and minigl.library from DEV:Libs/RadeonGL are added to LIBS:
+; for this run only. The game's log goes to DEV:Test/zod-{tag}.log, a done
+; marker follows when the run is over.
+FailAt 1000
+Stack 262144
+CD DEV:Zod
+SetEnv RadeonGLLog DEV:Test/zod-{tag}-lib.log
+Assign LIBS: DEV:Libs/camd ADD
+Assign LIBS: DEV:Libs/RadeonGL ADD
+Version LIBS:camd.library FULL >DEV:Test/zod-{tag}.log
+DEV:Zod/zod_040 -t null -b red -b blue -e psettings_nopause.txt -r 640x480 -M gm -G zod -F on -B {secs} {args} >>DEV:Test/zod-{tag}.log
+Echo "zod rc=$RC" >>DEV:Test/zod-{tag}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+Assign LIBS: DEV:Libs/camd REMOVE
+UnSetEnv RadeonGLLog
+Echo >DEV:Test/zod-{tag}.done done

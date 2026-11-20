@@ -21,6 +21,8 @@
 #include "zod_log.h"
 #include "musik_ausgabe.h"
 #include "musik_mischer.h"
+#include "musik_camd.h"
+#include <proto/dos.h>   /* GetVar */
 #include "amiga_audio.h"
 #include "zod_pack.h"
 
@@ -248,6 +250,7 @@ static int musik_aufsetzen(void);
  * die Musikfunktionen. */
 struct _Mix_Music;
 static struct _Mix_Music *musik_jetzt = 0;
+extern "C" void zod_midi_ende(void);
 
 /* Die Instrumentenbank, einmal fuer alle Stuecke. */
 static unsigned char *bank_daten = 0;
@@ -308,6 +311,9 @@ void Mix_CloseAudio(void)
 	 * haette die Engine nach einem Schliessen und Oeffnen still keinen Ton
 	 * mehr, und die Ursache waere ein Zaehler, den niemand sieht. */
 	zod_audio_close();
+
+	/* MIDI: notes off, camd.library closed, the player process gone */
+	zod_midi_ende();
 
 	/* Der Griff zeigt auf ein _Mix_Music, das die Engine weiterhin haelt.
 	 * Er darf nach dem Abbau nicht stehenbleiben: Mix_PlayingMusic wuerde
@@ -404,6 +410,40 @@ struct _Mix_Music
  * AHI: das laeuft auf jeder Soundkarte, Paula nur auf echter Amiga-Hardware. */
 int zod_musik_weg = MUSIK_AHI;
 
+/* Music through camd.library instead of the mixer (-M gm | -M mt32,
+ * port/amiga/musik_camd.c): MIDI_GM / MIDI_MT32, 0 = the mixer as before.
+ * The effects keep zod_musik_weg (AHI unless -M paula). */
+int zod_musik_midi = 0;
+static int midi_bereit = 0;        /* 0 not tried, 1 running, -1 failed */
+
+static int midi_aufsetzen(void)
+{
+	char cluster[64];
+	LONG n;
+
+	if(midi_bereit) return midi_bereit > 0;
+
+	/* ZOD_MIDI_CLUSTER: the camd cluster (default out.0, the serial port;
+	 * PrismaMIDI's is prisma.out.0) */
+	n = GetVar((CONST_STRPTR)"ZOD_MIDI_CLUSTER", (STRPTR)cluster, sizeof(cluster), 0);
+	if(n <= 0) strcpy(cluster, "out.0");
+
+	midi_bereit = midi_start(zod_musik_midi, cluster) ? 1 : -1;
+
+	return midi_bereit > 0;
+}
+
+extern "C" void zod_midi_ende(void)
+{
+	if(midi_bereit > 0)
+	{
+		midi_bericht();
+		midi_stop();
+	}
+
+	midi_bereit = 0;
+}
+
 namespace
 {
 
@@ -470,10 +510,21 @@ static int musik_aufsetzen(void)
 	/* Die Bank ist OPTIONAL. Fehlt sie, mischt der Mischer nur die
 	 * Klangeffekte -- das Spiel soll dann seine Klaenge behalten, nicht
 	 * verstummen. Musik gibt es in dem Fall keine. */
-	bank_daten = datei_ganz("music/MIDIBANK", &bank_laenge);
+	/* With MIDI the songs go to camd.library: the mixer mixes the effects
+	 * only and needs no bank. */
+	if(zod_musik_midi)
+	{
+		bank_daten = 0;
+		bank_laenge = 0;
+		ZLOG("Musik: MIDI (camd) -- the mixer gets no MIDIBANK, it mixes the effects\n");
+	}
+	else
+	{
+		bank_daten = datei_ganz("music/MIDIBANK", &bank_laenge);
 
-	if(!bank_daten)
-		ZLOG("Musik: music/MIDIBANK fehlt -- es laufen nur die Klangeffekte\n");
+		if(!bank_daten)
+			ZLOG("Musik: music/MIDIBANK fehlt -- es laufen nur die Klangeffekte\n");
+	}
 
 	/* Fuer den AHI-Weg muss der AHI-Kontext VORHER stehen: der Strom
 	 * laeuft ueber genau diesen einen. Ein Kanal genuegt, denn gemischt
@@ -557,6 +608,8 @@ extern "C" void zod_ton_anhalten(void)
 	ton_angehalten = 1;
 	ton_stueck_vorher = musik_jetzt;
 
+	if(zod_musik_midi && midi_bereit > 0) midi_pause(1);
+
 	if(musik_bereit > 0) musik_stop();
 
 	zod_audio_close();
@@ -569,6 +622,14 @@ extern "C" void zod_ton_fortsetzen(void)
 	if(!ton_angehalten) return;
 
 	ton_angehalten = 0;
+
+	/* MIDI: the song again from its start, as on the mixer's way below */
+	if(zod_musik_midi && midi_bereit > 0 && ton_stueck_vorher)
+	{
+		midi_lautstaerke(musik_lautstaerke_wert);
+		if(midi_spiele(ton_stueck_vorher->zmu, ton_stueck_vorher->zmu_len, 1))
+			musik_jetzt = ton_stueck_vorher;
+	}
 
 	if(musik_bereit <= 0) return;           /* es lief vorher schon nichts */
 
@@ -596,7 +657,7 @@ extern "C" void zod_ton_fortsetzen(void)
 	/* Die Klangliste hat zod_audio_close absichtlich stehenlassen (siehe
 	 * dort) -- die Effekte spielen also sofort wieder. Nur die Musik muss
 	 * neu aufgelegt werden. */
-	if(ton_stueck_vorher)
+	if(ton_stueck_vorher && !zod_musik_midi)
 	{
 		musik_pause(0);
 		mischer_musik_vol(musik_lautstaerke_wert);
@@ -621,7 +682,9 @@ Mix_Music *Mix_LoadMUS(const char *file)
 
 	stueck = zmu_name_zu(file);
 
-	if(!stueck || !musik_aufsetzen()) return 0;
+	if(!stueck) return 0;
+
+	if(zod_musik_midi ? !midi_aufsetzen() : !musik_aufsetzen()) return 0;
 
 	snprintf(pfad, sizeof(pfad), "music/%s.zmu", stueck);
 
@@ -652,7 +715,12 @@ void Mix_FreeMusic(Mix_Music *music)
 
 	if(!m) return;
 
-	if(musik_jetzt == m) { musik_pause(1); musik_jetzt = 0; }
+	if(musik_jetzt == m)
+	{
+		if(zod_musik_midi) midi_pause(1);
+		else musik_pause(1);
+		musik_jetzt = 0;
+	}
 
 	free(m->zmu);
 	free(m);
@@ -701,6 +769,14 @@ int Mix_PlayMusic(Mix_Music *music, int loops)
 
 	/* loops: -1 heisst bei SDL_mixer endlos. Die Engine uebergibt fuer
 	 * Planetenmusik -1. */
+	if(zod_musik_midi)
+	{
+		midi_lautstaerke(musik_lautstaerke_wert);
+		if(!midi_spiele(m->zmu, m->zmu_len, loops != 0)) return -1;
+		musik_jetzt = m;
+		return 0;
+	}
+
 	musik_pause(0);
 	mischer_musik_vol(musik_lautstaerke_wert);
 
@@ -731,7 +807,8 @@ int Mix_VolumeMusic(int volume)
 		 *
 		 * In echtem SDL_mixer regelt diese Funktion ausschliesslich die
 		 * Musik. Jetzt auch hier. */
-		mischer_musik_vol(musik_lautstaerke_wert);
+		if(zod_musik_midi) midi_lautstaerke(musik_lautstaerke_wert);
+		else mischer_musik_vol(musik_lautstaerke_wert);
 	}
 
 	return vorher;
@@ -739,6 +816,8 @@ int Mix_VolumeMusic(int volume)
 
 int Mix_PlayingMusic(void)
 {
+	if(zod_musik_midi) return musik_jetzt ? midi_laeuft() : 0;
+
 	return musik_jetzt ? musik_laeuft() : 0;
 }
 
@@ -746,6 +825,8 @@ int Mix_HaltMusic(void)
 {
 	/* Nicht musik_stop(): das gaebe den Ausgabeweg samt Process frei, und
 	 * das naechste Stueck muesste alles neu aufsetzen. Stillhalten reicht. */
+	if(zod_musik_midi) { if(midi_bereit > 0) midi_pause(1); return 0; }
+
 	if(musik_bereit > 0) musik_pause(1);
 
 	return 0;
@@ -760,7 +841,8 @@ int Mix_SetMusicPosition(double position)
 
 	if(position < 0) position = 0;
 
-	musik_springen((unsigned long)(position * 120.0));
+	if(zod_musik_midi) midi_springen((unsigned long)(position * 120.0));
+	else musik_springen((unsigned long)(position * 120.0));
 
 	return 0;
 }

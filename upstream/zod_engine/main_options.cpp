@@ -305,7 +305,11 @@ int input_options::getoptions(int argc, char **argv)
                  * des Launchers lesbar, "-M 1" waere es nicht. */
                 if(!optarg) return 0;
                 read_musik_weg = true;
-                musik_weg = (optarg[0] == 'p' || optarg[0] == 'P') ? 1 : 0;
+                /* 0 ahi, 1 paula, 2 gm, 3 mt32 (the last two: the songs
+                 * through camd.library, the effects on AHI) */
+                musik_weg = (optarg[0] == 'p' || optarg[0] == 'P') ? 1
+                          : (optarg[0] == 'g' || optarg[0] == 'G') ? 2
+                          : (optarg[0] == 'm' || optarg[0] == 'M') ? 3 : 0;
                 break;
 
             case 'F':

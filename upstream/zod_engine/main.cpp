@@ -167,6 +167,10 @@ static int bot_bypass_size;
 // ***** command line for canpaing start
 //      -l map_list.txt -n zlover -t red -r 800x484 -o -b blue
 // =============================================================
+#ifdef __amigaos__
+extern "C" void zod_midi_ende(void);   /* port/amiga/sdl_addons.cpp */
+#endif
+
 int main(int argc, char **argv)
 {
     //AmigaOS: Arbeitsverzeichnis auf PROGDIR:, damit die relativen Pfade der
@@ -200,6 +204,12 @@ int main(int argc, char **argv)
     //atexit-Behandler laufen in umgekehrter Reihenfolge: hier eingetragen,
     //meldet sich das Treffer-Aufblitzen noch VOR dem Schliessen der Ausgabe
     atexit(zod_hit_report);
+
+#ifdef __amigaos__
+    //MIDI (-M gm | mt32): the player process must be gone before the program
+    //unloads -- and it reports before the log closes (registered after it)
+    atexit(zod_midi_ende);
+#endif
 
     //Freien Speicher festhalten, damit sich nach dem Lauf vergleichen laesst,
     //ob wirklich alles freigegeben wurde (P5-Kriterium).
@@ -270,10 +280,16 @@ int main(int argc, char **argv)
     if(starting_conditions.read_musik_weg)
     {
         extern int zod_musik_weg;
+        extern int zod_musik_midi;
 
-        zod_musik_weg = starting_conditions.musik_weg;
+        /* 2 gm, 3 mt32: the songs through camd.library (MIDI_GM 1,
+         * MIDI_MT32 2), the effects on AHI */
+        zod_musik_weg = starting_conditions.musik_weg == 1 ? 1 : 0;
+        zod_musik_midi = starting_conditions.musik_weg >= 2 ? starting_conditions.musik_weg - 1 : 0;
 
         ZLOG("Musik: Ausgabeweg aus der Befehlszeile: %s\n",
+             zod_musik_midi == 1 ? "General MIDI (camd), effects AHI" :
+             zod_musik_midi == 2 ? "MT-32 (camd), effects AHI" :
              zod_musik_weg ? "Paula" : "AHI");
     }
 #endif
