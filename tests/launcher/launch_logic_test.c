@@ -494,6 +494,35 @@ int main(void)
             { printf("FEHLER -Y/-X with software: '%s'\n", z); fehler++; }
         }
 
+        /* AGA: -o and -C with the mode's word; both survive saving */
+        {
+            static const char *const wort[] = { "-C pal ", "-C dblpal ", "-C prod " };
+            int m;
+
+            for(m = 0; m < 3; m++)
+            {
+                cfg_vorgaben();
+                cfg.renderer = RENDERER_AGA;
+                cfg.aga_modus = m;
+                befehlszeile_bauen(z, sizeof(z));
+
+                if(!strstr(z, "-o ") || !strstr(z, wort[m]))
+                { printf("FEHLER AGA mode %d: '%s'\n", m, z); fehler++; }
+
+                cfg_speichern();
+                cfg_vorgaben();
+                cfg_laden();
+
+                if(cfg.renderer != RENDERER_AGA || cfg.aga_modus != m)
+                { printf("FEHLER AGA mode %d does not survive saving\n", m); fehler++; }
+            }
+
+            cfg_vorgaben();
+            befehlszeile_bauen(z, sizeof(z));
+            if(strstr(z, "-C "))
+            { printf("FEHLER -C without AGA: '%s'\n", z); fehler++; }
+        }
+
         cfg_vorgaben();
     }
 

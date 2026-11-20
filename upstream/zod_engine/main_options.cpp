@@ -23,6 +23,7 @@ input_options::input_options()
         display_sync[0] = 0;
         smooth = -1;
         midi_cluster[0] = 0;
+        aga_mode[0] = 0;
         read_video_dir = false;
         video_dir.clear();
         read_settings = false;
@@ -134,7 +135,7 @@ int input_options::getoptions(int argc, char **argv)
     extern char *optarg;
     extern int optind;
 
-    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:Y:X:K:")) != -1)
+    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:Y:X:K:C:")) != -1)
     {
         switch(c)
         {
@@ -338,6 +339,14 @@ int input_options::getoptions(int argc, char **argv)
                 if(!optarg) return 0;
                 smooth = (optarg[0] == 'o' && optarg[1] == 'n') || optarg[0] == '1' ||
                          optarg[0] == 'e' || optarg[0] == 'E';
+                break;
+
+            case 'C':
+                /* the AGA screen instead of RTG: pal (PAL HiRes Laced),
+                 * dblpal, prod (the flicker-free ones) -- docs/concept-aga.md */
+                if(!optarg) return 0;
+                strncpy(aga_mode, optarg, sizeof(aga_mode) - 1);
+                aga_mode[sizeof(aga_mode) - 1] = 0;
                 break;
 
             case 'F':

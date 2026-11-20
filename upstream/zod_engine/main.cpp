@@ -289,6 +289,15 @@ int main(int argc, char **argv)
         if(starting_conditions.smooth >= 0)
             zod_smooth_option = starting_conditions.smooth;
     }
+
+    /* -C: the AGA screen (port/amiga/zod_aga.cpp); before the first screen */
+    if(starting_conditions.aga_mode[0])
+    {
+        extern char zod_aga_mode[16];
+
+        strcpy(zod_aga_mode, starting_conditions.aga_mode);
+        ZLOG("Schirm: AGA aus der Befehlszeile: %s\n", zod_aga_mode);
+    }
 #endif
 
     /* Ausgabeweg der Musik aus -M. Muss VOR dem ersten Mix_LoadMUS stehen:

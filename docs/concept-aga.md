@@ -78,6 +78,39 @@ and the changed blocks through c2p; the HUD (right edge and bottom) is
 drawn again at each offset. That is the smooth-scrolling concept's AGA
 phase: after the static AGA screen works.
 
+### Milestone 4 in detail: what hardware scrolling costs here (for review)
+
+Measured on the PiStorm's A1200: scrolling rewrites the whole view, 230 KB
+of chip writes a frame, 8 fps. Hardware scrolling with system calls only
+(ScrollVPort on RasInfo offsets; no copper list of our own) means:
+
+- **A bitmap larger than the view**, holding the map around the view
+  ("world-anchored": a map pixel keeps its place in the bitmap while the
+  view moves over it). A chunky shadow of that bitmap in fast RAM keeps
+  c2p aligned to bitmap words and keeps the pixels outside the view; block
+  sums on the shadow send only what changed: the newly shown strip, units,
+  effects -- and the HUD.
+- **The HUD** (100 px right, 36 rows below) sits at a fixed place on
+  screen, so it moves across the bitmap with the view: drawn again at
+  every offset, and the map put back where it was (~67 KB a frame).
+- **No wrap-around**: AGA cannot wrap a bitmap sideways, and a vertical
+  wrap needs a copper split. When the view nears the bitmap's edge, the
+  bitmap re-centres: one full redraw (~230 KB, ~100 ms on the PiStorm).
+  With margins of 256 px sideways and 128 rows up/down (a 1152x768 bitmap,
+  884 KB of chip RAM) that is every ~0.6 s of continuous scrolling at
+  400 px/s.
+- **One buffer**: two 884 KB bitmaps do not fit next to Workbench in 2 MB
+  of chip RAM, so blocks are written into the shown bitmap (a unit may be
+  seen half drawn for a frame); the still view keeps its two buffers.
+- Estimate on the PiStorm's A1200: ~80 KB a frame (strip + HUD + units)
+  instead of 230 KB, plus a re-centring hitch twice a second: ~20 fps
+  scrolling instead of 8. On a real 040/060 card (faster chip writes) more.
+
+Open points for the user: the chip RAM it takes (884 KB, or smaller
+margins with more re-centring), one buffer while scrolling, and whether the
+re-centring hitch is acceptable -- or a smaller target: a "scroll with
+fewer updates" mode (the HUD and units refreshed every other frame).
+
 ## How it is chosen
 
 - ZodLaunch, Display group, Renderer: "Software (RTG)", "MiniGL if
@@ -105,10 +138,56 @@ phase: after the static AGA screen works.
 ## Milestones
 
 1. AGA screen + c2p of dirty blocks into the shown bitmap; FS-UAE
-   read-back check.
-2. Double buffering; c2p in assembler.
-3. The flicker-free modes; ZodLaunch choice.
+   read-back check -- DONE 20.11. night (branch aga): port/amiga/zod_aga.cpp,
+   ZOD_AGA, and the fallback when there is no RTG mode;
+   tests/auto/AgaCheck on the Makefile's new AGA machine (the 040 machine
+   without its RTG card): orig01 still, 774 frames, 4850 of 19200 groups a
+   frame through c2p, 0 pixels differ in every frame read back; orig04
+   tour (the fallback), 595 frames, 18838 groups a frame (the whole view),
+   0 differ. SwSums (software RTG) still 0 differ.
+2. Double buffering; c2p in assembler. -- Double buffering DONE 20.11.
+   night (ZOD_AGA_DBUF, default on): AllocScreenBuffer + ChangeScreenBuffer
+   with the safe/display messages; per-buffer block sums; a block whose
+   pixels the other buffer does not hold is marked stale there (also when
+   this buffer already holds them -- the first version missed the pointer
+   leaving a place: 200 pixels differed; since then 0). FS-UAE AgaCheck: 0
+   pixels differ in every frame of both runs. On PAL HiRes Laced a buffer
+   change waits for a whole frame: the game shows at most 25 frames a
+   second there (the display's own rate). Block sums (ZOD_AGA_SUMS, default
+   on): the still view converts ~650 instead of 4850 groups a frame. The
+   c2p in assembler waits for a real AGA machine to measure on.
+3. The flicker-free modes; ZodLaunch choice. -- DONE 20.11. night: the
+   game's -C pal|dblpal|prod (the screen size from the mode's nominal
+   dimensions; a mode without its monitor driver falls back to PAL HiRes
+   Laced, logged); ZodLaunch's Renderer gets "AGA (native screen)" and an
+   "AGA mode" choice, ghosted otherwise; the start line -o -C <mode>;
+   tests/launcher passes; ZodLaunch builds (cego's Docker toolchain).
+   FS-UAE's test system has no DblPAL/Multiscan driver: the fallback is
+   tested, the two modes themselves wait for a real AGA machine.
 4. Hardware scrolling (with the smooth-scrolling concept).
+
+## First real AGA (20.11. 23:36-23:40)
+
+The PiStorm CM4 sits in an A1200: its chipset is real AGA, the CPU is
+Emu68, chip RAM goes over the A1200's own bus. aga branch, software (-o),
+-C pal, two buffers, block sums, 30 s each:
+
+| run | fps | groups through c2p a frame | work a frame (sums, c2p, chip writes) |
+|---|---|---|---|
+| orig01 still | 48.8 | 549 of 19 200 | 4.5 ms |
+| orig04 tour | 8.2 | 14 416 (230 KB) | 101 ms |
+| RTG reference, orig04 tour (same binary, no -C) | 185.5 | -- | 0.2 ms copy |
+
+- The screen works on real AGA: 1484 frames, no failed buffer change, 8
+  waits for a safe buffer in the still view.
+- The still view is fine thanks to the block sums.
+- Scrolling is chip-bound: ~2.3 MB/s of chip writes through the PiStorm,
+  a whole view a frame -> 8 fps. A real 040/060 accelerator writes chip RAM
+  at ~7..14 MB/s (the concept's estimate): ~20..35 fps at best. So the step
+  that matters on AGA is hardware scrolling (milestone 4), not a faster
+  c2p: the c2p's CPU part is small against the chip writes here.
+- The picture itself (colours, flicker) waits for someone looking at the
+  A1200's native output.
 
 ## Open questions (recommendation first)
 

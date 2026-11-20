@@ -187,7 +187,7 @@ static const char *musikwege[] = { "AHI", "Paula", "General MIDI (camd)", "MT-32
  * (the game's own present). Saved as a word, "software" or "minigl". */
 static const char *renderer_namen[] =
 {
-    "Software (RTG)", "MiniGL if installed (RadeonGL, PiStorm3D)", NULL
+    "Software (RTG)", "MiniGL if installed (RadeonGL, PiStorm3D)", "AGA (native screen)", NULL
 };
 
 /* How a MiniGL frame reaches the screen (docs/concept-display-sync.md),
@@ -199,6 +199,17 @@ static const char *sync_namen[] =
     "Copied at once (fastest, tears)", NULL
 };
 static const char *sync_woerter[] = { "pan", "blank", "now" };
+/* AGA (docs/concept-aga.md): the software drawing on a native 8-plane
+ * screen. PAL HiRes Laced works on any TV or 1084; the two others are
+ * flicker-free on a 31 kHz monitor (their monitor drivers installed). Saved
+ * and passed as the game's -C word. */
+#define RENDERER_AGA 2
+static const char *aga_namen[] =
+{
+    "PAL HiRes Laced (640x512)", "DblPAL HiRes, flicker-free (31 kHz)",
+    "Multiscan Productivity (640x480, 31 kHz)", NULL
+};
+static const char *aga_woerter[] = { "pal", "dblpal", "prod" };
 
 /* Die beiden Spielvarianten. Gespeichert wird der LISTENPLATZ -- es gibt
  * hier keine Zahl mit eigener Bedeutung, die man verwechseln koennte, und
@@ -358,9 +369,10 @@ struct einstellungen
     LONG  team;             /* Index in team_namen                      */
     BOOL  bot[8];           /* je Team ein Bot                          */
     LONG  aufloesung;       /* Index in aufloesungen                    */
-    LONG  renderer;         /* 0 software, 1 minigl.library             */
+    LONG  renderer;         /* 0 software, 1 minigl.library, 2 AGA      */
     LONG  anzeige_sync;     /* index in sync_namen (MiniGL only)        */
     BOOL  smooth;           /* smooth scrolling (MiniGL only)           */
+    LONG  aga_modus;        /* index in aga_namen                       */
     BOOL  ton;
     BOOL  musik;
     /* Deckel auf die GEZEICHNETE Groesse der Effekte, in HALBEN Schritten:
@@ -494,7 +506,8 @@ static void cfg_laden(void)
         if(!strcmp(zeile, "spielername"))  { strncpy(cfg.spielername, wert, MAX_TEXT-1); cfg.spielername[MAX_TEXT-1] = 0; }
         else if(!strcmp(zeile, "team"))        cfg.team       = atoi(wert);
         else if(!strcmp(zeile, "aufloesung"))  cfg.aufloesung = aufloesung_platz(wert);
-        else if(!strcmp(zeile, "renderer"))    cfg.renderer   = !strcmp(wert, "minigl") ? 1 : 0;
+        else if(!strcmp(zeile, "renderer"))
+            cfg.renderer = !strcmp(wert, "minigl") ? 1 : !strcmp(wert, "aga") ? RENDERER_AGA : 0;
         else if(!strcmp(zeile, "anzeigesync"))
         {
             LONG i;
@@ -503,6 +516,13 @@ static void cfg_laden(void)
                 if(!strcmp(wert, sync_woerter[i])) cfg.anzeige_sync = i;
         }
         else if(!strcmp(zeile, "smooth"))      cfg.smooth     = atol(wert) ? TRUE : FALSE;
+        else if(!strcmp(zeile, "agamodus"))
+        {
+            LONG i;
+
+            for(i = 0; i < 3; i++)
+                if(!strcmp(wert, aga_woerter[i])) cfg.aga_modus = i;
+        }
         else if(!strcmp(zeile, "ton"))         cfg.ton        = (BOOL)atoi(wert);
         else if(!strcmp(zeile, "musik"))       cfg.musik      = (BOOL)atoi(wert);
         /* "fenster" gab es bis zum 23.09. Der Schluessel wird jetzt
@@ -565,10 +585,13 @@ static void cfg_speichern(void)
     snprintf(zeile, sizeof(zeile), "spielername=%s\n", cfg.spielername);   FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "team=%ld\n", (long)cfg.team);          FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "aufloesung=%s\n", aufloesungen[cfg.aufloesung]); FPuts(f, zeile);
-    snprintf(zeile, sizeof(zeile), "renderer=%s\n", cfg.renderer ? "minigl" : "software"); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "renderer=%s\n",
+             cfg.renderer == RENDERER_AGA ? "aga" : cfg.renderer ? "minigl" : "software"); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "anzeigesync=%s\n",
              sync_woerter[cfg.anzeige_sync >= 0 && cfg.anzeige_sync < 3 ? cfg.anzeige_sync : 0]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "smooth=%d\n", cfg.smooth ? 1 : 0); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "agamodus=%s\n",
+             aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "ton=%d\n", cfg.ton ? 1 : 0);           FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "musik=%d\n", cfg.musik ? 1 : 0);       FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "videos=%d\n", cfg.videos ? 1 : 0);     FPuts(f, zeile);
@@ -727,7 +750,7 @@ static void befehlszeile_bauen(char *aus, size_t platz)
 
     /* -o: draw in software. Without it the game draws through
      * minigl.library and falls back to software when it cannot. */
-    if(!cfg.renderer)
+    if(cfg.renderer != 1)
         strncat(aus, "-o ", platz - strlen(aus) - 1);
     else
     {
@@ -736,6 +759,14 @@ static void befehlszeile_bauen(char *aus, size_t platz)
         snprintf(teil, sizeof(teil), "-Y %s -X %s ",
                  sync_woerter[cfg.anzeige_sync >= 0 && cfg.anzeige_sync < 3 ? cfg.anzeige_sync : 0],
                  cfg.smooth ? "on" : "off");
+        strncat(aus, teil, platz - strlen(aus) - 1);
+    }
+
+    /* AGA: the software drawing on the native screen of the chosen mode */
+    if(cfg.renderer == RENDERER_AGA)
+    {
+        snprintf(teil, sizeof(teil), "-C %s ",
+                 aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]);
         strncat(aus, teil, platz - strlen(aus) - 1);
     }
 
@@ -1053,6 +1084,7 @@ int main(int argc, char **argv)
     Object *o_ton, *o_musik, *o_videos, *o_musikweg;
     Object *o_sync, *o_sync_label, *o_smooth, *o_smooth_label;
     Object *o_cluster, *o_cluster_label;
+    Object *o_aga, *o_aga_label;
     Object *o_ahi, *o_ahi_label, *o_ahi_gruppe, *o_ahi_waehlen, *o_ahi_vorgabe;
     Object *o_liste, *o_karte, *o_karte_an, *o_extra;
     Object *o_liste_waehlen, *o_karte_waehlen;
@@ -1070,6 +1102,7 @@ int main(int argc, char **argv)
     LONG    ahi_aus = -1;        /* zuletzt gesetzter Ausgrauzustand */
     LONG    sync_aus = -1;       /* the same for display sync and smooth */
     LONG    cluster_aus = -1;    /* the same for the MIDI cluster */
+    LONG    aga_aus = -1;        /* the same for the AGA mode */
 
     (void)argc; (void)argv;
 
@@ -1220,7 +1253,20 @@ int main(int argc, char **argv)
                         MUIA_ShortHelp, (ULONG)"Software: the 8-bit RTG path.\n"
                             "MiniGL: draws through minigl.library (RadeonGL\n"
                             "on a Radeon, PiStorm3D on a PiStorm). Without the\n"
-                            "library the game draws in software by itself.",
+                            "library the game draws in software by itself.\n"
+                            "AGA: the software drawing on a native AGA screen\n"
+                            "(no graphics card needed).",
+                    End,
+                    /* ghosted unless AGA is the renderer */
+                    Child, o_aga_label = Label2("AGA mode"),
+                    Child, o_aga = CycleObject,
+                        MUIA_Cycle_Entries, (ULONG)aga_namen,
+                        MUIA_Cycle_Active,  cfg.aga_modus,
+                        MUIA_ShortHelp, (ULONG)"PAL HiRes Laced shows on any TV\n"
+                            "or 1084 (it flickers on thin lines). The two\n"
+                            "others are flicker-free on a 31 kHz monitor and\n"
+                            "need their monitor drivers in DEVS:Monitors; the\n"
+                            "game falls back to PAL HiRes Laced without them.",
                     End,
                     /* ghosted unless MiniGL is the renderer */
                     Child, o_sync_label = Label2("Display sync"),
@@ -1438,10 +1484,10 @@ int main(int argc, char **argv)
             if(s) { strncpy(cfg.midi_cluster, (char*)s, MAX_TEXT-1); cfg.midi_cluster[MAX_TEXT-1] = 0; }
             get(o_variante, MUIA_Cycle_Active, &l); cfg.variante = (l == 1) ? 1 : 0;
             get(o_aufl,  MUIA_Cycle_Active, &l); cfg.aufloesung = l;
-            get(o_renderer, MUIA_Cycle_Active, &l); cfg.renderer = l ? 1 : 0;
+            get(o_renderer, MUIA_Cycle_Active, &l); cfg.renderer = (l >= 0 && l <= RENDERER_AGA) ? l : 0;
             get(o_sync, MUIA_Cycle_Active, &l); cfg.anzeige_sync = (l >= 0 && l < 3) ? l : 0;
             get(o_smooth, MUIA_Selected, &l); cfg.smooth = (BOOL)l;
-
+            get(o_aga, MUIA_Cycle_Active, &l); cfg.aga_modus = (l >= 0 && l < 3) ? l : 0;
             {
                 LONG aus = (cfg.renderer == 1) ? FALSE : TRUE;
 
@@ -1452,6 +1498,17 @@ int main(int argc, char **argv)
                     set(o_sync,         MUIA_Disabled, aus);
                     set(o_smooth_label, MUIA_Disabled, aus);
                     set(o_smooth,       MUIA_Disabled, aus);
+                }
+            }
+
+            {
+                LONG aus = (cfg.renderer == RENDERER_AGA) ? FALSE : TRUE;
+
+                if(aus != aga_aus)
+                {
+                    aga_aus = aus;
+                    set(o_aga_label, MUIA_Disabled, aus);
+                    set(o_aga,       MUIA_Disabled, aus);
                 }
             }
 
