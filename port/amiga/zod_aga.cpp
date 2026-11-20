@@ -18,6 +18,7 @@
  * old, half new for one frame. Double buffering and an assembler c2p are
  * phase 2 (the concept's milestones).
  */
+#include <stdlib.h>
 #include <string.h>
 
 #include <exec/types.h>
@@ -46,7 +47,11 @@ extern unsigned long long zod_dirty_bytes;
 extern unsigned long zod_dirty_frames;
 
 static int check_on = -1;
-static unsigned long st_frames = 0, st_groups = 0, st_ticks = 0;
+static int sums_on = -1;            /* ZOD_AGA_SUMS (default on) */
+static ULONG *sums = 0;             /* two per 16x16 block: what the planes hold */
+static UBYTE *sums_valid = 0;
+static int sums_gw = 0, sums_gh = 0;
+static unsigned long st_frames = 0, st_groups = 0, st_ticks = 0, st_skipped = 0;
 static unsigned long st_check_frames = 0, st_check_differ = 0;
 
 static int env_on(const char *name)
@@ -120,6 +125,31 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 	if(check_on < 0) check_on = env_on("ZOD_AGA_CHECK");
 
+	/* the block sums: a dirty block whose pixels are what the planes hold
+	 * already is not converted again -- on AGA every word saved is a chip
+	 * RAM write saved (the RTG path's flip sums, the same sum) */
+	if(sums_on < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_AGA_SUMS", buf, sizeof(buf));
+
+		sums_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+	}
+
+	free(sums);
+	free(sums_valid);
+	sums = 0;
+	sums_valid = 0;
+	sums_gw = w / 16;
+	sums_gh = (h + 15) / 16;
+
+	if(sums_on)
+	{
+		sums = (ULONG *)malloc((size_t)sums_gw * sums_gh * 2 * sizeof(ULONG));
+		sums_valid = (UBYTE *)calloc((size_t)sums_gw * sums_gh, 1);
+		if(!sums || !sums_valid) { free(sums); free(sums_valid); sums = 0; sums_valid = 0; }
+	}
+
 	ZLOG("AGA: PAL HiRes Laced 640x512, 8 planes, the picture %dx%d from row %d; "
 	     "chunky to planar by dirty blocks into the shown bitmap%s\n",
 	     w, h, *dy, check_on ? "; every frame read back (ZOD_AGA_CHECK)" : "");
@@ -172,6 +202,26 @@ static void c2p_rows(const UBYTE *src, int spitch, UBYTE *const *pl, int bpr,
 			*(UWORD *)(pl[0] + off) = (UWORD)(((b << 8) & 0xFF00) | (d & 0xFF));
 		}
 	}
+}
+
+/* the RTG path's block sum (sdl_screen.cpp block_sum), for a 16-wide block */
+static void block_sum16(const UBYTE *p, long pitch, int rows, ULONG *a, ULONG *b)
+{
+	ULONG x = 0x9e3779b9UL, y = 2166136261UL;
+	int r;
+
+	for(r = 0; r < rows; r++, p += pitch)
+	{
+		const ULONG *q = (const ULONG *)p;
+
+		x = ((x << 1) | (x >> 31)) + q[0]; y = y * 33 + q[0];
+		x = ((x << 1) | (x >> 31)) + q[1]; y = y * 33 + q[1];
+		x = ((x << 1) | (x >> 31)) + q[2]; y = y * 33 + q[2];
+		x = ((x << 1) | (x >> 31)) + q[3]; y = y * 33 + q[3];
+	}
+
+	*a = x;
+	*b = y;
 }
 
 /* ZOD_AGA_CHECK: the whole picture read back from the planes, compared */
@@ -249,6 +299,48 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 			if(x1 > w - 1) x1 = w - 1;
 			if(x1 < x0) continue;
 
+			if(sums && block == 16)
+			{
+				/* block by block: only those whose pixels changed */
+				const UBYTE *row = (const UBYTE *)cs->pixels + (long)y0 * cs->pitch;
+				int g, run0 = -1;
+
+				for(g = x0 >> 4; g <= (x1 >> 4) + 1; g++)
+				{
+					int changed = 0;
+
+					if(g <= (x1 >> 4))
+					{
+						const long k = (long)(y0 >> 4) * sums_gw + g;
+						ULONG a, b;
+
+						block_sum16(row + g * 16, cs->pitch, rows, &a, &b);
+
+						if(!sums_valid[k] || sums[2 * k] != a || sums[2 * k + 1] != b)
+						{
+							changed = 1;
+							sums[2 * k] = a;
+							sums[2 * k + 1] = b;
+							sums_valid[k] = 1;
+						}
+						else
+							st_skipped += (unsigned long)rows;
+					}
+
+					if(changed && run0 < 0) run0 = g;
+
+					if(!changed && run0 >= 0)
+					{
+						c2p_rows(row, cs->pitch, pl, bm->BytesPerRow, y0 + dy, rows, run0, g - 1);
+						st_groups += (unsigned long)(g - run0) * rows;
+						bytes += (unsigned long)(g - run0) * 16 * rows;
+						run0 = -1;
+					}
+				}
+
+				continue;
+			}
+
 			c2p_rows((const UBYTE *)cs->pixels + (long)y0 * cs->pitch, cs->pitch, pl,
 			         bm->BytesPerRow, y0 + dy, rows, x0 >> 4, x1 >> 4);
 
@@ -278,9 +370,10 @@ void zod_aga_report(void)
 
 	if(!st_frames) return;
 
-	ZLOG("AGA: %lu frames, %lu 16-pixel groups a frame through c2p, %lu us a frame "
-	     "(c2p and the chip RAM writes)%s",
-	     st_frames, st_groups / st_frames,
+	ZLOG("AGA: %lu frames, %lu 16-pixel groups a frame through c2p, %lu left out "
+	     "(their block unchanged, ZOD_AGA_SUMS %s), %lu us a frame (sums, c2p and the "
+	     "chip RAM writes)%s",
+	     st_frames, st_groups / st_frames, st_skipped / st_frames, sums ? "on" : "off",
 	     f >= 1000 ? (st_ticks / st_frames) * 1000UL / (f / 1000UL) : 0UL,
 	     check_on > 0 ? "" : "\n");
 
