@@ -155,6 +155,25 @@ static void grid_alles(unsigned char (*g)[ZOD_GRID_W], unsigned char v)
 		memset(g[by], v, (size_t)grid_w);
 }
 
+/* ZOD_DIRTYLAZY (default on): under GL nothing reads the grids while the
+ * game runs (zod_dirty_partial_ok is 0, the copy path is the software
+ * one), yet zod_dirty_force_full set both whole at every frame that
+ * scrolled -- 60 small memsets, ~0.3 ms on the A4000D (the profile's
+ * memset callers). Under GL it only notes that they are due; every reader
+ * below sets them first, so whatever reads them sees what it saw before. */
+static int grids_full_due = 0;
+unsigned long zod_dirty_lazy_n = 0;
+static int dirtylazy = -1;
+
+static inline void grids_due_apply(void)
+{
+	if(!grids_full_due) return;
+
+	grid_alles(out_grid, 1);
+	grid_alles(obj_grid, 1);
+	grids_full_due = 0;
+}
+
 /* Wie viele SAUBERE Bloecke zwischen zwei schmutzigen uebersprungen werden,
  * statt den Lauf zu teilen. Vorgabe 4 Bloecke = 64 Punkte.
  *
@@ -329,6 +348,7 @@ extern "C" void zod_dirty_set_target(SDL_Surface *s)
 	grid_alles(out_grid, 1);
 	grid_alles(obj_grid, 1);
 	grid_alles(prev_grid, 1);
+	grids_full_due = 0;
 	prev_gueltig = 0;
 }
 
@@ -497,6 +517,8 @@ extern "C" void zod_dirty_sweep(void)
 	const int breite = dirty_target->w;
 	const int block = 1 << ZOD_BLOCK_SHIFT;
 
+	grids_due_apply();
+
 	for(int by = 0; by < grid_h; by++)
 	{
 		/* Letzte Blockzeile kann angeschnitten sein. */
@@ -553,6 +575,8 @@ extern "C" int zod_dirty_out_zeile(int by)
 {
 	if(by < 0 || by >= grid_h) return 0;
 
+	grids_due_apply();
+
 	for(int bx = 0; bx < grid_w; bx++)
 		if(out_grid[by][bx]) return 1;
 
@@ -561,6 +585,8 @@ extern "C" int zod_dirty_out_zeile(int by)
 
 extern "C" int zod_dirty_out_runs(int by, short *x0, short *x1, int max)
 {
+	grids_due_apply();
+
 	return grid_runs(out_grid, by, x0, x1, max);
 }
 
@@ -578,6 +604,8 @@ extern "C" void zod_dirty_clear(void)
 {
 	/* Ausgeschaltet: alles bleibt schmutzig, es wird weiter voll kopiert. */
 	if(!dirty_an) return;
+
+	grids_due_apply();
 
 	/* Gesichert wird die OBJEKTspur -- sie allein sagt, was im naechsten
 	 * Bild zuzudecken ist. GETAUSCHT, nicht kopiert: die Vorspur des
@@ -609,6 +637,25 @@ extern "C" int zod_dirty_partial_ok(void)
 extern "C" void zod_dirty_force_full(void)
 {
 	prev_gueltig = 0;
+
+#ifndef DISABLE_OPENGL
+	if(dirtylazy < 0)
+	{
+		char b[16];
+		const char *e = zod_env("ZOD_DIRTYLAZY", b, sizeof(b));
+
+		dirtylazy = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+	}
+
+	if(zod_gl_active && dirtylazy)
+	{
+		grids_full_due = 1;
+		zod_dirty_lazy_n++;
+		return;
+	}
+#endif
+
+	grids_full_due = 0;
 	grid_alles(out_grid, 1);
 	grid_alles(obj_grid, 1);
 }

@@ -848,6 +848,17 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   A4000D (pansample, n14, two tour series): sorts 519 / 548 / 545 / 534
   against 768 / 796 / 850 / 803 us; frames 34.13 against 34.17 ms over
   eight runs (server 5.7..8.1 ms either way).
+- **The software path's dirty grids set only when read, under GL**
+  (fps-night2, ZOD_DIRTYLAZY): ZMap::DoRender called zod_dirty_force_full
+  at every frame the view moved, which set both block grids whole -- ~60
+  small memsets, the profile's memset callers (grid_alles, 0.85 % of the
+  samples) -- though under GL nothing reads them while the game runs. Under
+  GL it now only notes that they are due; every reader (the sweep, the
+  copy's runs, zod_dirty_clear) sets them first, so it sees what it saw
+  before. tools/prof_report.py --callers NAME found the callers. FS-UAE
+  SwSums, GLSmoke, GLTour, LoadBar, NoGL pass. A4000D (pansample, n15, two
+  tour series): map section 2377 / 2603 / 2490 / 2361 against 2952 / 2689
+  / 2758 / 2771 us; 29.2 against 29.25 fps over eight runs.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
