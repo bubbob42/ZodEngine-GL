@@ -67,6 +67,7 @@ static UBYTE *stale[NBUF];
 static int sums_gw = 0, sums_gh = 0;
 static unsigned long st_frames = 0, st_groups = 0, st_ticks = 0, st_skipped = 0;
 static unsigned long st_stale = 0, st_safe_waits = 0, st_change_failed = 0;
+static unsigned long st_wait_ticks = 0;    /* waiting for a safe buffer */
 static unsigned long st_check_frames = 0, st_check_differ = 0;
 
 static int env_on(const char *name)
@@ -80,20 +81,72 @@ static int env_on(const char *name)
 	return 1;
 }
 
+/* -C <mode> (the launcher's AGA choice); ZOD_AGA for tests */
+char zod_aga_mode[16] = "";
+
 int zod_aga_wanted(void)
 {
-	return env_on("ZOD_AGA");
+	return zod_aga_mode[0] || env_on("ZOD_AGA");
+}
+
+/* the AGA modes: PAL HiRes Laced (any TV or 1084), and the two flicker-free
+ * ones a 31 kHz monitor shows (their monitor drivers in DEVS:Monitors) */
+static const struct { const char *name; ULONG id; const char *title; } aga_modes[] =
+{
+	{ "pal",    PAL_MONITOR_ID | HIRESLACE_KEY, "PAL HiRes Laced" },
+	{ "dblpal", DBLPAL_MONITOR_ID | DBLPALHIRESFF_KEY, "DblPAL HiRes flicker-free" },
+	{ "prod",   VGA_MONITOR_ID | VGAPRODUCT_KEY, "Multiscan Productivity" }
+};
+
+/* the mode asked for: its table index (0 = PAL HiRes Laced) */
+static int mode_asked(void)
+{
+	char buf[16];
+	const char *e = zod_aga_mode[0] ? zod_aga_mode : zod_env("ZOD_AGA", buf, sizeof(buf));
+	unsigned i;
+
+	for(i = 0; e && i < sizeof(aga_modes) / sizeof(aga_modes[0]); i++)
+		if(!strcmp(e, aga_modes[i].name)) return (int)i;
+
+	return 0;
+}
+
+/* the mode's nominal size (its DimensionInfo); 0 when it has none */
+static int mode_size(ULONG id, int *mw, int *mh)
+{
+	struct DimensionInfo dims;
+	DisplayInfoHandle hd = FindDisplayInfo(id);
+
+	if(!hd || GetDisplayInfoData(hd, (UBYTE *)&dims, sizeof(dims), DTAG_DIMS, id) < sizeof(dims) - 32)
+		return 0;
+
+	*mw = dims.Nominal.MaxX - dims.Nominal.MinX + 1;
+	*mh = dims.Nominal.MaxY - dims.Nominal.MinY + 1;
+	return 1;
 }
 
 struct Screen *zod_aga_open(int w, int h, int *dy)
 {
-	const ULONG id = PAL_MONITOR_ID | HIRESLACE_KEY;
+	int mi = mode_asked();
+	ULONG id = aga_modes[mi].id;
+	int sw = 640, sh = 512;
 	ULONG err = 0;
 	struct Screen *scr;
 
-	if(w != 640 || h > 512)
+	/* a flicker-free mode without its monitor driver: PAL HiRes Laced */
+	if(mi != 0 && (ModeNotAvailable(id) || !mode_size(id, &sw, &sh) || sw != 640 || sh < h))
 	{
-		ZLOG("AGA: the screen is 640x512, the game asks for %dx%d -- no AGA screen\n", w, h);
+		ZLOG("AGA: %s is not available here (monitor driver in DEVS:Monitors?) -- "
+		     "PAL HiRes Laced\n", aga_modes[mi].title);
+		mi = 0;
+		id = aga_modes[0].id;
+	}
+
+	if(mi == 0) { sw = 640; sh = 512; }
+
+	if(w != 640 || h > sh)
+	{
+		ZLOG("AGA: the screen is %dx%d, the game asks for %dx%d -- no AGA screen\n", sw, sh, w, h);
 		return 0;
 	}
 
@@ -105,16 +158,16 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 	if(ModeNotAvailable(id))
 	{
-		ZLOG("AGA: PAL HiRes Laced is not available (%08lx) -- no AGA screen\n",
-		     (unsigned long)ModeNotAvailable(id));
+		ZLOG("AGA: %s is not available (%08lx) -- no AGA screen\n",
+		     aga_modes[mi].title, (unsigned long)ModeNotAvailable(id));
 		return 0;
 	}
 
 	{
 		struct TagItem sa[] = {
 			{ SA_DisplayID,   id },
-			{ SA_Width,       640 },
-			{ SA_Height,      512 },
+			{ SA_Width,       (ULONG)sw },
+			{ SA_Height,      (ULONG)sh },
 			{ SA_Depth,       8 },
 			{ SA_Type,        CUSTOMSCREEN },
 			{ SA_Quiet,       TRUE },
@@ -136,7 +189,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		return 0;
 	}
 
-	*dy = (512 - h) / 2;
+	*dy = (sh - h) / 2;
 
 	if(check_on < 0) check_on = env_on("ZOD_AGA_CHECK");
 
@@ -239,8 +292,9 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		}
 	}
 
-	ZLOG("AGA: PAL HiRes Laced 640x512, 8 planes, the picture %dx%d from row %d; "
+	ZLOG("AGA: %s %dx%d, 8 planes, the picture %dx%d from row %d; "
 	     "chunky to planar by dirty blocks, %s%s\n",
+	     aga_modes[mi].title, sw, sh,
 	     w, h, *dy, dbuf ? "two buffers (ChangeScreenBuffer)" : "into the shown bitmap",
 	     check_on ? "; every frame read back (ZOD_AGA_CHECK)" : "");
 
@@ -415,7 +469,7 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 	const int schub = zod_dirty_block_shift();
 	const int block = 1 << schub;
 	const int w = cs->w, h = cs->h;
-	const unsigned long t0 = zod_fineclock_ticks();
+	unsigned long t0;
 	const int b = dbuf ? cur : 0;
 	unsigned long bytes = 0;
 	int p, y0, i;
@@ -423,10 +477,14 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 	/* the buffer about to be drawn into may still be on display */
 	if(dbuf && !safe_ok)
 	{
+		const unsigned long w0 = zod_fineclock_ticks();
+
 		while(!GetMsg(safe_port)) { WaitPort(safe_port); st_safe_waits++; }
 		safe_ok = 1;
+		st_wait_ticks += zod_fineclock_ticks() - w0;
 	}
 
+	t0 = zod_fineclock_ticks();
 	bm = dbuf ? sbuf[b]->sb_BitMap : scr->RastPort.BitMap;
 	for(p = 0; p < 8; p++) pl[p] = (UBYTE *)bm->Planes[p];
 
@@ -490,6 +548,9 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 	zod_dirty_sweep();
 	zod_dirty_clear();
 
+	/* the work: sums, c2p, the chip RAM writes (not the wait, not the check) */
+	st_ticks += zod_fineclock_ticks() - t0;
+
 	if(check_on > 0)
 	{
 		st_check_differ += check_all(cs, pl, bm->BytesPerRow, dy);
@@ -516,7 +577,6 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 			st_change_failed++;
 	}
 
-	st_ticks += zod_fineclock_ticks() - t0;
 	st_frames++;
 }
 
@@ -560,10 +620,12 @@ void zod_aga_report(void)
 
 	ZLOG("AGA: %lu frames, %lu 16-pixel groups a frame through c2p, %lu left out "
 	     "(their block unchanged, ZOD_AGA_SUMS %s), %lu stale blocks a frame from the other "
-	     "buffer; waits for a safe buffer %lu, failed changes %lu; %lu us a frame (sums, c2p "
-	     "and the chip RAM writes)%s",
+	     "buffer; waits for a safe buffer %lu (%lu us a frame), failed changes %lu; %lu us a "
+	     "frame (sums, c2p and the chip RAM writes)%s",
 	     st_frames, st_groups / st_frames, st_skipped / st_frames, sums_on ? "on" : "off",
-	     st_stale / st_frames, st_safe_waits, st_change_failed,
+	     st_stale / st_frames, st_safe_waits,
+	     f >= 1000 ? (st_wait_ticks / st_frames) * 1000UL / (f / 1000UL) : 0UL,
+	     st_change_failed,
 	     f >= 1000 ? (st_ticks / st_frames) * 1000UL / (f / 1000UL) : 0UL,
 	     check_on > 0 ? "" : "\n");
 

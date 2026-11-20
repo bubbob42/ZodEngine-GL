@@ -20,6 +20,7 @@ input_options::input_options()
         ahi_mode = 0;
         read_musik_weg = false;
         musik_weg = 0;
+        aga_mode[0] = 0;
         read_video_dir = false;
         video_dir.clear();
         read_settings = false;
@@ -131,7 +132,7 @@ int input_options::getoptions(int argc, char **argv)
     extern char *optarg;
     extern int optind;
 
-    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:")) != -1)
+    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:C:")) != -1)
     {
         switch(c)
         {
@@ -306,6 +307,14 @@ int input_options::getoptions(int argc, char **argv)
                 if(!optarg) return 0;
                 read_musik_weg = true;
                 musik_weg = (optarg[0] == 'p' || optarg[0] == 'P') ? 1 : 0;
+                break;
+
+            case 'C':
+                /* the AGA screen instead of RTG: pal (PAL HiRes Laced),
+                 * dblpal, prod (the flicker-free ones) -- docs/concept-aga.md */
+                if(!optarg) return 0;
+                strncpy(aga_mode, optarg, sizeof(aga_mode) - 1);
+                aga_mode[sizeof(aga_mode) - 1] = 0;
                 break;
 
             case 'F':
