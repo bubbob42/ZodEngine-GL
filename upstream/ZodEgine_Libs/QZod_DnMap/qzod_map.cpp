@@ -21,6 +21,7 @@ extern "C" int  zod_dirty_block_shift(void);
 extern "C" int  zod_dirty_grid_h(void);
 extern "C" void zod_dirty_restore_begin(void);
 extern "C" void zod_dirty_restore_end(void);
+extern "C" void zod_rtgscroll_view(int sx, int sy, int rx, int ry, int vw, int vh);
 #endif
 extern "C" void zod_sdl_reload_palette(void);   /* port/amiga/sdl_screen.cpp */
 #endif
@@ -317,6 +318,10 @@ void ZMap::DoRender(SDL_Surface *dest, int shift_x_dest, int shift_y_dest)
     SDL_Rect from_rect;
 
 #ifdef __amigaos__
+    /* the view's offset and screen rect: SDL_Flip moves the map area on the
+     * card when it scrolled (ZOD_RTGSCROLL, port/amiga/zod_rtgscroll.cpp) */
+    zod_rtgscroll_view(shift_x, shift_y, shift_x_dest, shift_y_dest, view_w, view_h);
+
     /* Teilweise Wiederherstellung.
      *
      * Der volle Blit (540x444 = 239 760 Byte je Bild) hat nur EINEN Zweck:

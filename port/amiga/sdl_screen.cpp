@@ -123,6 +123,7 @@ extern unsigned long long zod_dirty_bytes;
 extern unsigned long zod_dirty_frames;
 extern unsigned long zod_dirty_calls;
 #include "fastcopy.h"
+#include "zod_rtgscroll.h"
 
 /* Die Basis selbst halten: libstubs.a traegt fuer cybergraphics den falschen
  * Bibliotheksnamen ("CyberGfx.library" statt "cybergraphics.library"). */
@@ -413,6 +414,8 @@ static void measure_gap(SDL_Surface *surf);
 void zod_flip_report(void)
 {
 	const unsigned long f = zod_fineclock_freq();
+
+	zod_rtgscroll_report();
 
 	if(!f || !flip_bilder) return;
 
@@ -1583,6 +1586,139 @@ extern "C" void zod_sdl_flip_teil(int x, int y, int w, int h)
 	flip_tx = x; flip_ty = y; flip_tw = w; flip_th = h;
 }
 
+/* ZOD_RTGSCROLL (zod_rtgscroll.cpp): a scrolled frame. The map area was
+ * moved on the card by (-dx, -dy) before the lock; every dirty block whose
+ * pixels are the previous frame's at the moved place stays, the others go
+ * over the bus. Returns the bytes sent. */
+static unsigned long rtgscroll_copy(SDL_Surface *screen, unsigned char *dst, ULONG bpr,
+                                    int dx, int dy, int rx, int ry, int vw, int vh)
+{
+	enum { MAX_RUNS = 24 };
+	const int w = screen->w, h = screen->h;
+	const long pitch = screen->pitch;
+	const unsigned char *src = (const unsigned char *)screen->pixels;
+	const int schub = zod_dirty_block_shift();
+	const int block = 1 << schub;
+	/* the rect the blit wrote: what it holds is the previous frame's */
+	const int bx0 = rx + (dx < 0 ? -dx : 0), by0 = ry + (dy < 0 ? -dy : 0);
+	const int bw = vw - (dx < 0 ? -dx : dx), bh = vh - (dy < 0 ? -dy : dy);
+	short lx0[MAX_RUNS], lx1[MAX_RUNS];
+	unsigned long bytes = 0, sent = 0, kept = 0;
+	int valid;
+	unsigned char *pv = zod_rtgscroll_prev(w, h, &valid);
+
+	for(int y0 = 0; y0 < h; y0 += block)
+	{
+		const int rows = (h - y0 < block) ? h - y0 : block;
+		const int n = zod_dirty_out_runs(y0 >> schub, lx0, lx1, MAX_RUNS);
+
+		for(int i = 0; i < n; i++)
+		{
+			int x0 = lx0[i], x1 = lx1[i];
+
+			if(x0 < 0) x0 = 0;
+			if(x1 > w - 1) x1 = w - 1;
+			if(x1 < x0) continue;
+
+			int span0 = -1;
+
+			for(int xb = x0 - (x0 % block); xb <= x1 + 1; xb += block)
+			{
+				int keep = 0;
+				const int bwid = (xb + block <= w) ? block : w - xb;
+
+				if(xb <= x1 && pv && xb >= bx0 && xb + bwid <= bx0 + bw && y0 >= by0 && y0 + rows <= by0 + bh)
+				{
+					keep = 1;
+
+					for(int r = 0; r < rows && keep; r++)
+						if(memcmp(src + (y0 + r) * pitch + xb,
+						          pv + (long)(y0 + r + dy) * w + xb + dx, (size_t)bwid))
+							keep = 0;
+				}
+
+				if(xb <= x1 && !keep)
+				{
+					if(span0 < 0) span0 = xb;
+					sent++;
+					continue;
+				}
+
+				if(xb <= x1) kept++;
+
+				if(span0 >= 0)
+				{
+					const int cx1 = (xb < w) ? xb : w;
+
+					for(int r = 0; r < rows; r++)
+						zod_copy_row(dst + (unsigned long)(y0 + r) * bpr + span0,
+						             src + (y0 + r) * pitch + span0, cx1 - span0);
+
+					zod_dirty_calls += (unsigned long)rows;
+					bytes += (unsigned long)(cx1 - span0) * rows;
+					span0 = -1;
+				}
+			}
+		}
+	}
+
+	zod_rtgscroll_count(sent, kept);
+
+	/* the previous frame is now this one, all of it */
+	if(pv)
+	{
+		for(int y = 0; y < h; y++) memcpy(pv + (long)y * w, src + y * pitch, (size_t)w);
+		zod_rtgscroll_prev_set_valid(1);
+	}
+
+	/* the block sums no longer know what the moved blocks hold */
+	if(sums_valid) memset(sums_valid, 0, (size_t)sums_w * sums_h);
+
+	return bytes;
+}
+
+/* ZOD_RTGSCROLL: the previous frame follows the screen in an ordinary
+ * flip -- the same dirty runs (all of it while it is not valid yet) */
+static void rtgscroll_prev_follow(SDL_Surface *screen)
+{
+	enum { MAX_RUNS = 24 };
+	const int w = screen->w, h = screen->h;
+	const long pitch = screen->pitch;
+	const unsigned char *src = (const unsigned char *)screen->pixels;
+	const int schub = zod_dirty_block_shift();
+	const int block = 1 << schub;
+	short lx0[MAX_RUNS], lx1[MAX_RUNS];
+	int valid;
+	unsigned char *pv = zod_rtgscroll_prev(w, h, &valid);
+
+	if(!pv) return;
+
+	if(!valid)
+	{
+		for(int y = 0; y < h; y++) memcpy(pv + (long)y * w, src + y * pitch, (size_t)w);
+		zod_rtgscroll_prev_set_valid(1);
+		return;
+	}
+
+	for(int y0 = 0; y0 < h; y0 += block)
+	{
+		const int rows = (h - y0 < block) ? h - y0 : block;
+		const int n = zod_dirty_out_runs(y0 >> schub, lx0, lx1, MAX_RUNS);
+
+		for(int i = 0; i < n; i++)
+		{
+			int x0 = lx0[i], x1 = lx1[i];
+
+			if(x0 < 0) x0 = 0;
+			if(x1 > w - 1) x1 = w - 1;
+			if(x1 < x0) continue;
+
+			for(int r = 0; r < rows; r++)
+				memcpy(pv + (long)(y0 + r) * w + x0, src + (y0 + r) * pitch + x0, (size_t)(x1 - x0 + 1));
+		}
+	}
+}
+
 int SDL_Flip(SDL_Surface *screen)
 {
 #ifndef DISABLE_OPENGL
@@ -1622,6 +1758,25 @@ int SDL_Flip(SDL_Surface *screen)
 
 	const unsigned long t_vor = zod_fineclock_ticks();
 
+	/* ZOD_RTGSCROLL: the view moved -- the map area's screen content moves
+	 * on the card first (BltBitMap in the screen bitmap: the board's
+	 * blitter, overlapping rects allowed), before the lock */
+	int rs = 0, rdx = 0, rdy = 0, rrx = 0, rry = 0, rvw = 0, rvh = 0;
+
+	if(screen_bpp == 8 && screen->format->BytesPerPixel == 1 && !breit_an)
+		rs = zod_rtgscroll_plan(screen->w, screen->h, &rdx, &rdy, &rrx, &rry, &rvw, &rvh);
+
+	if(rs)
+	{
+		const int adx = rdx < 0 ? -rdx : rdx, ady = rdy < 0 ? -rdy : rdy;
+
+		BltBitMap(screen_ptr->RastPort.BitMap,
+		          rrx + (rdx > 0 ? rdx : 0), rry + (rdy > 0 ? rdy : 0),
+		          screen_ptr->RastPort.BitMap,
+		          rrx + (rdx < 0 ? adx : 0), rry + (rdy < 0 ? ady : 0),
+		          rvw - adx, rvh - ady, 0xC0, 0xFF, 0);
+	}
+
 	APTR lock = LockBitMapTagList(screen_ptr->RastPort.BitMap, lbmi);
 
 	if(!lock) return -1;
@@ -1635,7 +1790,26 @@ int SDL_Flip(SDL_Surface *screen)
 	const int w = screen->w;
 
 
-	if(screen_bpp == 8 && screen->format->BytesPerPixel == 1)
+	if(rs)
+	{
+		const unsigned long n = rtgscroll_copy(screen, dst, bpr, rdx, rdy, rrx, rry, rvw, rvh);
+
+		if(sums_check && (int)bpr == screen->pitch)
+		{
+			const unsigned long all = (unsigned long)h * bpr;
+
+			for(unsigned long i = 0; i < all; i++)
+				if(dst[i] != src[i]) check_differ++;
+
+			check_bytes += all;
+		}
+
+		zod_dirty_bytes += n;
+		zod_dirty_frames++;
+		zod_dirty_sweep();
+		zod_dirty_clear();
+	}
+	else if(screen_bpp == 8 && screen->format->BytesPerPixel == 1)
 	{
 		/* Nur die vermerkten Bereiche kopieren. Die Anzeige (100 Punkte
 		 * rechts, 36 unten = 67 440 von 307 200 Byte) aendert sich meist gar
@@ -1924,6 +2098,9 @@ int SDL_Flip(SDL_Surface *screen)
 
 			check_bytes += all;
 		}
+
+		/* ZOD_RTGSCROLL: the previous frame follows what was sent */
+		if(zod_rtgscroll_on()) rtgscroll_prev_follow(screen);
 
 		zod_dirty_bytes += gezaehlt;
 		zod_dirty_frames++;
