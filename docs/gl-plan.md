@@ -1069,12 +1069,49 @@ Backlog (not started):
   - Order: GL pacing first (with the vsync item), then the software RTG
     on-card scroll (helps the A4000T, PiStorm without GL, every RTG
     Amiga), then AGA together with the AGA item above.
-- **Atlas page clears**: 32 a minute while scrolling, ~20 ms each (the
-  atlas holds fewer images than the scrolling view keeps needing).
+- **Atlas page clears** -- DONE by ZOD_GL_PREPAGES: the "32 a minute"
+  were the 2 x 16 strips of the two pages; in the last A4000D tour (gl,
+  n17) all 32 lie in the load step (22.3..23.0 s after the start, before
+  the bench clock), the atlas never starts again (2 pages, 432 images,
+  only ~270 000 px of them -- the second page comes from the shelf
+  classes, not from the pixels).
 - **Map effect tiles** (ZMap::DoEffects): every effect tile of the whole
   map gets a division and a view-test call per frame, every water tile a
   due check -- ~1.9 ms of a scrolling frame on orig04; precomputed tile
   positions and an inline view test keep the behaviour exact.
+  Evening 20.11, the n14 tour profile (A4000D, after EFFPOS and
+  WATERDUE): DoEffects 193 samples of 4000 (~1.6 ms a frame) -- the
+  water timers' walk 57 (the compact array: memory and fcmp.d), the due
+  water tiles 61 (rand() twice and two divs.l each), the effect-tile list
+  74. A water tile is due again 0.2..0.5 s after its last check
+  (min_interval_time + (rand() % 4) * 0.033), so ~100 of orig04's 734
+  are due EVERY frame: a heap of due times would save only the walk
+  (~0.45 ms) and must keep the list order of the due ones (the rand()
+  stream is the server's too, in the same process). What remains is
+  inherent to the original's design (a 1-in-40 draw per tile every
+  ~0.25 s); a geometric draw of the time to the next start would be
+  statistically the same but changes the random stream -- not exact,
+  not done.
+- **The bench's first frame holds the map's first send** (gl, n17 tour on
+  the A4000D): the 14 strips of the whole-map texture (orig04, 52 ms in
+  the call each, ~95 ms with the 8-bit -> RGB565 conversion) go up on the
+  first draw, after the bench clock started (main.cpp takes start_time
+  after zplayer.Setup(); the client gets the map over the loopback socket
+  only then): ~1.3 s of the 60 s, ~2 % of the bench figure, and a ~1.3 s
+  stand-still for the player right after the load bar. Moving it behind
+  the load bar needs the client's map during Setup (in single player the
+  server has it already).
+- **Per-quad cost in our code** (n14 tour profile): zod_gl_blit 168
+  samples self (~1.4 ms a frame, ~9 us a quad at ~150 quads): the
+  sub-texture loop's four fsdiv for u0/v0/u1/v1 and the int -> float
+  moves 76, the calls (batch_begin, quad_colour, four vertex()) 44, the
+  prologue/epilogue saving fp2..fp7 and d2..a6 44. A whole-image blit of a
+  one-tile texture always gets the same four UVs: computing them once per
+  texture would be bit-exact and save the divisions (~0.3 ms a frame, ~1
+  %, below the A4000D's A/B noise alone). The library's side of a quad
+  (dispatch 6.4 %, the vertex hooks ~5.5 %, plus the vertex stream inside
+  mglSwitchDisplay) is MiniGL's per-quad concept (census of Zod sent to
+  the MiniGL session 20.11 09:29, build/census/run2).
 
 ## 6. Open questions (recommendation first)
 
