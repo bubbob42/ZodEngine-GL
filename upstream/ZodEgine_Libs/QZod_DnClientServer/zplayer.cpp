@@ -1599,6 +1599,9 @@ static int rockprecheck_on(void) { if(rockprecheck < 0) rockprecheck = zod_switc
 extern unsigned long zod_waypoints_shown;   /* zobject.cpp */
 static unsigned long zod_wp_skipped = 0, zod_wp_checked = 0, zod_wp_bad = 0;
 
+/* ZOD_MOVEKEYS' counters, see split_rekey_dyn */
+static unsigned long zod_movekey_read = 0, zod_movekey_kept = 0, zod_movekey_bad = 0;
+
 /* ZOD_XCULL's margins and counters, see split_merge_x */
 enum { XCULL_LEFT = 64, XCULL_RIGHT = 64 };
 static unsigned long zod_xcull_seen = 0, zod_xcull_cut = 0, zod_xcull_bad = 0;
@@ -2111,6 +2114,11 @@ extern "C" void zod_render_sections_report(long frames)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
 		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
+
+	if(zod_movekey_read || zod_movekey_kept)
+		ZLOG("draw.order keys: %lu read again (robots, vehicles), %lu kept (ZOD_MOVEKEYS);"
+		     " ZOD_MOVEKEYCHECK: %lu kept ones had changed\n",
+		     zod_movekey_read, zod_movekey_kept, zod_movekey_bad);
 
 	if(zod_wp_skipped || zod_wp_checked)
 		ZLOG("waypoints pass: left out in %lu frames (none shown, ZOD_WPSKIP);"
@@ -2970,6 +2978,10 @@ struct split_view
 	 * key (the same fields' cache lines), moved with it by the sort */
 	bool with_x;
 	vector<int> fix_x0, fix_x1, dyn_x0, dyn_x1;
+	/* ZOD_MOVEKEYS: 1 for the dyn entries that can move (robots,
+	 * vehicles) -- only their keys are read again each frame; the others'
+	 * stay as read when the view was made. Moved by the sort. */
+	vector<unsigned char> dyn_mov;
 };
 
 enum { SV_RENDER, SV_PRE, SV_AFTER, SV_BAND, SV_MAX };
@@ -3035,9 +3047,11 @@ static bool split_active(void)
 	return sortsplit_on() != 0;
 }
 
-/* stable insertion sort of v by k (moved together; x0/x1 too when given) */
+/* stable insertion sort of v by k (moved together; x0/x1 and mv too when
+ * given) */
 static void split_sort(vector<ZObject*> &v, vector<int> &k,
-                       vector<int> *x0 = 0, vector<int> *x1 = 0)
+                       vector<int> *x0 = 0, vector<int> *x1 = 0,
+                       vector<unsigned char> *mv = 0)
 {
 	const size_t n = v.size();
 
@@ -3051,19 +3065,88 @@ static void split_sort(vector<ZObject*> &v, vector<int> &k,
 
 		{
 			const int a0 = x0 ? (*x0)[i] : 0, a1 = x1 ? (*x1)[i] : 0;
+			const unsigned char am = mv ? (*mv)[i] : 0;
 
 			while(j > 0 && key < k[j - 1])
 			{
 				v[j] = v[j - 1];
 				k[j] = k[j - 1];
 				if(x0) { (*x0)[j] = (*x0)[j - 1]; (*x1)[j] = (*x1)[j - 1]; }
+				if(mv) (*mv)[j] = (*mv)[j - 1];
 				j--;
 			}
 
 			v[j] = o;
 			k[j] = key;
 			if(x0) { (*x0)[j] = a0; (*x1)[j] = a1; }
+			if(mv) (*mv)[j] = am;
 		}
+	}
+}
+
+/* ZOD_MOVEKEYS (default on) / ZOD_MOVEKEYCHECK, see split_view */
+static int movekeys = -1, movekeycheck = -1;
+
+static int movekeys_on(void)
+{
+	if(movekeys < 0)
+	{
+		movekeys = zod_switch("ZOD_MOVEKEYS", 1);
+		movekeycheck = zod_switch("ZOD_MOVEKEYCHECK", 0);
+	}
+
+	return movekeys;
+}
+
+static bool can_move(ZObject *o)
+{
+	unsigned char ot, oid;
+
+	o->GetObjectID(ot, oid);
+
+	return ot == ROBOT_OBJECT || ot == VEHICLE_OBJECT;
+}
+
+/* the dyn entries' keys again, only the movers' (ZOD_MOVEKEYS): the others
+ * cannot have changed; ZOD_MOVEKEYCHECK reads them too and counts a change */
+static void split_rekey_dyn(struct split_view *sv)
+{
+	const size_t n = sv->dyn.size();
+
+	for(size_t i = 0; i < n; i++)
+	{
+		ZObject *o = sv->dyn[i];
+
+		if(!sv->dyn_mov[i])
+		{
+			if(movekeycheck)
+			{
+				int x, y, w, h;
+
+				o->GetCords(x, y);
+				o->GetDimensionsPixel(w, h);
+				if(sv->dyn_keys[i] != y + h ||
+				   (sv->with_x && (sv->dyn_x0[i] != x || sv->dyn_x1[i] != x + w)))
+					zod_movekey_bad++;
+			}
+			zod_movekey_kept++;
+			continue;
+		}
+
+		zod_movekey_read++;
+
+		if(sv->with_x)
+		{
+			int x, y, w, h;
+
+			o->GetCords(x, y);
+			o->GetDimensionsPixel(w, h);
+			sv->dyn_keys[i] = y + h;
+			sv->dyn_x0[i] = x;
+			sv->dyn_x1[i] = x + w;
+		}
+		else
+			sv->dyn_keys[i] = o->SortKey();
 	}
 }
 
@@ -3123,19 +3206,22 @@ static void split_rebuild(struct split_view *sv, const vector<ZObject*> &list)
 	split_carry(sv->fix, cf);
 	split_carry(sv->dyn, cd);
 
+	sv->dyn_mov.resize(sv->dyn.size());
+	for(size_t i = 0; i < sv->dyn.size(); i++) sv->dyn_mov[i] = can_move(sv->dyn[i]) ? 1 : 0;
+
 	if(sv->with_x)
 	{
 		split_rekey(sv->fix, sv->fix_keys, &sv->fix_x0, &sv->fix_x1);
 		split_rekey(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
 		split_sort(sv->fix, sv->fix_keys, &sv->fix_x0, &sv->fix_x1);
-		split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
+		split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1, &sv->dyn_mov);
 		return;
 	}
 
 	split_rekey(sv->fix, sv->fix_keys);
 	split_rekey(sv->dyn, sv->dyn_keys);
 	split_sort(sv->fix, sv->fix_keys);
-	split_sort(sv->dyn, sv->dyn_keys);
+	split_sort(sv->dyn, sv->dyn_keys, 0, 0, &sv->dyn_mov);
 }
 
 /* once a frame, where the lists were sorted before */
@@ -3162,15 +3248,21 @@ static void split_frame(ZOLists &ols)
 	{
 		struct split_view *sv = &split_views[i];
 
-		if(sv->with_x)
+		if(movekeys_on())
+		{
+			split_rekey_dyn(sv);
+			if(sv->with_x) split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1, &sv->dyn_mov);
+			else split_sort(sv->dyn, sv->dyn_keys, 0, 0, &sv->dyn_mov);
+		}
+		else if(sv->with_x)
 		{
 			split_rekey(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
-			split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1);
+			split_sort(sv->dyn, sv->dyn_keys, &sv->dyn_x0, &sv->dyn_x1, &sv->dyn_mov);
 		}
 		else
 		{
 			split_rekey(sv->dyn, sv->dyn_keys);
-			split_sort(sv->dyn, sv->dyn_keys);
+			split_sort(sv->dyn, sv->dyn_keys, 0, 0, &sv->dyn_mov);
 		}
 		zod_split_dynkeys += (unsigned long)sv->dyn.size();
 	}

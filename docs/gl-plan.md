@@ -838,6 +838,16 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   ms, drawing 23.8 against 21.0 ms); orig01 still 46.1 / 46.5 against 50.5
   / 49.4 fps (server 4.8 against 3.4 ms). FS-UAE on the tip: SwSums,
   NoGL, GLSmoke, GLTour, LoadBar, HudKeep pass.
+- **The draw order reads again only the movers' keys** (fps-night2,
+  ZOD_MOVEKEYS): every frame each view's dynamic entries had their keys
+  (and the render view's x ranges) read again -- but only robots and
+  vehicles move; buildings, cannons, huts, flags and the map objects keep
+  theirs. A flag per entry, moved by the sort, keeps theirs. FS-UAE
+  MoveKeyCheck (ZOD_MOVEKEYCHECK: the kept ones read anyway every frame):
+  0 of ~6.7 M had changed; SplitCheck, XCullCheck, SwSums, GLSmoke pass.
+  A4000D (pansample, n14, two tour series): sorts 519 / 548 / 545 / 534
+  against 768 / 796 / 850 / 803 us; frames 34.13 against 34.17 ms over
+  eight runs (server 5.7..8.1 ms either way).
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
