@@ -1595,6 +1595,10 @@ static int zod_switch(const char *name, int dflt);
 static int rockpreskip_on(void) { if(rockpreskip < 0) rockpreskip = zod_switch("ZOD_ROCKPRESKIP", 1); return rockpreskip; }
 static int rockprecheck_on(void) { if(rockprecheck < 0) rockprecheck = zod_switch("ZOD_ROCKPRECHECK", 0); return rockprecheck; }
 
+/* ZOD_WPSKIP, see RenderObjects */
+extern unsigned long zod_waypoints_shown;   /* zobject.cpp */
+static unsigned long zod_wp_skipped = 0, zod_wp_checked = 0, zod_wp_bad = 0;
+
 /* ZOD_XCULL's margins and counters, see split_merge_x */
 enum { XCULL_LEFT = 64, XCULL_RIGHT = 64 };
 static unsigned long zod_xcull_seen = 0, zod_xcull_cut = 0, zod_xcull_bad = 0;
@@ -2107,6 +2111,10 @@ extern "C" void zod_render_sections_report(long frames)
 		ZLOG("map effects: %lu tiles off the view without a call (ZOD_EFFPOS);"
 		     " ZOD_EFFCHECK: %lu compared, %lu differ\n",
 		     zod_effpos_skipped, zod_effcheck_n, zod_effcheck_bad);
+
+	if(zod_wp_skipped || zod_wp_checked)
+		ZLOG("waypoints pass: left out in %lu frames (none shown, ZOD_WPSKIP);"
+		     " ZOD_WPCHECK: %lu such frames run, %lu drew\n", zod_wp_skipped, zod_wp_checked, zod_wp_bad);
 
 	if(zod_rockpre_skipped || zod_rockpre_bad || rockprecheck == 1)
 		ZLOG("rock pre-render band: left out in %lu frames (shadows baked, ZOD_ROCKPRESKIP);"
@@ -5239,8 +5247,36 @@ void ZPlayer::RenderObjects()
 		gui_window->GetBuildingObj()->DoRenderWaypoints(zmap, screen, object_list, true);
 
 	//draw object's waypoints
-	for(vector<ZObject*>::iterator i=ols.non_mapitem_olist.begin(); i!=ols.non_mapitem_olist.end(); i++)
-		(*i)->DoRenderWaypoints(zmap, screen, object_list);
+	/* ZOD_WPSKIP (default on): no object shows its waypoints -> each call
+	 * would return at its first line; the pass over every unit is left out.
+	 * ZOD_WPCHECK on: the pass runs anyway then, and a quad drawn counts. */
+	{
+		static int wpskip = -1, wpcheck = -1;
+
+		if(wpskip < 0)
+		{
+			wpskip = zod_switch("ZOD_WPSKIP", 1);
+			wpcheck = zod_switch("ZOD_WPCHECK", 0);
+		}
+
+		if(wpskip && !wpcheck && !zod_waypoints_shown)
+			zod_wp_skipped++;
+		else
+		{
+#ifndef DISABLE_OPENGL
+			const unsigned long d0 = zod_gl_active ? zod_gl_draw_count() : 0;
+#endif
+			for(vector<ZObject*>::iterator i=ols.non_mapitem_olist.begin(); i!=ols.non_mapitem_olist.end(); i++)
+				(*i)->DoRenderWaypoints(zmap, screen, object_list);
+#ifndef DISABLE_OPENGL
+			if(wpcheck && !zod_waypoints_shown && zod_gl_active)
+			{
+				zod_wp_checked++;
+				if(zod_gl_draw_count() != d0) zod_wp_bad++;
+			}
+#endif
+		}
+	}
 
 	zod_rsec_end(RSEC_WEGPUNKTE);
 

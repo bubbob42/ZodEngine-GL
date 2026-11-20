@@ -814,6 +814,15 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   the one-second peak of server.bots. Averaged over a 60 s run that peak
   alone is ~0.6 ms "a frame"; the bots' steady cost is well below the
   1.7 ms average. Not a target.
+- **The waypoint pass left out while no unit shows its waypoints**
+  (fps-night2, ZOD_WPSKIP): DoRenderWaypoints ran for every unit each frame
+  and returned at its first line unless show_waypoints was on (3 s after
+  an order). A count of the objects showing them (ShowWaypoints up,
+  ProcessObject and the destructor down) skips the pass while it is 0.
+  FS-UAE WPCheck (ZOD_WPCHECK: the pass run anyway in those frames, any
+  quad counted): 0 of 31 151 frames drew; SwSums, GLSmoke pass. A4000D
+  (pansample, n11, tour): wegpunkte 28 / 28 against 187 / 177 us; 29.1 /
+  30.7 against 29.4 / 28.7 fps -- the first scrolling run over 30 fps.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
