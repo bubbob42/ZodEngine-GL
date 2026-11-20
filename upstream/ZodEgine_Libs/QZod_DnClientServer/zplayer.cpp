@@ -4687,23 +4687,23 @@ void ZPlayer::StartMouseScrolling(int new_mouse_x, int new_mouse_y)
 	if(!(mouse_x < 10) && (new_mouse_x < 10)) 
 	{
 		horz_scroll_over = 0;
-        last_horz_scroll_time = COMMON::current_time();
+        COMMON::scroll_note(0); last_horz_scroll_time = COMMON::scroll_clock();
 	}
 	else if(!(mouse_x > screen->w - 10) && (new_mouse_x > screen->w - 10)) 
 	{
 		horz_scroll_over = 0;
-        last_horz_scroll_time = COMMON::current_time();
+        COMMON::scroll_note(0); last_horz_scroll_time = COMMON::scroll_clock();
 	}
 
 	if(!(mouse_y < 10) && (new_mouse_y < 10)) 
 	{
 		vert_scroll_over = 0;
-        last_vert_scroll_time = COMMON::current_time();
+        COMMON::scroll_note(0); last_vert_scroll_time = COMMON::scroll_clock();
 	}
 	else if(!(mouse_y > screen->h - 10) && (new_mouse_y > screen->h - 10)) 
 	{
 		vert_scroll_over = 0;
-        last_vert_scroll_time = COMMON::current_time();
+        COMMON::scroll_note(0); last_vert_scroll_time = COMMON::scroll_clock();
 	}
 }
 
@@ -4775,10 +4775,22 @@ static bool zod_tour_on()
 
 void ZPlayer::ProcessScroll()
 {
-    double the_time = COMMON::current_time();
+    double the_time;
 	const double shift_speed = 400;
 	double time_diff;
 	double the_shift;
+
+	/* Smooth scrolling (port/amiga/zod_smooth.cpp): a view that moves this
+	 * frame says so BEFORE the clock is read -- the clock is then the blank
+	 * this frame will be shown on, the same clock that started the scroll. */
+	if(graphics_loaded &&
+	   (zod_tour_on() ||
+	    (!do_focus_to && (DoKeyScrollUp() || DoMouseScrollUp() || DoKeyScrollDown() ||
+	                      DoMouseScrollDown() || DoKeyScrollRight() || DoMouseScrollRight() ||
+	                      DoKeyScrollLeft() || DoMouseScrollLeft()))))
+		COMMON::scroll_note(0);
+
+	the_time = COMMON::scroll_clock();
 
 	/* The tour cancels a camera flight: a watching player (-t null) has no
 	 * fort, so the flight to it would never end and block scrolling. */
@@ -4801,6 +4813,8 @@ void ZPlayer::ProcessScroll()
 			const int a = amt < tour_step_left ? amt : tour_step_left;
 			const bool ok = tour_dy > 0 ? zmap.ShiftViewDown(a) : zmap.ShiftViewUp(a);
 
+			if(ok) COMMON::scroll_note(a);
+
 			tour_step_left -= a;
 
 			if(!ok) { tour_dy = -tour_dy; tour_step_left = 0; }
@@ -4808,6 +4822,8 @@ void ZPlayer::ProcessScroll()
 		else
 		{
 			const bool ok = tour_dx > 0 ? zmap.ShiftViewRight(amt) : zmap.ShiftViewLeft(amt);
+
+			if(ok) COMMON::scroll_note(amt);
 
 			if(!ok) { tour_dx = -tour_dx; tour_step_left = 240; }
 		}
@@ -4834,7 +4850,7 @@ void ZPlayer::ProcessScroll()
 		{
 			last_vert_scroll_time = the_time;
 			vert_scroll_over = the_shift - (int)the_shift;
-			zmap.ShiftViewUp((int)the_shift);
+			if(zmap.ShiftViewUp((int)the_shift)) COMMON::scroll_note((int)the_shift);
 		}
 	}
 	else if(DoKeyScrollDown() || DoMouseScrollDown())//!up_down && down_down)
@@ -4848,7 +4864,7 @@ void ZPlayer::ProcessScroll()
 		{
 			last_vert_scroll_time = the_time;
 			vert_scroll_over = the_shift - (int)the_shift;
-			zmap.ShiftViewDown((int)the_shift);
+			if(zmap.ShiftViewDown((int)the_shift)) COMMON::scroll_note((int)the_shift);
 		}
 	}
 
@@ -4865,7 +4881,7 @@ void ZPlayer::ProcessScroll()
 		{
 			last_horz_scroll_time = the_time;
 			horz_scroll_over = the_shift - (int)the_shift;
-			zmap.ShiftViewRight((int)the_shift);
+			if(zmap.ShiftViewRight((int)the_shift)) COMMON::scroll_note((int)the_shift);
 		}
 	}
 	else if(DoKeyScrollLeft() || DoMouseScrollLeft())//!right_down && left_down)
@@ -4879,7 +4895,7 @@ void ZPlayer::ProcessScroll()
 		{
 			last_horz_scroll_time = the_time;
 			horz_scroll_over = the_shift - (int)the_shift;
-			zmap.ShiftViewLeft((int)the_shift);
+			if(zmap.ShiftViewLeft((int)the_shift)) COMMON::scroll_note((int)the_shift);
 		}
 	}
 }

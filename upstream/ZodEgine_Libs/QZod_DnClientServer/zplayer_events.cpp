@@ -529,7 +529,7 @@ void ZPlayer::keydown_event(ZPlayer *p, char *data, int size, int dummy)
 			{
 				p->up_down = true;
 				p->vert_scroll_over = 0;
-                p->last_vert_scroll_time = COMMON::current_time();
+                COMMON::scroll_note(0); p->last_vert_scroll_time = COMMON::scroll_clock();
 			}
 			break;
 		case 274: //down
@@ -538,7 +538,7 @@ void ZPlayer::keydown_event(ZPlayer *p, char *data, int size, int dummy)
 			{
 				p->down_down = true;
 				p->vert_scroll_over = 0;
-                p->last_vert_scroll_time = COMMON::current_time();
+                COMMON::scroll_note(0); p->last_vert_scroll_time = COMMON::scroll_clock();
 			}
 			break;
 		case 275: //right
@@ -547,7 +547,7 @@ void ZPlayer::keydown_event(ZPlayer *p, char *data, int size, int dummy)
 			{
 				p->right_down = true;
 				p->horz_scroll_over = 0;
-                p->last_horz_scroll_time = COMMON::current_time();
+                COMMON::scroll_note(0); p->last_horz_scroll_time = COMMON::scroll_clock();
 			}
 			break;
 		case 276: //left
@@ -556,7 +556,7 @@ void ZPlayer::keydown_event(ZPlayer *p, char *data, int size, int dummy)
 			{
 				p->left_down = true;
 				p->horz_scroll_over = 0;
-                p->last_horz_scroll_time = COMMON::current_time();
+                COMMON::scroll_note(0); p->last_horz_scroll_time = COMMON::scroll_clock();
 			}
 			break;
 		case 304: //left shift

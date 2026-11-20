@@ -171,7 +171,7 @@ else ifeq ($(PLATFORM),amiga)
     MGL_SDK  ?= ../RadeonGL/sdk/minigl-29.1
     INCLUDES += -I$(MGL_SDK)/minigl-shared-library/include
     LIBS     := -L$(MGL_SDK)/lib -lminigl $(LIBS)
-    ENGINE_SRCS += port/zod_gl.cpp port/amiga/zod_present.cpp
+    ENGINE_SRCS += port/zod_gl.cpp port/amiga/zod_present.cpp port/amiga/zod_smooth.cpp
     # the own present on PiStorm3D opens its screen without a mouse sprite
     # (Picasso96API, optional at run time); the headers as Doom64 takes them
     P96_SDK  ?= $(HOME)/Developer/AmigaSDK/Picasso96Develop

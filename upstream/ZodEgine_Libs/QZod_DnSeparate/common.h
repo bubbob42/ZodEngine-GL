@@ -37,6 +37,14 @@ namespace COMMON
 	extern void lcase(char *message, int m_size);
 	extern void lcase(string &message);
 	extern double current_time();
+	/* The clock the view's scrolling runs on (docs/concept-smooth-scrolling.md):
+	 * current_time() unless a port hooks in a display clock -- the blank the
+	 * frame being drawn will be shown on (port/amiga/zod_smooth.cpp).
+	 * scroll_note(px): the view moves by px this frame (0: a scroll starts). */
+	extern double (*scroll_clock_hook)();
+	extern void (*scroll_note_hook)(int px);
+	extern double scroll_clock();
+	extern void scroll_note(int px);
 	extern void create_folder(char *foldername);
 	extern void uni_pause(int m_sec);
 	extern char *wtoc_s(const wchar_t *input);

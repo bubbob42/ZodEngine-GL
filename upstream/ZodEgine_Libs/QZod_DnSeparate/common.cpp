@@ -126,6 +126,19 @@ void create_folder(char *foldername)
 
 
 
+double (*scroll_clock_hook)() = 0;
+void (*scroll_note_hook)(int px) = 0;
+
+double scroll_clock()
+{
+	return scroll_clock_hook ? scroll_clock_hook() : current_time();
+}
+
+void scroll_note(int px)
+{
+	if(scroll_note_hook) scroll_note_hook(px);
+}
+
 double current_time()
 {
 #ifdef WIN32
