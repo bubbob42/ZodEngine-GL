@@ -27,9 +27,12 @@ The user, 19.11. night: vsync while scrolling under RadeonGL (gl-plan 5h,
   early-hold defect: 252 of the first 600 presents of a tour held 8 ms or
   more, 20.11. 21:30). Fixed in RadeonGL main (unreleased); releasing it is
   the user's call (RadeonGL session).
-- The copy path (`RadeonGLFlip=copy`) honours `mglEnableSync`: with sync
-  it copies behind the beam (GLQuake: 29.9 against 32.2 fps at 720p),
-  without it it tears. Zod never uses it today.
+- The copy path honours `mglEnableSync`: with sync it copies behind the
+  beam (GLQuake: 29.9 against 32.2 fps at 720p), without it it tears. A
+  program gets it by asking for fewer than three buffers
+  (`mglChooseNumberOfBuffers(2)`); with three, `RadeonGLFlip` only picks
+  the pan or ChangeScreenBuffer ("csb") way (RadeonGL lib/cardflip.c).
+  Zod never uses it today.
 - PiStorm3D (no pan below VideoCore.card 2): Zod's own present, two halves
   of one screen panned with its own sync (zod_present.cpp) -- a separate
   path, unchanged here.
@@ -54,10 +57,10 @@ The user, 19.11. night: vsync while scrolling under RadeonGL (gl-plan 5h,
 
    Display sync entries:
    - "Panned, tear-free (RadeonGL 0.15+)" -- default; `RadeonGLFlip=pan`.
-   - "Copied at the blank (older RadeonGL, slower)" -- `RadeonGLFlip=copy`,
-     sync on: tear-free on libraries before 0.15.
-   - "Copied at once (fastest, tears)" -- `RadeonGLFlip=copy`, sync off:
-     for measuring and for players who prefer speed.
+   - "Copied at the blank (older RadeonGL, slower)" -- two buffers (the
+     copy path), sync on: tear-free on libraries before 0.15.
+   - "Copied at once (fastest, tears)" -- two buffers, sync off: for
+     measuring and for players who prefer speed.
    Smooth scrolling: on = `ZOD_SMOOTH=scroll`, off = as today. Default:
    off until the user's eye test says otherwise, then on.
 2. **How the launcher hands them over**: two new game options, so they
@@ -65,13 +68,30 @@ The user, 19.11. night: vsync while scrolling under RadeonGL (gl-plan 5h,
    settings (the launcher's rule: "dann steht sie in der Vorschau und im
    Spielprotokoll"): `-Y pan|blank|now` (display sync) and `-X on|off`
    (smooth). Free letters; the game maps them onto the existing switches
-   (RadeonGLFlip for its context, ZOD_GL_SYNC, ZOD_SMOOTH), the environment
+   (the number of buffers, ZOD_GL_SYNC, ZOD_SMOOTH), the environment
    variables keep working for tests and override nothing set on the line.
 3. **The library release** with the PanPace fix -- the user's call, in
    the RadeonGL session; Zod works with 0.16 meanwhile (the early holds
    cost ~5 ms a frame in the first ~600 frames).
 4. **A tear check on Hamiller while scrolling** (eye test, morning): pan
    vs. copy-at-once, orig04 tour, blind.
+
+## Done (20.11. night, branch display-sync, on top of smooth-gl)
+
+- The game: `-Y pan|blank|now` (pan: three buffers panned as before;
+  blank / now: two buffers, the copy path, sync on / off) and `-X on|off`
+  (smooth scrolling; overrides ZOD_SMOOTH). The log says which:
+  "3 buffers, panned" / "2 buffers, copied, sync on|off".
+- ZodLaunch: "Display sync" and "Smooth scrolling" in the Display group,
+  ghosted unless the renderer is MiniGL; always passed with MiniGL, so
+  they stand in the preview and the log. tests/launcher passes; ZodLaunch
+  builds (cego's Docker toolchain).
+- FS-UAE DisplaySyncCheck: -Y now -X on (copied, sync off; smooth finds no
+  blank clock on the null card and switches itself off) and -Y blank -X
+  off (copied, sync on) run, rc 0.
+- A first version set RadeonGLFlip=copy for the copy path: in RadeonGL a
+  value starting with "c" means ChangeScreenBuffer ("csb") -- caught in
+  RadeonGL's lib/cardflip.c before any hardware run.
 
 ## Not done here
 

@@ -263,6 +263,24 @@ int main(int argc, char **argv)
         }
     }
 
+#ifdef __amigaos__
+    /* -Y and -X: how a GL frame reaches the screen, and smooth scrolling
+     * (port/amiga/sdl_screen.cpp, zod_smooth.cpp); before the first screen */
+    {
+        extern char zod_display_sync[8];
+        extern int zod_smooth_option;
+
+        if(starting_conditions.display_sync[0])
+        {
+            strcpy(zod_display_sync, starting_conditions.display_sync);
+            ZLOG("GL: display sync from the command line: %s\n", zod_display_sync);
+        }
+
+        if(starting_conditions.smooth >= 0)
+            zod_smooth_option = starting_conditions.smooth;
+    }
+#endif
+
     /* Ausgabeweg der Musik aus -M. Muss VOR dem ersten Mix_LoadMUS stehen:
      * die Musikausgabe wird beim ERSTEN geladenen Stueck aufgesetzt, und
      * danach ist der Weg festgelegt. */

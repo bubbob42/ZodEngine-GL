@@ -174,6 +174,9 @@ static int wheel_pending = 0;     /* +1 hoch, -1 runter */
  * software, and SDL_Flip shows them as one texture. */
 static int mgl_offen  = 0;       /* MiniGLOpen succeeded */
 static int gl_sync    = 1;       /* wait for the beam (ZOD_GL_SYNC) */
+/* -Y (the launcher's "Display sync"): pan, blank, now; empty: as before
+ * (pan, sync from ZOD_GL_SYNC) -- docs/concept-display-sync.md */
+char zod_display_sync[8] = "";
 static int gl_kontext = 0;       /* a context is open */
 static int flip_var_vorher = -1; /* RadeonGLFlip before us: -1 untouched, 0 none, 1 flip_var_text */
 static char flip_var_text[16];
@@ -1084,7 +1087,11 @@ static int gl_oeffnen(int w, int h)
 	{
 		mglChooseWindowMode(GL_FALSE);
 		mglChoosePixelDepth(16);
-		mglChooseNumberOfBuffers(3);
+		/* -Y blank / now: the copy path -- RadeonGL copies the frame to the
+		 * screen (behind the beam with sync on) when a program asks for
+		 * fewer than three buffers (lib/cardflip.c: three = the flip,
+		 * RadeonGLFlip only picks pan or csb there) */
+		mglChooseNumberOfBuffers((zod_display_sync[0] == 'b' || zod_display_sync[0] == 'n') ? 2 : 3);
 
 		if(!mglCreateContext(0, 0, w, h))
 		{
@@ -1130,10 +1137,15 @@ static int gl_oeffnen(int w, int h)
 		gl_sync = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
 		                  (e[0] == 'o' && e[1] == 'f')));
 
+		/* -Y now: no wait; blank and pan: wait (pan ignores it anyway) */
+		if(zod_display_sync[0]) gl_sync = zod_display_sync[0] != 'n';
+
 		mglEnableSync(gl_sync ? GL_TRUE : GL_FALSE);
 		ZLOG("GL: %s, %dx%d screen, %s, sync %s\n",
 		     (const char *)glGetString(GL_RENDERER), w, h,
-		     zod_present_active() ? "own present (two halves of one screen)" : "3 buffers",
+		     zod_present_active() ? "own present (two halves of one screen)" :
+		     (zod_display_sync[0] == 'b' || zod_display_sync[0] == 'n') ? "2 buffers, copied" :
+		     "3 buffers, panned",
 		     gl_sync ? "on" : "off");
 	}
 

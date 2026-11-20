@@ -81,9 +81,14 @@ static double st_ppr_sum = 0.0, st_ppr_sq = 0.0;   /* px per refresh, scrolling 
 static unsigned long st_ppr_bins[12];              /* 0..10 px per refresh, more */
 static unsigned long st_n_frames[5];               /* frames by N (1..4) */
 
+/* -X on|off (the launcher's "Smooth scrolling"): 1, 0; -1 not given */
+int zod_smooth_option = -1;
+
 static int read_mode(void)
 {
 	char buf[16];
+
+	if(zod_smooth_option >= 0) return zod_smooth_option ? 1 : 0;
 	const char *e = zod_env("ZOD_SMOOTH", buf, sizeof(buf));
 
 	if(!e || !*e) return 0;

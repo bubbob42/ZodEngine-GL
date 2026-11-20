@@ -183,6 +183,16 @@ static const char *renderer_namen[] =
     "Software (RTG)", "MiniGL if installed (RadeonGL, PiStorm3D)", NULL
 };
 
+/* How a MiniGL frame reaches the screen (docs/concept-display-sync.md),
+ * and smooth scrolling (docs/concept-smooth-scrolling.md). Saved and passed
+ * as words: the game's -Y and -X. */
+static const char *sync_namen[] =
+{
+    "Panned, tear-free (RadeonGL 0.15+)", "Copied at the blank (older RadeonGL, slower)",
+    "Copied at once (fastest, tears)", NULL
+};
+static const char *sync_woerter[] = { "pan", "blank", "now" };
+
 /* Die beiden Spielvarianten. Gespeichert wird der LISTENPLATZ -- es gibt
  * hier keine Zahl mit eigener Bedeutung, die man verwechseln koennte, und
  * die Liste wird nicht waermer als zwei Eintraege. */
@@ -342,6 +352,8 @@ struct einstellungen
     BOOL  bot[8];           /* je Team ein Bot                          */
     LONG  aufloesung;       /* Index in aufloesungen                    */
     LONG  renderer;         /* 0 software, 1 minigl.library             */
+    LONG  anzeige_sync;     /* index in sync_namen (MiniGL only)        */
+    BOOL  smooth;           /* smooth scrolling (MiniGL only)           */
     BOOL  ton;
     BOOL  musik;
     /* Deckel auf die GEZEICHNETE Groesse der Effekte, in HALBEN Schritten:
@@ -474,6 +486,14 @@ static void cfg_laden(void)
         else if(!strcmp(zeile, "team"))        cfg.team       = atoi(wert);
         else if(!strcmp(zeile, "aufloesung"))  cfg.aufloesung = aufloesung_platz(wert);
         else if(!strcmp(zeile, "renderer"))    cfg.renderer   = !strcmp(wert, "minigl") ? 1 : 0;
+        else if(!strcmp(zeile, "anzeigesync"))
+        {
+            LONG i;
+
+            for(i = 0; i < 3; i++)
+                if(!strcmp(wert, sync_woerter[i])) cfg.anzeige_sync = i;
+        }
+        else if(!strcmp(zeile, "smooth"))      cfg.smooth     = atol(wert) ? TRUE : FALSE;
         else if(!strcmp(zeile, "ton"))         cfg.ton        = (BOOL)atoi(wert);
         else if(!strcmp(zeile, "musik"))       cfg.musik      = (BOOL)atoi(wert);
         /* "fenster" gab es bis zum 23.09. Der Schluessel wird jetzt
@@ -528,6 +548,9 @@ static void cfg_speichern(void)
     snprintf(zeile, sizeof(zeile), "team=%ld\n", (long)cfg.team);          FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "aufloesung=%s\n", aufloesungen[cfg.aufloesung]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "renderer=%s\n", cfg.renderer ? "minigl" : "software"); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "anzeigesync=%s\n",
+             sync_woerter[cfg.anzeige_sync >= 0 && cfg.anzeige_sync < 3 ? cfg.anzeige_sync : 0]); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "smooth=%d\n", cfg.smooth ? 1 : 0); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "ton=%d\n", cfg.ton ? 1 : 0);           FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "musik=%d\n", cfg.musik ? 1 : 0);       FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "videos=%d\n", cfg.videos ? 1 : 0);     FPuts(f, zeile);
@@ -677,6 +700,15 @@ static void befehlszeile_bauen(char *aus, size_t platz)
      * minigl.library and falls back to software when it cannot. */
     if(!cfg.renderer)
         strncat(aus, "-o ", platz - strlen(aus) - 1);
+    else
+    {
+        /* MiniGL: how its frames reach the screen, and smooth scrolling --
+         * always given, so they stand in the preview and the game's log */
+        snprintf(teil, sizeof(teil), "-Y %s -X %s ",
+                 sync_woerter[cfg.anzeige_sync >= 0 && cfg.anzeige_sync < 3 ? cfg.anzeige_sync : 0],
+                 cfg.smooth ? "on" : "off");
+        strncat(aus, teil, platz - strlen(aus) - 1);
+    }
 
     if(cfg.extra[0])
     {
@@ -990,6 +1022,7 @@ int main(int argc, char **argv)
     Object *o_name, *o_team, *o_aufl, *o_renderer;
     Object *o_skalierung, *o_skalierung_text;
     Object *o_ton, *o_musik, *o_videos, *o_musikweg;
+    Object *o_sync, *o_sync_label, *o_smooth, *o_smooth_label;
     Object *o_ahi, *o_ahi_label, *o_ahi_gruppe, *o_ahi_waehlen, *o_ahi_vorgabe;
     Object *o_liste, *o_karte, *o_karte_an, *o_extra;
     Object *o_liste_waehlen, *o_karte_waehlen;
@@ -1005,6 +1038,7 @@ int main(int argc, char **argv)
     int     i;
     char    ahi_anzeige[80];
     LONG    ahi_aus = -1;        /* zuletzt gesetzter Ausgrauzustand */
+    LONG    sync_aus = -1;       /* the same for display sync and smooth */
 
     (void)argc; (void)argv;
 
@@ -1156,6 +1190,22 @@ int main(int argc, char **argv)
                             "MiniGL: draws through minigl.library (RadeonGL\n"
                             "on a Radeon, PiStorm3D on a PiStorm). Without the\n"
                             "library the game draws in software by itself.",
+                    End,
+                    /* ghosted unless MiniGL is the renderer */
+                    Child, o_sync_label = Label2("Display sync"),
+                    Child, o_sync = CycleObject,
+                        MUIA_Cycle_Entries, (ULONG)sync_namen,
+                        MUIA_Cycle_Active,  cfg.anzeige_sync,
+                        MUIA_ShortHelp, (ULONG)"Panned: three buffers, each frame\n"
+                            "shown at a blank -- tear-free on RadeonGL 0.15+.\n"
+                            "Copied at the blank: for older RadeonGL, slower.\n"
+                            "Copied at once: the fastest, but it tears.",
+                    End,
+                    Child, o_smooth_label = Label2("Smooth scrolling"),
+                    Child, HGroup,
+                        Child, o_smooth = MUI_MakeObject(MUIO_Checkmark, (ULONG)"Smooth scrolling"),
+                        Child, Label1("Even steps: frames held for whole refreshes"),
+                        Child, HVSpace,
                     End,
                     Child, Label2("Scaling"),
                     Child, HGroup,
@@ -1341,6 +1391,21 @@ int main(int argc, char **argv)
             get(o_variante, MUIA_Cycle_Active, &l); cfg.variante = (l == 1) ? 1 : 0;
             get(o_aufl,  MUIA_Cycle_Active, &l); cfg.aufloesung = l;
             get(o_renderer, MUIA_Cycle_Active, &l); cfg.renderer = l ? 1 : 0;
+            get(o_sync, MUIA_Cycle_Active, &l); cfg.anzeige_sync = (l >= 0 && l < 3) ? l : 0;
+            get(o_smooth, MUIA_Selected, &l); cfg.smooth = (BOOL)l;
+
+            {
+                LONG aus = (cfg.renderer == 1) ? FALSE : TRUE;
+
+                if(aus != sync_aus)
+                {
+                    sync_aus = aus;
+                    set(o_sync_label,   MUIA_Disabled, aus);
+                    set(o_sync,         MUIA_Disabled, aus);
+                    set(o_smooth_label, MUIA_Disabled, aus);
+                    set(o_smooth,       MUIA_Disabled, aus);
+                }
+            }
 
             for(i = 0; i < 8; i++) { get(o_bot[i], MUIA_Selected, &l); cfg.bot[i] = (BOOL)l; }
             get(o_ton,          MUIA_Selected, &l); cfg.ton               = (BOOL)l;

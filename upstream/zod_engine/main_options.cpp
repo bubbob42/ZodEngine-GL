@@ -20,6 +20,8 @@ input_options::input_options()
         ahi_mode = 0;
         read_musik_weg = false;
         musik_weg = 0;
+        display_sync[0] = 0;
+        smooth = -1;
         read_video_dir = false;
         video_dir.clear();
         read_settings = false;
@@ -131,7 +133,7 @@ int input_options::getoptions(int argc, char **argv)
     extern char *optarg;
     extern int optind;
 
-    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:")) != -1)
+    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:Y:X:")) != -1)
     {
         switch(c)
         {
@@ -306,6 +308,23 @@ int input_options::getoptions(int argc, char **argv)
                 if(!optarg) return 0;
                 read_musik_weg = true;
                 musik_weg = (optarg[0] == 'p' || optarg[0] == 'P') ? 1 : 0;
+                break;
+
+            case 'Y':
+                /* how a GL frame reaches the screen (docs/concept-display-
+                 * sync.md): pan (three buffers panned, tear-free on RadeonGL
+                 * 0.15+), blank (copied behind the beam), now (copied at
+                 * once, tears) */
+                if(!optarg) return 0;
+                strncpy(display_sync, optarg, sizeof(display_sync) - 1);
+                display_sync[sizeof(display_sync) - 1] = 0;
+                break;
+
+            case 'X':
+                /* smooth scrolling (docs/concept-smooth-scrolling.md) */
+                if(!optarg) return 0;
+                smooth = (optarg[0] == 'o' && optarg[1] == 'n') || optarg[0] == '1' ||
+                         optarg[0] == 'e' || optarg[0] == 'E';
                 break;
 
             case 'F':

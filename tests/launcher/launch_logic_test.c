@@ -424,6 +424,37 @@ int main(void)
         if(cfg.renderer != 0)
         { printf("FEHLER renderer does not survive saving\n"); fehler++; }
 
+        /* MiniGL: -Y and -X always, with the choice's words; software: none */
+        {
+            static const char *const wort[] = { "-Y pan -X on ", "-Y blank -X off ", "-Y now -X on " };
+            int m;
+
+            for(m = 0; m < 3; m++)
+            {
+                cfg_vorgaben();
+                cfg.renderer = 1;
+                cfg.anzeige_sync = m;
+                cfg.smooth = (m != 1);
+                befehlszeile_bauen(z, sizeof(z));
+
+                if(!strstr(z, wort[m]))
+                { printf("FEHLER display sync %d: '%s'\n", m, z); fehler++; }
+
+                cfg_speichern();
+                cfg_vorgaben();
+                cfg_laden();
+
+                if(cfg.anzeige_sync != m || cfg.smooth != (m != 1))
+                { printf("FEHLER display sync %d does not survive saving\n", m); fehler++; }
+            }
+
+            cfg_vorgaben();
+            cfg.renderer = 0;
+            befehlszeile_bauen(z, sizeof(z));
+            if(strstr(z, "-Y ") || strstr(z, "-X "))
+            { printf("FEHLER -Y/-X with software: '%s'\n", z); fehler++; }
+        }
+
         cfg_vorgaben();
     }
 
