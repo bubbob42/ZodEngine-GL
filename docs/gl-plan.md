@@ -787,6 +787,16 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   changed; SwSums, NoGL, GLSmoke pass. A4000D (pansample, n7, m1 m0 m0 m1,
   tour): server.process 2720 / 2552 against 4145 / 4086 us, update 204 /
   194 against 482 / 465 us; 27.8 / 28.8 against 26.4 / 27.1 fps.
+- **REJECTED: static map objects as fixed sort keys** (ZOD_MAPOBJFIX, n8,
+  not committed): plain map objects, grenade and rocket boxes never move
+  and have an empty Process(), so they could join the rocks in the views'
+  fixed part (sorted once, left out of the Process pass). A4000D
+  (pansample, k1 k0 k0 k1, tour): sorts 653 / 576 against 719 / 794 us,
+  Process pass about the same, 27.9 / 29.2 against 29.6 / 27.9 fps -- and
+  FS-UAE SplitCheck counted ~9 places a frame where a map object and
+  another object tie on the key (idle units stand on the tile grid like
+  the trees) and now draw in the other order. A visible-order change for
+  ~0.15 ms: reverted.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
