@@ -78,6 +78,39 @@ and the changed blocks through c2p; the HUD (right edge and bottom) is
 drawn again at each offset. That is the smooth-scrolling concept's AGA
 phase: after the static AGA screen works.
 
+### Milestone 4 in detail: what hardware scrolling costs here (for review)
+
+Measured on the PiStorm's A1200: scrolling rewrites the whole view, 230 KB
+of chip writes a frame, 8 fps. Hardware scrolling with system calls only
+(ScrollVPort on RasInfo offsets; no copper list of our own) means:
+
+- **A bitmap larger than the view**, holding the map around the view
+  ("world-anchored": a map pixel keeps its place in the bitmap while the
+  view moves over it). A chunky shadow of that bitmap in fast RAM keeps
+  c2p aligned to bitmap words and keeps the pixels outside the view; block
+  sums on the shadow send only what changed: the newly shown strip, units,
+  effects -- and the HUD.
+- **The HUD** (100 px right, 36 rows below) sits at a fixed place on
+  screen, so it moves across the bitmap with the view: drawn again at
+  every offset, and the map put back where it was (~67 KB a frame).
+- **No wrap-around**: AGA cannot wrap a bitmap sideways, and a vertical
+  wrap needs a copper split. When the view nears the bitmap's edge, the
+  bitmap re-centres: one full redraw (~230 KB, ~100 ms on the PiStorm).
+  With margins of 256 px sideways and 128 rows up/down (a 1152x768 bitmap,
+  884 KB of chip RAM) that is every ~0.6 s of continuous scrolling at
+  400 px/s.
+- **One buffer**: two 884 KB bitmaps do not fit next to Workbench in 2 MB
+  of chip RAM, so blocks are written into the shown bitmap (a unit may be
+  seen half drawn for a frame); the still view keeps its two buffers.
+- Estimate on the PiStorm's A1200: ~80 KB a frame (strip + HUD + units)
+  instead of 230 KB, plus a re-centring hitch twice a second: ~20 fps
+  scrolling instead of 8. On a real 040/060 card (faster chip writes) more.
+
+Open points for the user: the chip RAM it takes (884 KB, or smaller
+margins with more re-centring), one buffer while scrolling, and whether the
+re-centring hitch is acceptable -- or a smaller target: a "scroll with
+fewer updates" mode (the HUD and units refreshed every other frame).
+
 ## How it is chosen
 
 - ZodLaunch, Display group, Renderer: "Software (RTG)", "MiniGL if
