@@ -764,6 +764,18 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   baked frame, any quad counted): 0 frames drew; SwSums, NoGL, GLSmoke
   pass. A4000D (pansample, n5, r1 r0 r0 r1, tour): obj_vor 802 / 703
   against 1118 / 1077 us; 27.1 / 28.4 against 26.7 / 28.3 fps.
+- **8-bit own textures send only what differs** (fps-night2, ZOD_REFDIFF):
+  the minimap marks its whole surface at every rebuild (~4 a second) and
+  was sent whole each time (ARGB4444, ~4.6 ms on the A4000D); the
+  portrait likewise. Now zod_gl keeps the pixels as last sent and sends
+  only the box around what really differs (or nothing); the first refresh
+  sends the whole surface, so the copy and the texture start out the same.
+  FS-UAE RefDiffCheck (ZOD_REFDIFFCHECK: an image of the texture by what
+  was sent, against the surface after every refresh): 0 of 295 unlike;
+  23..35 % of the marked pixels sent. A4000D (pansample, n6, d1 d0 d0 d1,
+  tour): refresh uploads 513 / 494 against 1289 / 1270 ms a run, HUD 2163
+  / 2492 against 2668 / 2675 us; 28.9 / 25.4 against 27.0 / 26.2 fps (the
+  25.4 run: server 8.9 ms).
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
