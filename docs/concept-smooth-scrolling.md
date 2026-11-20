@@ -207,6 +207,26 @@ after a 116 ms hiccup: since then a percentile and up to three tries).
   >30 fps goal is what makes N = 2 (30 fps, 13.3 px steps) hold. The eye
   decides whether 20 fps even beats 28 fps uneven (eye tests).
 
+### The user's eye test (21.11. 00:13-00:34, Hamiller, the merged night build)
+
+| run | the user | measured |
+|---|---|---|
+| tour, off | "apart from the regular occasional micro stutter, this looks very good" | 29.8 fps |
+| tour, N = 2 | "less micro stutter, but a bit different due to lower fps perhaps" | 24.3 fps, 225 of 1879 late |
+| tour, N = 3 | "looks like run 2 to me, or even a bit worse" | 17.6 fps, 100 late |
+| by hand, off | "feels fine" | 25.8 fps |
+| by hand, N = 2 | "this feels better than run one" | 26.2 fps |
+| by hand, automatic N | "far worse" than N = 2 | N flipped 17 times in 150 s (up 9, down 8), 479 frames at N = 4 |
+
+Also: "the stutter seems to appear when scrolling over the map centre --
+maybe I'm imagining" (to be checked against the cadence logs).
+
+**The user's decisions:** smooth ON by default with N = 2 fixed (the
+automatic N only with ZOD_SMOOTH_N=auto), the step carrying the fraction
+(exact 400 px/s); ZodLaunch's "Smooth scrolling" ticked; ZOD_SMOOTH=aus or
+-X off to switch it off. Benchmarks (tools/hw/zod_run.py) run without it
+unless ZSMOOTH=1.
+
 ## Software RTG (phase 2, own branch)
 
 From gl-plan 5h: scroll on the card instead of copying the whole view. The

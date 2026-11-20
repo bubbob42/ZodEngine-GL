@@ -189,6 +189,17 @@ Emu68, chip RAM goes over the A1200's own bus. aga branch, software (-o),
 - The picture itself (colours, flicker) waits for someone looking at the
   A1200's native output.
 
+## The user's eye and decisions (21.11. ~00:15, voltago's native output)
+
+- "AGA is looking good on voltago, no complaints, jerky scrolling was to
+  be expected" -- picture, colours, flicker and the HUD fine; voltago
+  (A4000D 060): still 34.5 fps; hardware scrolling stays the next AGA step.
+- The picture: the whole 640x512 for the view (32 more map rows), not
+  640x480 centred -- since then -C pal / -C dblpal run the game at
+  640x512 (AgaCheck: "the picture 640x512 from row 0", 0 differ);
+  Productivity stays 640x480; the automatic fallback without -C still
+  640x480 centred.
+
 ## Open questions (recommendation first)
 
 1. 640x480 **centred in 640x512** -- or the full 640x512 with 32 more map

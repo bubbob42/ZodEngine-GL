@@ -150,6 +150,15 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
    Prisma session (voltago and arkon are Prisma's; Zod's 24 MB of game data
    would have to go up first).
 
+## The user's decisions (21.11. ~00:40, relayed)
+
+- Default cluster: **out.0**.
+- MT-32: use the ORIGINAL game's MT-32 data if the CD has it (Miles keeps
+  MT-32 timbres in driver/timbre files next to the XMIs), the table above
+  only as the fallback. Not checked yet: there is no Z CD or image on the
+  Mac (z.pac searched for); with the CD (or ZExtract on the Amiga reading
+  it) the MT-32 files can be looked for and carried into ZMU1 as SysEx.
+
 ## Open questions (recommendation first)
 
 1. Default cluster **out.0** (the serial port: mt32-pi, MT-32, any MIDI

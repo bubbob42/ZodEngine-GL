@@ -1113,6 +1113,30 @@ Backlog (not started):
   mglSwitchDisplay) is MiniGL's per-quad concept (census of Zod sent to
   the MiniGL session 20.11 09:29, build/census/run2).
 
+## 5i. The backlog night, 20./21.11. (the user: "start on the backlog items, run through the night")
+
+Concepts and results in their own documents: docs/concept-smooth-scrolling.md
+(GL smooth scrolling and the software-RTG on-card scroll),
+docs/concept-display-sync.md, docs/concept-midi-camd.md, docs/concept-aga.md.
+Branches smooth-gl, display-sync, rtg-scroll, midi-camd, aga, loadbar-fix,
+merged as night-merge and then into gl (21.11. ~00:50, the user's word).
+
+- Smooth scrolling: ON by default, N = 2 fixed (the user's eye test on
+  Hamiller: N = 2 by hand "feels better" than off; the automatic N "far
+  worse"). The refresh is measured from PanPace's returns (~2 s at start).
+- Display sync: -Y pan|blank|now, ZodLaunch "Display sync".
+- Software RTG on-card scroll (ZOD_RTGSCROLL, off): -69 % bytes in FS-UAE,
+  but on the PiStorm 55 fps against 185 (a 7 ms blit against nearly free
+  bytes); a Zorro A/B decides.
+- MIDI through camd: -M gm|mt32, -K cluster (default out.0), ZodLaunch;
+  byte-exact FS-UAE checks; the original MT-32 data waits for the Z CD.
+- AGA: -C pal|dblpal|prod, the fallback without RTG; the user on voltago:
+  "looking good, no complaints"; PAL/DblPAL at 640x512; scrolling is
+  chip-bound (PiStorm's A1200 8 fps, hardware scrolling is the next step).
+- The load bar no longer comes back for a moment after loading: a frame
+  that drew nothing is not presented (the game's first frame before the
+  map arrived showed an older buffer).
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
