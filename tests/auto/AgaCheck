@@ -1,0 +1,32 @@
+; AgaCheck -- the AGA screen (docs/concept-aga.md, port/amiga/zod_aga.cpp) in
+; FS-UAE without an RTG card (fsuae/local/ZodEngine-autotest-aga.fs-uae:
+; A1200, AGA, 68040). PAL HiRes Laced 640x512, 8 planes, the dirty blocks
+; through chunky to planar. ZOD_AGA_CHECK reads every frame back from the
+; planes and compares it with the compose surface: "0 pixels differ".
+; (1) ZOD_AGA set, orig01, a still bot match, 30 s;
+; (2) ZOD_AGA not set: no RTG, so the game must fall back to AGA itself;
+;     orig04 with the view scrolling (ZOD_TOUR), 30 s.
+; Software (-o): no GL without RTG.
+; LIMIT 900
+; MACHINE aga
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_AGA_CHECK on
+SetEnv ZOD_AGA pal
+Echo "=== AGA (ZOD_AGA), orig01, still ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod ags 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-ags.done
+Type DEV:Test/zod-ags.log >>DEV:Test/auto.log
+UnSetEnv ZOD_AGA
+SetEnv ZOD_TOUR on
+Echo "=== no RTG, no ZOD_AGA: the fallback; orig04, tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod agt 30 -o -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-agt.done
+Type DEV:Test/zod-agt.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_AGA_CHECK
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

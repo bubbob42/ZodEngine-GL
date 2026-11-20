@@ -46,6 +46,7 @@
 #include "amiga_startup.h"
 #include "ammx.h"
 #include "fineclock.h"
+#include "zod_aga.h"
 
 #ifndef DISABLE_OPENGL
 #include <dos/var.h>
@@ -146,6 +147,8 @@ static SDL_VideoInfo video_info;
 static SDL_PixelFormat video_format;
 
 static int screen_bpp = 0;        /* Tiefe des RTG-Schirms */
+static int aga_aktiv = 0;         /* the AGA screen (zod_aga.cpp) instead of RTG */
+static int aga_dy = 0;            /* its rows above the picture */
 static int screen_swapped = 0;    /* 16 Bit byte-vertauscht (RGB16PC) */
 
 static int mouse_x = 0, mouse_y = 0;
@@ -292,6 +295,8 @@ static void close_all(void)
 		screen_ptr = 0;
 	}
 
+	aga_aktiv = 0;
+
 	if(KeymapBaseOwn)
 	{
 		CloseLibrary(KeymapBaseOwn);
@@ -414,6 +419,8 @@ void zod_flip_report(void)
 {
 	const unsigned long f = zod_fineclock_freq();
 
+	zod_aga_report();
+
 	if(!f || !flip_bilder) return;
 
 	/* Ticks -> us, ohne Ueberlauf. */
@@ -471,11 +478,9 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	{
 		CyberGfxBase = OpenLibrary((CONST_STRPTR)CYBERGFXNAME, 41L);
 
+		/* no RTG: the AGA screen is the way left (zod_aga.cpp) */
 		if(!CyberGfxBase)
-		{
-			ZLOG("Schirm: cybergraphics.library nicht zu oeffnen -- RTG noetig\n");
-			return 0;
-		}
+			ZLOG("Schirm: cybergraphics.library nicht zu oeffnen -- kein RTG, AGA wird versucht\n");
 	}
 
 	if(!KeymapBaseOwn)
@@ -503,19 +508,34 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	ULONG id = INVALID_ID;
 	int got = 0;
 
-	for(int i = 0; i < n && id == INVALID_ID; i++)
+	/* AGA (docs/concept-aga.md): asked for (ZOD_AGA), or no RTG at all */
+	int use_aga = zod_aga_wanted() || !CyberGfxBase;
+
+	for(int i = 0; !use_aga && i < n && id == INVALID_ID; i++)
 	{
 		id = find_mode(w, h, want[i]);
 
 		if(id != INVALID_ID) got = want[i];
 	}
 
-	if(id == INVALID_ID)
+	if(!use_aga && id == INVALID_ID)
 	{
-		ZLOG("Schirm: kein RTG-Modus fuer %dx%d gefunden\n", w, h);
-		return 0;
+		ZLOG("Schirm: kein RTG-Modus fuer %dx%d gefunden -- AGA wird versucht\n", w, h);
+		use_aga = 1;
 	}
 
+	if(use_aga)
+	{
+		screen_ptr = zod_aga_open(w, h, &aga_dy);
+
+		if(!screen_ptr) return 0;
+
+		aga_aktiv = 1;
+		screen_bpp = 8;
+		screen_swapped = 0;
+	}
+	else
+	{
 	ULONG err = 0;
 	struct TagItem sa[] = {
 		{ SA_DisplayID,  id },
@@ -545,10 +565,13 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	ULONG pixfmt = GetCyberMapAttr(screen_ptr->RastPort.BitMap, CYBRMATTR_PIXFMT);
 
 	screen_swapped = (pixfmt == PIXFMT_RGB16PC || pixfmt == PIXFMT_RGB15PC);
+	}
 
+	/* on AGA the window covers the picture's rows: the mouse's window
+	 * coordinates are the picture's */
 	struct TagItem wa[] = {
 		{ WA_CustomScreen, (ULONG)screen_ptr },
-		{ WA_Left, 0 }, { WA_Top, 0 },
+		{ WA_Left, 0 }, { WA_Top, (ULONG)(aga_aktiv ? aga_dy : 0) },
 		{ WA_Width, (ULONG)w }, { WA_Height, (ULONG)h },
 		{ WA_Flags, WFLG_BACKDROP | WFLG_BORDERLESS | WFLG_ACTIVATE |
 		            WFLG_RMBTRAP | WFLG_REPORTMOUSE | WFLG_NOCAREREFRESH },
@@ -614,7 +637,8 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 		              : "Laeufe je Blockzeile (Vorgabe)");
 
 		/* the gap from this machine's own prices (ZOD_LUECKE fixes it) */
-		measure_gap(compose);
+		/* both lock the RTG bitmap: not on AGA */
+		if(!aga_aktiv) measure_gap(compose);
 
 		/* the block sums: on where a byte into the screen is dear;
 		 * ZOD_FLIP_SUMS=ein / aus / pruefen. A new screen: record all. */
@@ -633,7 +657,7 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 
 		if(GetVar((CONST_STRPTR)"ZOD_COPYBENCH", (STRPTR)wahl, sizeof(wahl), 0) > 0
 		   && (wahl[0] == '1' || wahl[0] == 'j' || wahl[0] == 'J'))
-			copy_bench(compose);
+			if(!aga_aktiv) copy_bench(compose);
 
 		char wunsch[160];
 
@@ -1605,6 +1629,21 @@ int SDL_Flip(SDL_Surface *screen)
 #endif
 
 	if(!screen || !screen_ptr) return -1;
+
+	/* AGA: the dirty blocks through chunky to planar into the planes
+	 * (zod_aga.cpp); the late pointer as on RTG */
+	if(aga_aktiv)
+	{
+		if(screen->format->BytesPerPixel != 1) return -1;
+
+		if(zod_zeiger_spaet()) zeiger_einsetzen(screen);
+
+		zod_aga_flip(screen, screen_ptr, aga_dy);
+
+		if(zod_zeiger_spaet()) zeiger_entfernen(screen);
+
+		return 0;
+	}
 
 	APTR base = 0;
 	ULONG bpr = 0;

@@ -105,7 +105,13 @@ phase: after the static AGA screen works.
 ## Milestones
 
 1. AGA screen + c2p of dirty blocks into the shown bitmap; FS-UAE
-   read-back check.
+   read-back check -- DONE 20.11. night (branch aga): port/amiga/zod_aga.cpp,
+   ZOD_AGA, and the fallback when there is no RTG mode;
+   tests/auto/AgaCheck on the Makefile's new AGA machine (the 040 machine
+   without its RTG card): orig01 still, 774 frames, 4850 of 19200 groups a
+   frame through c2p, 0 pixels differ in every frame read back; orig04
+   tour (the fallback), 595 frames, 18838 groups a frame (the whole view),
+   0 differ. SwSums (software RTG) still 0 differ.
 2. Double buffering; c2p in assembler.
 3. The flicker-free modes; ZodLaunch choice.
 4. Hardware scrolling (with the smooth-scrolling concept).
