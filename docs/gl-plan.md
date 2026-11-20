@@ -776,6 +776,17 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   tour): refresh uploads 513 / 494 against 1289 / 1270 ms a run, HUD 2163
   / 2492 against 2668 / 2675 us; 28.9 / 25.4 against 27.0 / 26.2 fps (the
   25.4 run: server 8.9 ms).
+- **The map items left out of the server's per-tick passes** (fps-night2,
+  ZOD_SRVMAPSKIP): the process and update passes ran over every object but
+  the rocks, ~300 of them map items (trees, crates, huts, flags, grenade
+  boxes) that all run ZObject's own ProcessServer -- ~10 cache misses each
+  a pass, for nothing. Now both passes run over non_mapitem_olist (the same
+  relative order). FS-UAE SrvMapCheck (ZOD_SRVMAPCHECK: both passes as
+  before, every map item's bytes compared before and after its
+  ProcessServer with its two time stamps put back): 0 of 1 184 284
+  changed; SwSums, NoGL, GLSmoke pass. A4000D (pansample, n7, m1 m0 m0 m1,
+  tour): server.process 2720 / 2552 against 4145 / 4086 us, update 204 /
+  194 against 482 / 465 us; 27.8 / 28.8 against 26.4 / 27.1 fps.
 - **Where the present's 3.7 ms go** (t37, A4000D tour): flush 0.12 ms,
   mglSwitchDisplay 3.7 ms, present_show 0.02 ms. The PC profile (4000
   samples) shows no waiting (0.0 %): the library works -- _ToVram 5.9 % of
