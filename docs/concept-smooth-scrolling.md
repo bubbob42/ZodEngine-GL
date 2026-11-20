@@ -169,7 +169,8 @@ the same run gives it.
 
 ### Switches
 
-- `ZOD_SMOOTH` = aus (default for the night) | scroll | always | messen
+- `ZOD_SMOOTH` = scroll (the default since the user's eye test, 21.11.) | aus
+  | always | messen
   (measure the blank clock and report the judder, change nothing: the
   "before" numbers with the same instrument).
 - `ZOD_SMOOTH_N` = 1..4 fixed, else chosen from the frames' work.

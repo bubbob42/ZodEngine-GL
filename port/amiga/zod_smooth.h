@@ -4,7 +4,8 @@
  * Smooth scrolling under RadeonGL's panned buffers
  * (docs/concept-smooth-scrolling.md).
  *
- * ZOD_SMOOTH=aus (default) | scroll | always | messen. With it on, the GL
+ * ZOD_SMOOTH=scroll (default since the user's eye test, 21.11.) | aus |
+ * always | messen; -X on|off from the launcher. With it on, the GL
  * screen's blank clock is measured once when the screen opens; then every
  * frame is held for N refreshes while the view moves (scroll) or always,
  * and the view's scroll clock is the blank the frame will be shown on.

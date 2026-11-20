@@ -297,6 +297,17 @@ int main(int argc, char **argv)
 
         strcpy(zod_aga_mode, starting_conditions.aga_mode);
         ZLOG("Schirm: AGA aus der Befehlszeile: %s\n", zod_aga_mode);
+
+        /* PAL HiRes Laced and DblPAL are 640x512: the view takes all of it
+         * (32 more map rows -- the user's choice, 21.11.); Productivity is
+         * 640x480 */
+        if(!strcmp(zod_aga_mode, "pal") || !strcmp(zod_aga_mode, "dblpal"))
+        {
+            starting_conditions.resolution_width = 640;
+            starting_conditions.resolution_height = 512;
+            starting_conditions.read_resolution = true;
+            ZLOG("Schirm: AGA %s -- the game runs at 640x512\n", zod_aga_mode);
+        }
     }
 #endif
 

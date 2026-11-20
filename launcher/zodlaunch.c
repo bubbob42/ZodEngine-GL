@@ -420,6 +420,7 @@ static void cfg_vorgaben(void)
     cfg.team        = 0;                 /* red                          */
     cfg.aufloesung  = aufloesung_platz("640x480");
     cfg.renderer    = 1;                 /* MiniGL, software without it    */
+    cfg.smooth      = TRUE;              /* even steps (the eye test)      */
     cfg.ton         = TRUE;
     cfg.musik       = FALSE;             /* Musik ist nicht mitgeliefert  */
     cfg.musikweg    = 0;                 /* AHI                           */

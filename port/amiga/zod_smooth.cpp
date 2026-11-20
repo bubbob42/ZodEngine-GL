@@ -40,14 +40,15 @@
 
 enum
 {
-	CAL_FRAMES = 200,       /* the measuring run: ~3.3 s at 60 Hz */
+	CAL_FRAMES = 128,       /* the measuring run: ~2 s at 60 Hz (on by default:
+	                           a black screen at every GL start) */
 	CAL_SKIP = 8,           /* the first switches fill the buffers */
 	WORK_WIN = 120,         /* frames looked at to choose N */
 	HIST = 8                /* refreshes a frame stayed up: 1..7, more */
 };
 
 static int mode = -1;               /* 0 aus, 1 scroll, 2 always, 3 messen */
-static int fix_n = 0;               /* ZOD_SMOOTH_N, 0 = chosen */
+static int fix_n = 2;               /* ZOD_SMOOTH_N: 1..4 fixed (default 2), 0 = chosen (auto) */
 static int clock_ok = 0;            /* the blank clock is measured */
 static double per = 0.0;            /* E-clock ticks a refresh */
 static unsigned long base_i = 0;    /* a blank: E-clock ticks ... */
@@ -91,7 +92,12 @@ static int read_mode(void)
 	if(zod_smooth_option >= 0) return zod_smooth_option ? 1 : 0;
 	const char *e = zod_env("ZOD_SMOOTH", buf, sizeof(buf));
 
-	if(!e || !*e) return 0;
+	/* on by default while the view moves (the user's eye test, 21.11.:
+	 * N = 2 fixed felt better than off and than the automatic N);
+	 * ZOD_SMOOTH=aus (or -X off) switches it off */
+	if(!e || !*e) return 1;
+	if(e[0] == 'a' && e[1] == 'u' && e[2] == 's') return 0;   /* aus */
+	if(e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
 	if(e[0] == 's' || e[0] == 'S') return 1;
 	if(e[0] == 'i' || e[0] == 'I' || (e[0] == 'a' && e[1] == 'l')) return 2;   /* immer, always */
 	if(e[0] == 'm' || e[0] == 'M') return 3;
@@ -487,7 +493,12 @@ void zod_smooth_open(void)
 	if(!mode) return;
 
 	e = zod_env("ZOD_SMOOTH_N", buf, sizeof(buf));
-	fix_n = (e && e[0] >= '1' && e[0] <= '4') ? e[0] - '0' : 0;
+	/* N = 2 fixed by default (the user's eye test); "auto" picks it from the
+	 * frames' work -- it flipped 17 times in 150 s on Hamiller and felt
+	 * "far worse" */
+	fix_n = 2;
+	if(e && e[0] >= '1' && e[0] <= '4') fix_n = e[0] - '0';
+	else if(e && (e[0] == 'a' || e[0] == 'A')) fix_n = 0;
 	if(fix_n) n_cur = fix_n;
 
 	freq = zod_fineclock_freq();
