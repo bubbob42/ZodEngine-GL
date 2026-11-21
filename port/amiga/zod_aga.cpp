@@ -36,6 +36,7 @@
 #include <proto/intuition.h>
 
 #include "zod_aga.h"
+#include "zod_c2p.h"
 #include "zod_log.h"
 #include "amiga_startup.h"
 #include "fineclock.h"
@@ -52,6 +53,7 @@ extern unsigned long zod_dirty_frames;
 static int check_on = -1;
 static int sums_on = -1;            /* ZOD_AGA_SUMS (default on) */
 static int dbuf_on = -1;            /* ZOD_AGA_DBUF (default on) */
+static int c2p32_on = -1;           /* ZOD_AGA_C2P32: longword writes (default on) */
 
 /* Two buffers (phase 2): the frame goes into the hidden bitmap, then
  * ChangeScreenBuffer shows it at the next blank -- no block is ever seen
@@ -325,6 +327,17 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 		/* -H fast: hardware scrolling into the shown bitmap */
 		if(zod_aga_hw_option == 2) dbuf_on = 0;
+	}
+
+	/* chip RAM written a longword at a time (docs/research-aga-speed.md):
+	 * the CPU gets as many chip accesses a second whatever their width, so
+	 * a longword moves twice the bytes; ZOD_AGA_C2P32=aus keeps the words */
+	if(c2p32_on < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_AGA_C2P32", buf, sizeof(buf));
+
+		c2p32_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
 	}
 
 	/* Margins as wide as the chip RAM allows (measured on voltago, the
@@ -623,34 +636,52 @@ static inline void transpose8(ULONG &x, ULONG &y)
 	x = t;
 }
 
-/* rows of 16-pixel groups g0..g1 from the compose rows into the planes */
-static void c2p_rows(const UBYTE *src, int spitch, UBYTE *const *pl, int bpr,
+/* one 16-pixel group as a word of each plane */
+static inline void c2p_word_out(const UBYTE *row, UBYTE *const *pl, long off, int g)
+{
+	unsigned short w[8];
+	int p;
+
+	c2p_16((const c2p_u32 *)(row + g * 16), w);
+	for(p = 0; p < 8; p++) *(UWORD *)(pl[p] + off + g * 2) = w[p];
+}
+
+/* rows of 16-pixel groups g0..g1 from the source rows into the planes:
+ * groups in pairs that start on an even group as one longword of each
+ * plane (the plane rows are 64-bit aligned), a group alone at either end
+ * as words; ZOD_AGA_C2P32=aus writes words only */
+static void c2p_rows(const UBYTE *src, int spitch, UBYTE *const *pl, long bpr,
                      int prow, int rows, int g0, int g1)
 {
-	int r, g;
+	int r;
 
 	for(r = 0; r < rows; r++)
 	{
-		const ULONG *s = (const ULONG *)(src + (long)r * spitch + g0 * 16);
-		long off = (long)(prow + r) * bpr + g0 * 2;
+		const UBYTE *row = src + (long)r * spitch;
+		const long off = (long)(prow + r) * bpr;
+		int g = g0;
 
-		for(g = g0; g <= g1; g++, off += 2)
+		if(c2p32_on)
 		{
-			ULONG a = s[0], b = s[1], c = s[2], d = s[3];
+			if(g & 1) { c2p_word_out(row, pl, off, g); g++; }
 
-			s += 4;
-			transpose8(a, b);   /* left 8 pixels: a planes 7..4, b planes 3..0 */
-			transpose8(c, d);   /* right 8 pixels */
+			for(; g < g1; g += 2)
+			{
+				c2p_u32 l[8];
 
-			*(UWORD *)(pl[7] + off) = (UWORD)(((a >> 16) & 0xFF00) | (c >> 24));
-			*(UWORD *)(pl[6] + off) = (UWORD)(((a >> 8) & 0xFF00) | ((c >> 16) & 0xFF));
-			*(UWORD *)(pl[5] + off) = (UWORD)((a & 0xFF00) | ((c >> 8) & 0xFF));
-			*(UWORD *)(pl[4] + off) = (UWORD)(((a << 8) & 0xFF00) | (c & 0xFF));
-			*(UWORD *)(pl[3] + off) = (UWORD)(((b >> 16) & 0xFF00) | (d >> 24));
-			*(UWORD *)(pl[2] + off) = (UWORD)(((b >> 8) & 0xFF00) | ((d >> 16) & 0xFF));
-			*(UWORD *)(pl[1] + off) = (UWORD)((b & 0xFF00) | ((d >> 8) & 0xFF));
-			*(UWORD *)(pl[0] + off) = (UWORD)(((b << 8) & 0xFF00) | (d & 0xFF));
+				c2p_32((const c2p_u32 *)(row + g * 16), l);
+				*(ULONG *)(pl[7] + off + g * 2) = l[7];
+				*(ULONG *)(pl[6] + off + g * 2) = l[6];
+				*(ULONG *)(pl[5] + off + g * 2) = l[5];
+				*(ULONG *)(pl[4] + off + g * 2) = l[4];
+				*(ULONG *)(pl[3] + off + g * 2) = l[3];
+				*(ULONG *)(pl[2] + off + g * 2) = l[2];
+				*(ULONG *)(pl[1] + off + g * 2) = l[1];
+				*(ULONG *)(pl[0] + off + g * 2) = l[0];
+			}
 		}
+
+		for(; g <= g1; g++) c2p_word_out(row, pl, off, g);
 	}
 }
 
@@ -721,10 +752,11 @@ static unsigned long check_all(const SDL_Surface *cs, UBYTE *const *pl, int bpr,
 	return differ;
 }
 
-/* block k (16x16 at gx, gy) of the compose surface into buffer b's planes,
- * when its pixels are not what they hold already; 1 = converted */
-static int block_out(const SDL_Surface *cs, UBYTE *const *pl, int bpr, int dy, int b,
-                     int gx, int gy, int rows)
+/* block k (16x16 at gx, gy) of the compose surface: does buffer b need it
+ * (its pixels are not what the buffer holds already)? The sums and the
+ * other buffer's stale mark are brought up to date as if it were written;
+ * the caller writes the blocks of a row together (need_out). */
+static int block_need(const SDL_Surface *cs, int b, int gx, int gy, int rows)
 {
 	const UBYTE *src = (const UBYTE *)cs->pixels + (long)gy * 16 * cs->pitch;
 	const long k = (long)gy * sums_gw + gx;
@@ -760,10 +792,33 @@ static int block_out(const SDL_Surface *cs, UBYTE *const *pl, int bpr, int dy, i
 	else if(dbuf && stale[b ^ 1])
 		stale[b ^ 1][k] = 1;    /* without sums: the other one gets it too */
 
-	c2p_rows(src, cs->pitch, pl, bpr, gy * 16 + dy, rows, gx, gx);
-	st_groups += (unsigned long)rows;
-
 	return 1;
+}
+
+/* the needed groups of block row gy into the planes, a run at a time (so
+ * two neighbours that are both needed go as longwords) */
+static unsigned long need_out(const SDL_Surface *cs, UBYTE *const *pl, long bpr, int dy,
+                              int gy, int rows, const UBYTE *need)
+{
+	const UBYTE *src = (const UBYTE *)cs->pixels + (long)gy * 16 * cs->pitch;
+	unsigned long bytes = 0;
+	int g = 0;
+
+	while(g < sums_gw)
+	{
+		int e;
+
+		if(!need[g]) { g++; continue; }
+
+		for(e = g; e + 1 < sums_gw && need[e + 1]; e++) ;
+
+		c2p_rows(src, cs->pitch, pl, bpr, gy * 16 + dy, rows, g, e);
+		st_groups += (unsigned long)(e - g + 1) * rows;
+		bytes += 16UL * rows * (e - g + 1);
+		g = e + 1;
+	}
+
+	return bytes;
 }
 
 /* 16 bytes of the picture (s, any alignment) against 16 of the shadow (d,
@@ -958,9 +1013,16 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 			}
 			else if(run >= 0)
 			{
-				c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, run, g - 1);
-				st_groups += (unsigned long)(g - run);
-				bytes += 16UL * (g - run);
+				int ga = run, gb = g - 1;
+
+				/* longwords: the pair partners go along from the shadow,
+				 * which holds exactly what the planes hold (the bitmap's
+				 * row is a multiple of 64 pixels: the partner exists) */
+				if(c2p32_on) { ga &= ~1; gb |= 1; }
+
+				c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
+				st_groups += (unsigned long)(gb - ga + 1);
+				bytes += 16UL * (gb - ga + 1);
 				run = -1;
 			}
 		}
@@ -1051,6 +1113,9 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 	{
 		const int rows = (h - y0 < block) ? h - y0 : block;
 		const int n = zod_dirty_out_runs(y0 >> schub, rx0, rx1, MAX_RUNS);
+		UBYTE rowneed[64];
+
+		memset(rowneed, 0, sizeof(rowneed));
 
 		for(i = 0; i < n; i++)
 		{
@@ -1067,8 +1132,7 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 				for(g = x0 >> 4; g <= (x1 >> 4); g++)
 				{
 					if(stale[b]) stale[b][(long)(y0 >> 4) * sums_gw + g] = 0;
-					if(block_out(cs, pl, bm->BytesPerRow, dy, b, g, y0 >> 4, rows))
-						bytes += 16UL * rows;
+					if(block_need(cs, b, g, y0 >> 4, rows)) rowneed[g] = 1;
 				}
 
 				continue;
@@ -1080,26 +1144,38 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 			st_groups += (unsigned long)((x1 >> 4) - (x0 >> 4) + 1) * rows;
 			bytes += (unsigned long)((x1 >> 4) - (x0 >> 4) + 1) * 16 * rows;
 		}
+
+		if(block == 16 && (sums[b] || dbuf))
+			bytes += need_out(cs, pl, bm->BytesPerRow, dy, y0 >> 4, rows, rowneed);
 	}
 
 	/* the blocks the other buffer got last time and this one has not */
 	if(dbuf && stale[b])
 	{
-		const long nk = (long)sums_gw * sums_gh;
-		long k;
+		int gy, gx;
 
-		for(k = 0; k < nk; k++)
-			if(stale[b][k])
+		for(gy = 0; gy < sums_gh; gy++)
+		{
+			const int rows = (h - gy * 16 < 16) ? h - gy * 16 : 16;
+			UBYTE rowneed[64];
+			int any = 0;
+
+			memset(rowneed, 0, sizeof(rowneed));
+
+			for(gx = 0; gx < sums_gw; gx++)
 			{
-				const int gy = (int)(k / sums_gw);
-				const int rows = (h - gy * 16 < 16) ? h - gy * 16 : 16;
+				const long k = (long)gy * sums_gw + gx;
+
+				if(!stale[b][k]) continue;
 
 				stale[b][k] = 0;
 				st_stale++;
 
-				if(block_out(cs, pl, bm->BytesPerRow, dy, b, (int)(k % sums_gw), gy, rows))
-					bytes += 16UL * rows;
+				if(block_need(cs, b, gx, gy, rows)) { rowneed[gx] = 1; any = 1; }
 			}
+
+			if(any) bytes += need_out(cs, pl, bm->BytesPerRow, dy, gy, rows, rowneed);
+		}
 	}
 
 	zod_dirty_bytes += bytes;
