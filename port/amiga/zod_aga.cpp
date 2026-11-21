@@ -1300,24 +1300,35 @@ void zod_aga_panel_palette(ULONG *table)
 
 int zod_aga_split_row(void) { return pnl_scr ? split_b : 0; }
 
-/* the pointer on the picture: the map screen's mouse below its rows is on
- * the panel screen (or in the blank rows between: the map's last row) */
+/* The pointer on the picture. The panel screen is in front of the map
+ * screen (its child), and Intuition keeps the front screen's mouse position
+ * current wherever the pointer is (-187 above it, measured on voltago),
+ * while the map screen's own stops at its last value inside it once the
+ * pointer is on the panel. So only the panel's is read: at or below its
+ * top the panel's rows, above it the map screen's row (the same
+ * resolution), the blank rows between counting as the map's last row. */
 void zod_aga_mouse(struct Screen *map, int *x, int *y)
 {
-	*x = map->MouseX;
-	*y = map->MouseY;
+	int py;
 
-	if(!pnl_scr || *y < split_b) return;
-
-	if(pnl_scr->MouseY >= 0 && pnl_scr->MouseY < PANEL_H)
+	if(!pnl_scr)
 	{
-		*x = pnl_scr->MouseX;
-		*y = split_b + pnl_scr->MouseY;
+		*x = map->MouseX;
+		*y = map->MouseY;
+		return;
 	}
-	else if(*y >= split_off)
-		*y = (*y - split_off < PANEL_H) ? split_b + (*y - split_off) : split_b + PANEL_H - 1;
+
+	*x = pnl_scr->MouseX;
+	py = pnl_scr->MouseY;
+
+	if(py >= 0)
+		*y = split_b + (py < PANEL_H ? py : PANEL_H - 1);
 	else
-		*y = split_b - 1;
+	{
+		const int my = py + split_off;   /* the row on the map screen */
+
+		*y = (my >= split_b) ? split_b - 1 : my;
+	}
 }
 
 /* a picture row as the map screen's mouse row (for warping the pointer) */
