@@ -1187,7 +1187,29 @@ Backlog, LAST (the user, 21.11. ~01:25: "ignore the center stutter for now
   and game time by where the view's middle is on an 8 x 8 grid of the map,
   and the frames of 31 ms work and more (an N = 2 slip); FS-UAE
   SlowMapCheck passes (14 331 frames in the cells against the bench's
-  14 332). Not run on Hamiller yet.
+  14 332).
+  Run 21.11. 02:23-02:28 (the rest of the backlog done or waiting for an
+  eye, an ear, a machine or the Z CD): two orig04 tours on Hamiller,
+  pansample, smooth N = 2, 60 s. Drawing (work - server - game) and the
+  share of frames of 31 ms work and more, both runs together, rows 1..6 x
+  columns 1..6 of the 8 x 8 grid (the outer ring is never the view's
+  middle):
+
+      row 1: start (map upload, the bots' start)  16.8 16.4 16.4 15.6  start
+      row 2: 17.8 [18 %] 18.6 [20] 20.6 [36] 20.9 [33] 25.2 [27] 22.9 [30]
+      row 3: 19.1 [14]   17.3 [15] 18.3 [8]  18.0 [13] 16.5 [9]  16.7 [16]
+      row 4: 15.7 [10]   16.3 [8]  17.6 [9]  18.6 [11] 16.7 [7]  16.6 [16]
+      row 5: 17.2 [16]   18.8 [13] 16.7 [12] 15.4 [8]  14.9 [13] 12.8 [9]
+      row 6: 15.9 [17]   16.1 [12] 14.5 [7]  14.7 [8]  14.5 [6]  13.7 [9]
+
+  The centre (rows 3..4, columns 3..4: 17.6..18.6 ms, 8..13 % slips) is
+  not slower than the map around it. The slow band is row 2 (drawing up to
+  25 ms, server ~10 ms against ~4.5 elsewhere, 20..36 % slips) in both
+  runs -- but the tour always passes it 6..12 s into the match, so place
+  and the match's early load cannot be told apart yet; a tour starting
+  elsewhere would. In a red-against-blue bot match the fights also tend to
+  be in the middle, where the user scrolled by hand: "the centre" may be
+  "where the fight is" (server time and units on screen), not the map.
 
 ## 6. Open questions (recommendation first)
 
