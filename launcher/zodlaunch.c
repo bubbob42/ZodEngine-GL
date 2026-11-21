@@ -74,6 +74,8 @@
  * fuehren. */
 #include <proto/muimaster.h>
 
+#define ZOD_MUI_VMIN 19   /* MUI 3.8 */
+
 #endif /* !ZOD_LAUNCH_TEST */
 
 #include <stdio.h>
@@ -1142,11 +1144,14 @@ int main(int argc, char **argv)
      * kann das Feld den Namen des eingestellten Modus nicht zeigen. */
     ahi_oeffnen();
 
-    MUIMasterBase = OpenLibrary(MUIMASTER_NAME, MUIMASTER_VMIN);
+    /* MUI 3.8 (muimaster 19) is what ZodLaunch is written for; the SDK's
+     * MUIMASTER_VMIN is 20 (MUI 4/5) in the cross toolchain, which turned
+     * an A4000T with MUI 3.8 away ("muimaster.library 20 or newer"). */
+    MUIMasterBase = OpenLibrary(MUIMASTER_NAME, ZOD_MUI_VMIN);
     if(!MUIMasterBase)
     {
         Printf("ZodLaunch: muimaster.library %ld or newer is required.\n",
-               (LONG)MUIMASTER_VMIN);
+               (LONG)ZOD_MUI_VMIN);
         return RETURN_FAIL;
     }
 
