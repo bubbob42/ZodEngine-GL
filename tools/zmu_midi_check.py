@@ -28,6 +28,12 @@ of first use onto channels 2..9, the rhythm on 10; programs through the
 table mt32_prog in port/amiga/musik_camd.c (read from there); drum keys
 outside 35..76 dropped.
 
+With --real: the user's own songs (copied from their install for the run,
+never into the repo) instead of the test songs. A part's song is then
+found by its notes -- every song and every place its first eight notes
+occur are tried, the one that keeps the longest run in order wins -- and
+the test songs' drum key 81 is not asked for.
+
 Prints what matched, the first difference, and the timing.
 """
 import argparse
@@ -183,12 +189,53 @@ def is_burst(msgs, i, ctl):
     return True
 
 
+def run_in_order(ref, start, msgs_p, limit=400):
+    """how many of the part's first messages follow the song from `start`
+    (programs and volumes before the first match skipped, CC7 by its
+    controller alone)"""
+    r = start
+    n = 0
+    for t, b in msgs_p[:limit]:
+        if r >= len(ref):
+            break
+        want = ref[r][1]
+        if b == want or (want[0] & 0xf0 == 0xb0 and b[0] == want[0] and b[1] == 7):
+            r += 1
+            n += 1
+        elif n == 0 and b[0] & 0xf0 in (0xc0, 0xb0):
+            continue
+        else:
+            break
+    return n
+
+
+def find_real(real, first, msgs_p):
+    """--real: (song name, its reference, the start) of the place the part's
+    first notes occur at that keeps the longest run in order"""
+    best = (None, None, None, -1)
+    for name, ref, ref_notes in real:
+        for q in range(len(ref_notes) - len(first)):
+            if ref[ref_notes[q]][1] != first[0]:
+                continue
+            if [ref[ref_notes[q + z]][1] for z in range(len(first))] != first:
+                continue
+            st = ref_notes[q]
+            while st > 0 and ref[st - 1][0] == ref[st][0]:
+                st -= 1
+            n = run_in_order(ref, st, msgs_p)
+            if n > best[3]:
+                best = (name, ref, st, n)
+    return best[:3]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('capture')
     ap.add_argument('songs')
     ap.add_argument('--min-notes', type=int, default=50)
     ap.add_argument('--mt32', action='store_true')
+    ap.add_argument('--real', action='store_true',
+                    help="the user's songs: find each part's song by its notes")
     ap.add_argument('--log', help="the game's log (dist/Test/auto.log): its own "
                     "lateness line 'events late ... at most N us' must stay under 5 ms")
     a = ap.parse_args()
@@ -196,9 +243,16 @@ def main():
     mt = mt32_table(os.path.join(here, '..', 'port', 'amiga', 'musik_camd.c')) if a.mt32 else None
 
     songs = {}      # the first program on the first melodic output channel -> song
+    real = []       # --real: (name, ref, the indexes of its note messages)
     for n, name in enumerate(NAMES, 1):
-        ev = zmu_events(open(os.path.join(a.songs, name + '.zmu'), 'rb').read())
+        path = os.path.join(a.songs, name + '.zmu')
+        if a.real and not os.path.exists(path):
+            continue
+        ev = zmu_events(open(path, 'rb').read())
         songs[mt[10 + n] if mt else 10 + n] = (name, ev)
+        if a.real:
+            ref = reference(ev, mt32=mt)
+            real.append((name, ref, [r for r, x in enumerate(ref) if x[1][0] & 0xf0 in (0x80, 0x90)]))
     first_ch = 1 if a.mt32 else 0
 
     msgs = decode(read_capture(a.capture))
@@ -227,7 +281,7 @@ def main():
     if a.mt32 and drum_hi:
         print('FAIL: %d drum keys outside 35..76 went out' % drum_hi)
         ok = False
-    elif not a.mt32 and drum_hi == 0:
+    elif not a.mt32 and not a.real and drum_hi == 0:
         print('FAIL: no drum key 81 went out (General MIDI plays it)')
         ok = False
     else:
@@ -270,28 +324,36 @@ def main():
                 if k == 'VOL':
                     vols = {x for x in range(129) if scaled(100, x) == v}
             continue
-        prog0 = [m for m in msgs_p if m[1][0] == 0xc0 | first_ch]
-        if not prog0 or prog0[0][1][1] not in songs:
-            print('FAIL: part %d: %d notes but no song program on channel %d' % (pi, len(notes), first_ch + 1))
-            ok = False
-            continue
-        name, ev = songs[prog0[0][1][1]]
-        ref = reference(ev, mt32=mt)
-
-        # where in the song: the first eight note messages, found in the
-        # song; the part plays from the first message of that step
         first = [m[1] for m in notes[:8]]
-        ref_notes = [r for r, x in enumerate(ref) if x[1][0] & 0xf0 in (0x80, 0x90)]
-        start = None
-        for q in range(len(ref_notes) - len(first)):
-            if [ref[ref_notes[q + z]][1] for z in range(len(first))] == first:
-                start = ref_notes[q]
-                break
-        if start is None:
-            print('FAIL: part %d (%s): its first notes %s are not in the song'
-                  % (pi, name, ' '.join(f.hex() for f in first)))
-            ok = False
-            continue
+        if a.real:
+            name, ref, start = find_real(real, first, msgs_p)
+            if start is None:
+                print('FAIL: part %d: its first notes %s are in none of the songs'
+                      % (pi, ' '.join(f.hex() for f in first)))
+                ok = False
+                continue
+        else:
+            prog0 = [m for m in msgs_p if m[1][0] == 0xc0 | first_ch]
+            if not prog0 or prog0[0][1][1] not in songs:
+                print('FAIL: part %d: %d notes but no song program on channel %d' % (pi, len(notes), first_ch + 1))
+                ok = False
+                continue
+            name, ev = songs[prog0[0][1][1]]
+            ref = reference(ev, mt32=mt)
+
+            # where in the song: the first eight note messages, found in the
+            # song; the part plays from the first message of that step
+            ref_notes = [r for r, x in enumerate(ref) if x[1][0] & 0xf0 in (0x80, 0x90)]
+            start = None
+            for q in range(len(ref_notes) - len(first)):
+                if [ref[ref_notes[q + z]][1] for z in range(len(first))] == first:
+                    start = ref_notes[q]
+                    break
+            if start is None:
+                print('FAIL: part %d (%s): its first notes %s are not in the song'
+                      % (pi, name, ' '.join(f.hex() for f in first)))
+                ok = False
+                continue
         while start > 0 and ref[start - 1][0] == ref[start][0]:
             start -= 1
 

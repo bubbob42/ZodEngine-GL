@@ -1,0 +1,47 @@
+; RoundEndMusic -- RoundEnd with the user's own songs (the user on Hamiller,
+; 21.11.: the General MIDI music "ran haywire shortly after the fort fell").
+; The songs are not in the install or the repo: for the run they are copied
+; from the user's install into dist/Test/real-songs (DEV:Test/real-songs),
+; and deleted again afterwards. Each round ends 40 s after its map was
+; loaded (ZOD_ROUNDEND), the next map follows 10 s later (maps_round.txt:
+; orig01, orig02); the danger levels jump within the songs as they do in a
+; game. Music through camd (-M gm), captured raw from the serial port.
+; (1) GL (null card), the next map paused, the texture heap capped at 16 MB
+;     as on Hamiller (RadeonGLHeapMax);
+; (2) software (-o), the next map unpaused (the danger levels keep jumping).
+; Then on the Mac: tools/zmu_midi_check.py build/autotest/RoundEndMusic.serial
+;      dist/Test/real-songs --real --log build/autotest/RoundEndMusic.out
+; LIMIT 900
+; SERIAL_RAW
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+MakeDir >NIL: DEV:Zod/music
+Copy DEV:Test/real-songs/#?.zmu DEV:Zod/music/ QUIET
+List DEV:Zod/music/#?.zmu >>DEV:Test/auto.log
+Echo "use_database=0" >DEV:Test/psettings_pause.txt
+Echo "use_mysql=0" >>DEV:Test/psettings_pause.txt
+Echo "require_login=0" >>DEV:Test/psettings_pause.txt
+Echo "start_map_paused=1" >>DEV:Test/psettings_pause.txt
+Echo "bots_start_ignored=0" >>DEV:Test/psettings_pause.txt
+Echo "0" >DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig01.map" >>DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig02.map" >>DEV:Test/maps_round.txt
+SetEnv ZOD_ROUNDEND 40
+Echo "=== (1) GL (null card), 16 MB heap, the next map paused ===" >>DEV:Test/auto.log
+SetEnv RadeonGLHeapMax 16
+Run >NIL: Execute DEV:Test/RunZodRound rm1 110 DEV:Test/psettings_pause.txt -l DEV:Test/maps_round.txt
+Execute DEV:Test/WaitDone DEV:Test/zod-rm1.done
+Type DEV:Test/zod-rm1.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+Echo "=== (2) software, the next map unpaused ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodRound rm2 110 psettings_nopause.txt -o -l DEV:Test/maps_round.txt
+Execute DEV:Test/WaitDone DEV:Test/zod-rm2.done
+Type DEV:Test/zod-rm2.log >>DEV:Test/auto.log
+UnSetEnv ZOD_ROUNDEND
+Delete >NIL: DEV:Zod/music/#?.zmu
+Delete >NIL: DEV:Zod/music
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

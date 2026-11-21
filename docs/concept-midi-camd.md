@@ -183,3 +183,38 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
 
 - PrismaMIDI (GM) and the mt32-pi in MT-32 mode, one battle song each,
   against the mixer's own rendering.
+
+## "Haywire shortly after the fort fell" (Hamiller, 21.11. afternoon)
+
+The user, General MIDI on Hamiller: after the fort fell the picture smeared
+(the GL map texture refused at the map change, fixed in a44cc48) and the
+music "ran haywire". What is known:
+
+- **The overshoot fix (a3aa42e) was not the user's case.** A jump past the
+  song's end made the player race; that came from the test songs, which
+  are a few seconds long. The user's songs are as long as the Zod Engine's
+  Ogg soundtrack the jump table was written for (AD1 371.2 s against the
+  table's 371.47, AV1 361.0 / 361.34, AJ1 342.4 / 342.77, AA1 371.2,
+  AC1 361.0), so every jump lands inside them. The fix stays: a jump must
+  never send the player racing.
+- **Zod's MIDI is right with the user's songs.** FS-UAE, the songs copied
+  from the user's install for the run only (never into the repo):
+  `tests/auto/RoundEndMusic` (two round ends, three maps, GL with the
+  16 MB heap and software) and `tests/auto/MidiRealJumps` (a jump to the
+  desert's FORT place 335.77 s, with the loop after it; one to its CALM
+  place 60 s, where the music goes 15 s after one's own fort fell). Every
+  message in order, every note off, the player's own lateness at most
+  4 ms. `tools/zmu_midi_check.py --real` finds a part's song by its notes.
+- **Not it on Hamiller:** the round-end films (no `cuts` drawer, no
+  jvplay there) and the effects on the Prisma card (`ahimodus=0x00020008`,
+  a Paula mode).
+- **Open -- the way to the synth.** Hamiller's ZodLaunch links to
+  `out.0`, camd's serial port. The synth hears that only through
+  PrismaControl's route (out.0 -> prisma.out.0, a child process at
+  priority 0 next to a busy game at priority 0), and the synth took the
+  card at priority 10 for about a second in the driver of the afternoon
+  (since then at priority 0). Both can delay or bunch the music; neither
+  is measured yet. For the retest: Zod's log (`ZOD_LOG=RAM:zod-gl.log`)
+  and the driver's (`PrismaSynth/Log=RAM:prisma.log`, read when camd opens
+  a prisma port), on Hamiller and Arkon. Linking to `prisma.out.0`
+  directly leaves out the serial port and the route (open question 1).

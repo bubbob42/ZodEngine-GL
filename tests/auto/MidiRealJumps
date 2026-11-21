@@ -1,0 +1,36 @@
+; MidiRealJumps -- the danger levels' jumps with the user's own songs (the
+; user on Hamiller, 21.11.: the General MIDI music "ran haywire shortly
+; after the fort fell"). Like MidiCamd, but with the songs of the user's
+; install, copied into dist/Test/real-songs for the run (never into the
+; repo) and deleted again afterwards. orig01 is a desert map (AD1); 8 s
+; into it a jump as ZMusicEngine makes them (ZOD_MIDI_TESTJUMP):
+; (1) to the desert's FORT place 335.77 s (step 40292): 35 s before the
+;     song's end, so the loop back to its start follows in the same run;
+; (2) to the desert's CALM place 60 s (step 7200) -- where the music goes
+;     15 s after one's own fort fell.
+; Then on the Mac: tools/zmu_midi_check.py build/autotest/MidiRealJumps.serial
+;      dist/Test/real-songs --real --log build/autotest/MidiRealJumps.run
+; LIMIT 600
+; SERIAL_RAW
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+MakeDir >NIL: DEV:Zod/music
+Copy DEV:Test/real-songs/#?.zmu DEV:Zod/music/ QUIET
+Echo "=== (1) software, orig01, a jump to the FORT place 335.77 s ===" >>DEV:Test/auto.log
+SetEnv ZOD_MIDI_TESTJUMP 40292@8
+Run >NIL: Execute DEV:Test/RunZodMidi rj1 60 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rj1.done
+Type DEV:Test/zod-rj1.log >>DEV:Test/auto.log
+Echo "=== (2) software, orig01, a jump to the CALM place 60 s ===" >>DEV:Test/auto.log
+SetEnv ZOD_MIDI_TESTJUMP 7200@8
+Run >NIL: Execute DEV:Test/RunZodMidi rj2 40 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rj2.done
+Type DEV:Test/zod-rj2.log >>DEV:Test/auto.log
+UnSetEnv ZOD_MIDI_TESTJUMP
+Delete >NIL: DEV:Zod/music/#?.zmu
+Delete >NIL: DEV:Zod/music
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
