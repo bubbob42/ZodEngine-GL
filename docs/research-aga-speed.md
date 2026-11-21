@@ -78,6 +78,20 @@ units are mostly contiguous, so few pairs carry an unchanged half.
 - System-friendly, both compilers, no look change; FS-UAE's read-back
   check proves it the same way as today.
 
+**DONE 21.11. ~07:15 (ZOD_AGA_C2P32, default on), measured 07:25-07:33**
+(the same binary, ZOD_AGA_C2P32 on / off, orig04 tour 640x512, 30 s,
+l w w l, then one buffer l w):
+
+| machine | two buffers: longwords | words | one buffer: longwords | words |
+|---|---|---|---|---|
+| PiStorm's A1200 | **21.4 / 21.5 fps** (34 ms AGA work) | 12.0 / 12.0 (69 ms) | **29.5** (27 ms) | 17.3 (49 ms) |
+| voltago (A4000D 060) | **8.4 / 8.4** (67..69 ms) | 5.6 / 5.6 (110..112 ms) | **10.1** (55 ms) | 7.4 (80 ms) |
+
++78 % / +70 % on the PiStorm, +50 % / +36 % on voltago -- more than the
+estimate: the work a frame halves on the PiStorm (the CPU's part of the
+c2p is small there), on voltago it drops by ~40 ms. FS-UAE AgaCheck and
+AgaHwScroll: 0 pixels differ in every run.
+
 ### 3.2 Fewer planes for the whole game (6 = 64 colours) -- possible, changes the look
 
 - Gains twice: 25 % fewer bytes to write, and the display leaves more slots
