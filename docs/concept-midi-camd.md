@@ -158,6 +158,16 @@ cluster field is ghosted unless a camd entry is chosen. The game gets
   only as the fallback. Not checked yet: there is no Z CD or image on the
   Mac (z.pac searched for); with the CD (or ZExtract on the Amiga reading
   it) the MT-32 files can be looked for and carried into ZMU1 as SysEx.
+- 21.11. ~07:35, the user: "cd install archive is on icloud drive
+  Amiga/setup_z...". That is GOG's setup_z_2.3.0.8.exe (Inno Setup,
+  322 MB), looked into with innoextract: it is the 2014 Windows remaster
+  (Z.exe with SDL2/SDL2_mixer), its music recorded audio -- Ogg tracks
+  (AA16, aC16, aJ16 planet themes, ipBATTLE16, ipWIN, ipLOSE,
+  ipOPTIONS16) plus speech in de/en/... folders. No XMI, no MIDI, no Miles
+  driver or timbre files, and Z.exe has no MT-32/Roland/MIDI strings. So
+  there is no original MT-32 data to take; the GM -> MT-32 program table
+  stays (the user's decision 6 fallback), to be set by ear. The original
+  DOS CD (with the XMIs ZMU1 came from) would still be worth a look.
 
 ## Open questions (recommendation first)
 

@@ -214,7 +214,11 @@ static const struct { const char *name; ULONG id; const char *title; } aga_modes
 {
 	{ "pal",    PAL_MONITOR_ID | HIRESLACE_KEY, "PAL HiRes Laced" },
 	{ "dblpal", DBLPAL_MONITOR_ID | DBLPALHIRESFF_KEY, "DblPAL HiRes flicker-free" },
-	{ "prod",   VGA_MONITOR_ID | VGAPRODUCT_KEY, "Multiscan Productivity" }
+	{ "prod",   VGA_MONITOR_ID | VGAPRODUCT_KEY, "Multiscan Productivity" },
+	/* PAL HiRes Laced with a 400-row picture, centred: 22 % fewer rows to
+	 * convert and 112 fewer rows of display fetches (docs/research-aga-
+	 * speed.md: +9 % chip bandwidth) -- the faster choice, less map shown */
+	{ "pal400", PAL_MONITOR_ID | HIRESLACE_KEY, "PAL HiRes Laced (400 rows, centred)" }
 };
 
 /* the mode asked for: its table index (0 = PAL HiRes Laced) */
@@ -277,7 +281,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	struct Screen *scr;
 
 	/* a flicker-free mode without its monitor driver: PAL HiRes Laced */
-	if(mi != 0 && (ModeNotAvailable(id) || !mode_size(id, &sw, &sh) || sw != 640 || sh < h))
+	if(mi != 0 && mi != 3 && (ModeNotAvailable(id) || !mode_size(id, &sw, &sh) || sw != 640 || sh < h))
 	{
 		ZLOG("AGA: %s is not available here (monitor driver in DEVS:Monitors?) -- "
 		     "PAL HiRes Laced\n", aga_modes[mi].title);
@@ -286,6 +290,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	}
 
 	if(mi == 0) { sw = 640; sh = 512; }
+	if(mi == 3) { sw = 640; sh = 400; }   /* pal400: centred in the 512 rows */
 
 	if(hw_on < 0)
 	{
@@ -433,13 +438,20 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	}
 
 	{
-		/* hardware scrolling: the bitmap is larger than the display */
-		struct Rectangle dclip = { 0, 0, (WORD)(sw - 1), (WORD)(sh - 1) };
+		/* the display window: the whole mode, or for pal400 the 400 rows in
+		 * the middle of PAL HiRes Laced's 512 (the screen placed there, its
+		 * clip the same rows -- with hardware scrolling the bitmap is larger
+		 * than the window, so the clip is what sizes it) */
+		const int top = (mi == 3) ? (512 - sh) / 2 : 0;
+		struct Rectangle dclip = { 0, (WORD)top, (WORD)(sw - 1), (WORD)(top + sh - 1) };
 		struct TagItem sa[] = {
 			{ SA_DisplayID,   id },
 			{ SA_Width,       (ULONG)(hw ? hw_bw : sw) },
 			{ SA_Height,      (ULONG)(hw ? hw_bh : sh) },
-			{ hw ? SA_DClip : TAG_IGNORE, (ULONG)&dclip },
+			{ (hw || top) ? SA_DClip : TAG_IGNORE, (ULONG)&dclip },
+			{ top ? SA_Top : TAG_IGNORE, (ULONG)top },
+			/* nothing else on the display above or below a shorter picture */
+			{ top ? SA_Exclusive : TAG_IGNORE, TRUE },
 			{ SA_Depth,       8 },
 			{ SA_Type,        CUSTOMSCREEN },
 			{ SA_Quiet,       TRUE },
@@ -470,7 +482,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 			sa[1].ti_Data = (ULONG)sw;
 			sa[2].ti_Data = (ULONG)sh;
-			sa[3].ti_Tag = TAG_IGNORE;
+			if(!top) sa[3].ti_Tag = TAG_IGNORE;   /* pal400 keeps its window */
 			err = 0;
 			scr = OpenScreenTagList(0, sa);
 		}
@@ -611,6 +623,10 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	     aga_modes[mi].title, sw, sh,
 	     w, h, *dy, dbuf ? "two buffers (ChangeScreenBuffer)" : "into the shown bitmap",
 	     check_on ? "; every frame read back (ZOD_AGA_CHECK)" : "");
+
+	if(mi == 3)
+		ZLOG("AGA: the screen at row %d of the display, %d rows shown (exclusive)\n",
+		     (int)scr->TopEdge, (int)scr->ViewPort.DHeight);
 
 	if(hw)
 		ZLOG("AGA: hardware scrolling (ZOD_AGA_HWSCROLL): a %dx%d bitmap (%ld KB of chip RAM a buffer), "

@@ -13,7 +13,9 @@
 ; (5) margins 1024x512 (a ~4 MB bitmap: cannot fit in 2 MB of chip RAM):
 ;     the game must fall back to the normal screen without hardware
 ;     scrolling ("did not fit") and still show every frame right, 15 s.
-; Without given margins (1, 2, 4) they come from the free chip RAM.
+; (6) -C pal400 (640x400 centred), orig04 tour, the default (two buffers),
+;     20 s.
+; Without given margins (1, 2, 4, 6) they come from the free chip RAM.
 ; LIMIT 1200
 ; MACHINE aga
 FailAt 1000
@@ -48,6 +50,12 @@ Run >NIL: Execute DEV:Test/RunZod hwf 15 -o -C pal -m Data/Campaing/Z_original/p
 Execute DEV:Test/WaitDone DEV:Test/zod-hwf.done
 Type DEV:Test/zod-hwf.log >>DEV:Test/auto.log
 UnSetEnv ZOD_AGA_HWSCROLL
+SetEnv ZOD_TOUR on
+Echo "=== -C pal400 (640x400 centred), orig04 tour, the default ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hw4 20 -o -C pal400 -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hw4.done
+Type DEV:Test/zod-hw4.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
 UnSetEnv ZOD_AGA_CHECK
 Echo "=== done ===" >>DEV:Test/auto.log
 Echo >DEV:Test/AutoDone done

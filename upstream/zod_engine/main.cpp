@@ -321,6 +321,15 @@ int main(int argc, char **argv)
             starting_conditions.read_resolution = true;
             ZLOG("Schirm: AGA %s -- the game runs at 640x512\n", zod_aga_mode);
         }
+
+        /* the faster choice: 400 rows, centred (docs/research-aga-speed.md) */
+        if(!strcmp(zod_aga_mode, "pal400"))
+        {
+            starting_conditions.resolution_width = 640;
+            starting_conditions.resolution_height = 400;
+            starting_conditions.read_resolution = true;
+            ZLOG("Schirm: AGA %s -- the game runs at 640x400\n", zod_aga_mode);
+        }
     }
     else
     {

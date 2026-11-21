@@ -207,9 +207,11 @@ static const char *sync_woerter[] = { "pan", "blank", "now" };
 static const char *aga_namen[] =
 {
     "PAL HiRes Laced (640x512)", "DblPAL HiRes, flicker-free (31 kHz)",
-    "Multiscan Productivity (640x480, 31 kHz)", NULL
+    "Multiscan Productivity (640x480, 31 kHz)",
+    "PAL HiRes Laced 640x400 (faster, less map)", NULL
 };
-static const char *aga_woerter[] = { "pal", "dblpal", "prod" };
+static const char *aga_woerter[] = { "pal", "dblpal", "prod", "pal400" };
+#define AGA_MODI 4
 /* AGA hardware scrolling (docs/concept-aga.md, milestone 4): on (two
  * buffers) by default since the user's word of 21.11.; fast = one buffer,
  * off = the whole view redrawn. Saved as a word, passed as the game's -H. */
@@ -531,7 +533,7 @@ static void cfg_laden(void)
         {
             LONG i;
 
-            for(i = 0; i < 3; i++)
+            for(i = 0; i < AGA_MODI; i++)
                 if(!strcmp(wert, aga_woerter[i])) cfg.aga_modus = i;
         }
         else if(!strcmp(zeile, "agascroll"))
@@ -609,7 +611,7 @@ static void cfg_speichern(void)
              sync_woerter[cfg.anzeige_sync >= 0 && cfg.anzeige_sync < 3 ? cfg.anzeige_sync : 0]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "smooth=%d\n", cfg.smooth ? 1 : 0); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "agamodus=%s\n",
-             aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]); FPuts(f, zeile);
+             aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < AGA_MODI ? cfg.aga_modus : 0]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "agascroll=%s\n",
              agascroll_woerter[cfg.aga_scroll >= 0 && cfg.aga_scroll < 3 ? cfg.aga_scroll : 0]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "ton=%d\n", cfg.ton ? 1 : 0);           FPuts(f, zeile);
@@ -786,7 +788,7 @@ static void befehlszeile_bauen(char *aus, size_t platz)
     if(cfg.renderer == RENDERER_AGA)
     {
         snprintf(teil, sizeof(teil), "-C %s ",
-                 aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]);
+                 aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < AGA_MODI ? cfg.aga_modus : 0]);
         strncat(aus, teil, platz - strlen(aus) - 1);
 
         /* the game's default is on (two buffers); passed either way, so
@@ -1290,10 +1292,12 @@ int main(int argc, char **argv)
                         MUIA_Cycle_Entries, (ULONG)aga_namen,
                         MUIA_Cycle_Active,  cfg.aga_modus,
                         MUIA_ShortHelp, (ULONG)"PAL HiRes Laced shows on any TV\n"
-                            "or 1084 (it flickers on thin lines). The two\n"
-                            "others are flicker-free on a 31 kHz monitor and\n"
-                            "need their monitor drivers in DEVS:Monitors; the\n"
-                            "game falls back to PAL HiRes Laced without them.",
+                            "or 1084 (it flickers on thin lines). DblPAL and\n"
+                            "Productivity are flicker-free on a 31 kHz monitor\n"
+                            "and need their monitor drivers in DEVS:Monitors;\n"
+                            "the game falls back to PAL HiRes Laced without\n"
+                            "them. 640x400 shows less map, centred, and is\n"
+                            "faster on slow chip RAM.",
                     End,
                     /* ghosted unless AGA is the renderer */
                     Child, o_agascroll_label = Label2("AGA scrolling"),
@@ -1526,7 +1530,7 @@ int main(int argc, char **argv)
             get(o_renderer, MUIA_Cycle_Active, &l); cfg.renderer = (l >= 0 && l <= RENDERER_AGA) ? l : 0;
             get(o_sync, MUIA_Cycle_Active, &l); cfg.anzeige_sync = (l >= 0 && l < 3) ? l : 0;
             get(o_smooth, MUIA_Selected, &l); cfg.smooth = (BOOL)l;
-            get(o_aga, MUIA_Cycle_Active, &l); cfg.aga_modus = (l >= 0 && l < 3) ? l : 0;
+            get(o_aga, MUIA_Cycle_Active, &l); cfg.aga_modus = (l >= 0 && l < AGA_MODI) ? l : 0;
             get(o_agascroll, MUIA_Cycle_Active, &l); cfg.aga_scroll = (l >= 0 && l < 3) ? l : 0;
             {
                 LONG aus = (cfg.renderer == 1) ? FALSE : TRUE;

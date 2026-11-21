@@ -496,10 +496,10 @@ int main(void)
 
         /* AGA: -o and -C with the mode's word; both survive saving */
         {
-            static const char *const wort[] = { "-C pal ", "-C dblpal ", "-C prod " };
+            static const char *const wort[] = { "-C pal ", "-C dblpal ", "-C prod ", "-C pal400 " };
             int m;
 
-            for(m = 0; m < 3; m++)
+            for(m = 0; m < 4; m++)
             {
                 cfg_vorgaben();
                 cfg.renderer = RENDERER_AGA;

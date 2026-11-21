@@ -162,6 +162,38 @@ nothing (today it is ~4400 of the ~6600 groups a frame while scrolling).
 - **The shadow compare** (fast RAM, ~650 KB of reads a scrolling frame): part
   of the ~27 ms of non-chip AGA work on voltago. Worth measuring after 3.1.
 
+### 3.8 BlazeWCP (Aminet util/boot/Blazewcp, Rick Pratt, 1.74 with source)
+
+Looked at on the user's word (21.11. ~07:10): "ULTRA FAST 32bit C2P patch
+for OS chunky functions" -- it replaces WritePixelArray8 / WriteChunkyPixels
+and is known for its speed on AGA. Its 8-plane routine (blazewcp.s,
+con8p32):
+
+- **32 pixels at a time, one `move.l` per plane** -- the same lever 3.1
+  measures: "Uses 32bit Chunky 2 Planar routines to write longwords to
+  chipram. This makes it fast on 020+ cpus and REALLY fast on machines with
+  32bit chipram (A1200, A3000, A4000)."
+- **Two passes per row of 32 pixels**: planes 7..4 from the high nibbles,
+  then planes 3..0 from the low nibbles (the source read twice, from fast
+  RAM). Four planes at a time fit the 68k's eight data registers without
+  spilling.
+- **The merge**: a nibble merge with and/shift/or ($F0F0F0F0), a 16-bit
+  swap done with move.w/swap (cheaper than shifting 16), then 2-bit
+  ($33333333), 8-bit ($00FF00FF) and 1-bit ($55555555) merges -- the
+  classic merge c2p.
+- **The chip writes spread between the arithmetic**: each `move.l` to a
+  plane sits between merge steps of the next 32 pixels, so the CPU works on
+  while the slow chip write completes (a write buffer, or the posted write
+  of the 030/040/060), instead of eight writes in a row that wait for each
+  other.
+
+The licence: the guide states none; the readme invites tinkering. So the
+ideas are taken, not the code: Zod's c2p_32 (port/amiga/zod_c2p.h) is its
+own -- the existing 8x8 bit transposes plus a 4x4 byte transpose to make a
+longword per plane -- and checked bit for bit on the host. What is not
+done yet: spreading the writes (C gives the compiler the order; a later
+step, measured on its own, possibly in assembler like BlazeWCP).
+
 ## 4. Recommendation
 
 1. **32-bit chip writes (3.1)** -- next, no change to the look, ~25..30 %
