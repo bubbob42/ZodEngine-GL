@@ -58,7 +58,10 @@ and upstream's `-o` turns GL off.
   - GL_COLOR_INDEX through ONE glColorTable palette, expanded at upload.
   - At most 2048 x 2048, NPOT allowed (one level).
 - **Heap 16 MB on a screen context (8 MB in a window), NO eviction:** a full
-  heap gives GL_OUT_OF_MEMORY.
+  heap gives GL_OUT_OF_MEMORY. The library's upload cache (locked vertex
+  arrays) and its vertex stream come out of the same heap: 4 MB + 0.5 MB at
+  the start, and the cache never gives way below that. Zod holds the cache
+  at 1 MB (5k).
 - Uploads cross the Mediator at ~8.4 MB/s, so upload once and never per frame.
 - **A small draw costs ~120 us on the 68060** (Doom 64 MAP33 profile). One
   draw per sprite would cost more than the software blitter saves.
@@ -1241,6 +1244,33 @@ Backlog, LAST (the user, 21.11. ~01:25: "ignore the center stutter for now
   elsewhere would. In a red-against-blue bot match the fights also tend to
   be in the middle, where the user scrolled by hand: "the centre" may be
   "where the fight is" (server time and units on screen), not the map.
+
+## 5k. The round end on Hamiller, 21.11. evening
+
+After the fort fell, the next map came up with trails (a44cc48: the earlier
+maps' textures deleted at a map change, refused textures asked again every
+50 frames, black instead of nothing), then -- after that fix, at 1280x720 --
+with a BLACK floor: the new map's texture still found no room.
+
+- **Cause:** of the card's 16 MB texture heap, RadeonGL takes 4 MB for its
+  upload cache and 0.5 MB for the vertex stream at the start, and the cache
+  never shrinks below its start size for a texture (ucgrow.c,
+  Core_UCacheShrink). At 1280x720 Zod's other textures take ~8.5 MB; the
+  next map (1024x1376 = 2.8 MB as one texture, 1152x1440 = 3.3 MB, or the
+  2048x1024 ring around the view = 4 MB) then fits nowhere. At 640x480
+  (all the earlier tests) it did.
+- **The cache serves locked vertex arrays only** (DrawCached); Zod draws
+  immediate quads, "0 hits, 0 misses" in every log.
+- **The fix:** Zod sets RadeonGLUploadCache=1 as a local variable for its
+  own context (port/amiga/sdl_screen.cpp, like RadeonGLFlip), unless the
+  user set the variable; it goes again at SDL_Quit. 3 MB more for textures.
+- **Checked:** `tests/auto/RoundEnd720` (GL null card, 1280x720, heap capped
+  at 16 MB, two round ends): before 292 refusals, the map drawn black in
+  14843 frames, the heap at its 16.0 MB peak; after 0 refusals, 0 black
+  frames, peak 13.1 MB. GLSmoke, GLCheck, HudKeep, LoadBarPresents,
+  RefDiffCheck unchanged.
+- **Still without eviction:** over a long session the other textures keep
+  growing; 2.9 MB of room was left after three maps at 1280x720.
 
 ## 6. Open questions (recommendation first)
 

@@ -185,6 +185,7 @@ char zod_display_sync[8] = "";
 static int gl_kontext = 0;       /* a context is open */
 static int flip_var_vorher = -1; /* RadeonGLFlip before us: -1 untouched, 0 none, 1 flip_var_text */
 static char flip_var_text[16];
+static int ucache_var_ours = 0;  /* RadeonGLUploadCache: set by us (local), to go at SDL_Quit */
 
 static int  gl_oeffnen(int w, int h);
 static void gl_schliessen(void);
@@ -345,6 +346,12 @@ void SDL_Quit(void)
 		DeleteVar((CONST_STRPTR)"RadeonGLFlip", GVF_LOCAL_ONLY);
 
 	flip_var_vorher = -1;
+
+	if(ucache_var_ours)
+	{
+		DeleteVar((CONST_STRPTR)"RadeonGLUploadCache", GVF_LOCAL_ONLY);
+		ucache_var_ours = 0;
+	}
 #endif
 }
 
@@ -1168,6 +1175,22 @@ static int gl_oeffnen(int w, int h)
 		                         sizeof(flip_var_text), GVF_LOCAL_ONLY) > 0 ? 1 : 0;
 
 	SetVar((CONST_STRPTR)"RadeonGLFlip", (CONST_STRPTR)"pan", -1, GVF_LOCAL_ONLY);
+
+	/* RadeonGL's upload cache at its smallest, 1 MB, unless the user set
+	 * RadeonGLUploadCache. It holds locked vertex arrays (lib's
+	 * DrawCached); Zod draws immediate quads only -- "0 hits, 0 misses" in
+	 * every log. At its default 4 MB it comes out of the card's 16 MB
+	 * texture heap and never gives way to textures below that (ucgrow.c),
+	 * and at 1280x720 the next map then found no room after a round end:
+	 * the floor black (the user on Hamiller, 21.11.; RoundEnd720 in FS-UAE).
+	 * Read when the context opens; it goes again at SDL_Quit. */
+	if(!ucache_var_ours && GetVar((CONST_STRPTR)"RadeonGLUploadCache", (STRPTR)buf, sizeof(buf), 0) <= 0)
+	{
+		SetVar((CONST_STRPTR)"RadeonGLUploadCache", (CONST_STRPTR)"1", -1, GVF_LOCAL_ONLY);
+		ucache_var_ours = 1;
+		ZLOG("GL: RadeonGL's upload cache held to 1 MB for this game (Zod draws no locked "
+		     "arrays; the room goes to textures) -- SetEnv RadeonGLUploadCache to override\n");
+	}
 
 	/* a batch is at most 1000 quads (port/zod_gl.cpp); PiStorm3D's default
 	 * buffer is smaller and refuses longer blocks */

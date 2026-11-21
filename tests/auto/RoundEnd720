@@ -1,0 +1,35 @@
+; RoundEnd720 -- RoundEnd's GL run at 1280x720 (the user on Hamiller,
+; 21.11. ~21:15, after a44cc48: the next map came up with a BLACK floor --
+; the map texture missing, filled black instead of trails -- in a game the
+; launcher had set to 1280x720; FS-UAE at 640x480 had no refusal). GL on
+; the null card, the texture heap capped at 16 MB as on Hamiller's Radeon
+; (RadeonGLHeapMax), each round ending 25 s after its map was loaded
+; (ZOD_ROUNDEND), the next map 10 s later (maps_round.txt: orig01, orig02),
+; the next map paused (the engine's default). No music. Read in the game's
+; log: "GL: map ... as one texture", "no room", "refused ... (asked again)",
+; "drawn black for want of a texture"; in the library's log the heap.
+; LIMIT 600
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+Echo "use_database=0" >DEV:Test/psettings_pause.txt
+Echo "use_mysql=0" >>DEV:Test/psettings_pause.txt
+Echo "require_login=0" >>DEV:Test/psettings_pause.txt
+Echo "start_map_paused=1" >>DEV:Test/psettings_pause.txt
+Echo "bots_start_ignored=0" >>DEV:Test/psettings_pause.txt
+Echo "0" >DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig01.map" >>DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig02.map" >>DEV:Test/maps_round.txt
+SetEnv ZOD_ROUNDEND 25
+SetEnv RadeonGLHeapMax 16
+Echo "=== GL (null card), 1280x720, 16 MB heap, the next map paused ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodRound r720 80 DEV:Test/psettings_pause.txt -r 1280x720 -l DEV:Test/maps_round.txt
+Execute DEV:Test/WaitDone DEV:Test/zod-r720.done
+Type DEV:Test/zod-r720.log >>DEV:Test/auto.log
+Type DEV:Test/zod-r720-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_ROUNDEND
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
