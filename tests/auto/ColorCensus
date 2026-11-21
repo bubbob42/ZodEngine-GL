@@ -1,0 +1,43 @@
+; ColorCensus -- research for docs/research-aga-speed.md: which colour
+; indices the terrain (ZOD_MAPCOLORS: the map surface as drawn) and the
+; parts of the AGA picture (ZOD_AGA_COLORS: map view, side panel, bottom
+; panel) use, on maps of different planets; orig04-style tour so the view
+; covers the map. Then tools/amiga/chipprobe once as a functional check
+; (FS-UAE's chip timing is not the real machine's).
+; LIMIT 1500
+; MACHINE aga
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_AGA_COLORS on
+SetEnv ZOD_MAPCOLORS on
+SetEnv ZOD_TOUR on
+Echo "=== map orig01 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod cc01 20 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-cc01.done
+Type DEV:Test/zod-cc01.log >>DEV:Test/auto.log
+Echo "=== map orig08 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod cc08 20 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig08.map
+Execute DEV:Test/WaitDone DEV:Test/zod-cc08.done
+Type DEV:Test/zod-cc08.log >>DEV:Test/auto.log
+Echo "=== map orig15 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod cc15 20 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig15.map
+Execute DEV:Test/WaitDone DEV:Test/zod-cc15.done
+Type DEV:Test/zod-cc15.log >>DEV:Test/auto.log
+Echo "=== map orig22 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod cc22 20 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig22.map
+Execute DEV:Test/WaitDone DEV:Test/zod-cc22.done
+Type DEV:Test/zod-cc22.log >>DEV:Test/auto.log
+Echo "=== map orig29 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod cc29 20 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig29.map
+Execute DEV:Test/WaitDone DEV:Test/zod-cc29.done
+Type DEV:Test/zod-cc29.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_MAPCOLORS
+UnSetEnv ZOD_AGA_COLORS
+Echo "=== chipprobe (functional only) ===" >>DEV:Test/auto.log
+DEV:Test/chipprobe PASSES=4 >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

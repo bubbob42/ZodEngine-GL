@@ -105,12 +105,86 @@ static unsigned long st_hw_anchors = 0, st_hw_scrolls = 0, st_hw_moved = 0;
  * environment decides (ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF) */
 int zod_aga_hw_option = -1;
 
-/* ZMap::DoRender's view offset this frame (from zod_rtgscroll_view) */
-extern "C" void zod_aga_view(int sx, int sy)
+/* the map view's rectangle on the picture (for ZOD_AGA_COLORS) */
+static int view_rx = -1, view_ry = -1, view_w = 0, view_h = 0;
+
+/* ZMap::DoRender's view offset and rectangle this frame (zod_rtgscroll_view) */
+extern "C" void zod_aga_view(int sx, int sy, int rx, int ry, int vw, int vh)
 {
 	view_set = 1;
 	view_sx = sx;
 	view_sy = sy;
+	view_rx = rx;
+	view_ry = ry;
+	view_w = vw;
+	view_h = vh;
+}
+
+/* ZOD_AGA_COLORS (research, docs/research-aga-speed.md): which colour
+ * indices each part of the picture uses over a run -- the map view (terrain,
+ * units, effects), the side panel right of it, the bottom panel below it --
+ * every 4th frame. Answers whether fewer planes or two playfields of 16
+ * colours could show the game: how many indices carry 99 / 99.9 % of the
+ * pixels of each part. */
+static int env_on(const char *name);
+
+enum { COL_VIEW = 0, COL_SIDE, COL_BOTTOM, COL_N };
+static int colors_on = -1;
+static unsigned long col_hist[COL_N][256];
+static unsigned long col_frames = 0, col_seen = 0;
+
+static void colors_count(const SDL_Surface *cs)
+{
+	int x, y;
+
+	if(colors_on < 0) colors_on = env_on("ZOD_AGA_COLORS");
+	if(!colors_on || view_w <= 0 || (col_seen++ & 3)) return;
+
+	col_frames++;
+
+	for(y = 0; y < cs->h; y++)
+	{
+		const UBYTE *p = (const UBYTE *)cs->pixels + (long)y * cs->pitch;
+
+		for(x = 0; x < cs->w; x++)
+		{
+			int r;
+
+			if(x >= view_rx + view_w) r = COL_SIDE;
+			else if(y >= view_ry + view_h) r = COL_BOTTOM;
+			else r = COL_VIEW;
+
+			col_hist[r][p[x]]++;
+		}
+	}
+}
+
+/* indices used, and how many of the most used carry 99 / 99.9 % */
+static void colors_line(const char *name, const unsigned long *h)
+{
+	unsigned long sorted[256], total = 0, acc = 0;
+	int i, j, used = 0, n99 = 0, n999 = 0;
+
+	for(i = 0; i < 256; i++) { sorted[i] = h[i]; total += h[i]; if(h[i]) used++; }
+
+	/* largest first (256 values: a plain insertion sort) */
+	for(i = 1; i < 256; i++)
+	{
+		const unsigned long v = sorted[i];
+
+		for(j = i; j > 0 && sorted[j - 1] < v; j--) sorted[j] = sorted[j - 1];
+		sorted[j] = v;
+	}
+
+	for(i = 0; i < 256 && total; i++)
+	{
+		acc += sorted[i];
+		if(!n99 && acc * 100.0 >= total * 99.0) n99 = i + 1;
+		if(!n999 && acc * 1000.0 >= total * 999.0) n999 = i + 1;
+	}
+
+	ZLOG("  %s: %d indices used, %d carry 99 %%, %d carry 99.9 %% (%lu pixels)\n",
+	     name, used, n99, n999, total);
 }
 
 static int env_on(const char *name)
@@ -955,6 +1029,8 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 	unsigned long bytes = 0;
 	int p, y0, i;
 
+	colors_count(cs);
+
 	if(hw) { flip_hw(cs, scr, dy); return; }
 
 	/* the buffer about to be drawn into may still be on display */
@@ -1101,6 +1177,15 @@ void zod_aga_report(void)
 
 	if(check_on > 0)
 		ZLOG("; read back in %lu frames: %lu pixels differ\n", st_check_frames, st_check_differ);
+
+	if(col_frames)
+	{
+		ZLOG("AGA colours (ZOD_AGA_COLORS), %lu frames counted, map view %dx%d at %d,%d:\n",
+		     col_frames, view_w, view_h, view_rx, view_ry);
+		colors_line("map view (terrain, units, effects)", col_hist[COL_VIEW]);
+		colors_line("side panel", col_hist[COL_SIDE]);
+		colors_line("bottom panel", col_hist[COL_BOTTOM]);
+	}
 
 	if(st_hw_scrolls)
 		ZLOG("AGA hardware scrolling: %lu frames, the window moved in %lu, anchored again %lu times "

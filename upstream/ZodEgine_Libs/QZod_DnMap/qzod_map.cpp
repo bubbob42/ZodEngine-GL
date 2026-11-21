@@ -569,6 +569,49 @@ void ZMap::RenderMap()
     for(i=k=0;i<basic_info.width;i++)
         for(j=0;j<basic_info.height;j++,k++)
             RenderTile(k);
+
+#ifdef __amigaos__
+    /* ZOD_MAPCOLORS (research, docs/research-aga-speed.md): the colour
+     * indices the terrain alone uses (the map surface as drawn) */
+    {
+        char wahl[8];
+        SDL_Surface *ms = full_render.GetBaseSurface();
+
+        if(ms && ms->format->BitsPerPixel == 8 && zod_env("ZOD_MAPCOLORS", wahl, sizeof(wahl)))
+        {
+            static unsigned long h[256];
+            unsigned long total = 0, acc = 0, s[256];
+            int used = 0, n99 = 0, n999 = 0, a, b;
+
+            for(a = 0; a < 256; a++) h[a] = 0;
+            for(int yy = 0; yy < ms->h; yy++)
+            {
+                const unsigned char *p = (const unsigned char *)ms->pixels + (long)yy * ms->pitch;
+
+                for(int xx = 0; xx < ms->w; xx++) h[p[xx]]++;
+            }
+
+            for(a = 0; a < 256; a++) { s[a] = h[a]; total += h[a]; if(h[a]) used++; }
+            for(a = 1; a < 256; a++)
+            {
+                const unsigned long v = s[a];
+
+                for(b = a; b > 0 && s[b - 1] < v; b--) s[b] = s[b - 1];
+                s[b] = v;
+            }
+            for(a = 0; a < 256 && total; a++)
+            {
+                acc += s[a];
+                if(!n99 && acc * 100.0 >= total * 99.0) n99 = a + 1;
+                if(!n999 && acc * 1000.0 >= total * 999.0) n999 = a + 1;
+            }
+
+            ZLOG("Map colours (ZOD_MAPCOLORS), planet %s, %dx%d: %d indices used, "
+                 "%d carry 99 %%, %d carry 99.9 %%\n",
+                 planet_type_string[basic_info.terrain_type].c_str(), ms->w, ms->h, used, n99, n999);
+        }
+    }
+#endif
 }
 
 /* Kacheln im Punktbereich neu aus den Kartendaten zeichnen.

@@ -45,11 +45,11 @@ int zod_rtgscroll_on(void)
 	return on;
 }
 
-extern "C" void zod_aga_view(int sx, int sy);   /* zod_aga.cpp: hardware scrolling */
+extern "C" void zod_aga_view(int sx, int sy, int rx, int ry, int vw, int vh);   /* zod_aga.cpp */
 
 extern "C" void zod_rtgscroll_view(int sx, int sy, int rx, int ry, int vw, int vh)
 {
-	zod_aga_view(sx, sy);
+	zod_aga_view(sx, sy, rx, ry, vw, vh);
 
 	cur_set = 1;
 	cur_sx = sx; cur_sy = sy;
