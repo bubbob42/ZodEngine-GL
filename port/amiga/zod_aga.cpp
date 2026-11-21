@@ -77,6 +77,24 @@ static unsigned long st_stale = 0, st_safe_waits = 0, st_change_failed = 0;
 static unsigned long st_wait_ticks = 0;    /* waiting for a safe buffer */
 static unsigned long st_check_frames = 0, st_check_differ = 0;
 
+/* The buffer and the window's place in one step (ZOD_AGA_TOGETHER, default
+ * on; the user's video of 21.11.: "side panel flickers on AGA while
+ * scrolling"). ChangeScreenBuffer puts the new buffer on display at once,
+ * at the place the display had; the ScrollVPort after it then moves it. A
+ * frame that begins between the two calls shows the new buffer at the old
+ * place: the map, anchored in the bitmap, looks right, but the side panel,
+ * drawn at the new place, jumps by the scroll step. Intuition does the
+ * change in its input task, so with the mouse moving the gap can be
+ * milliseconds long. Now the RasInfo gets the new buffer and the new
+ * offsets, and one ScrollVPort shows both (the autodoc's "double buffering
+ * effect"); ChangeScreenBuffer then finds that buffer on display already
+ * and only sends its messages and tells Intuition. Off: the old order. */
+static int together_on = -1;
+/* ZOD_AGA_CHECK: the copper list read at each buffer change that moves
+ * the window -- between the two calls the display must hold the old buffer
+ * at the old place or the new one at the new, nothing in between */
+static unsigned long st_cop_checked = 0, st_cop_mixed = 0;
+
 /* Hardware scrolling (milestone 4, docs/concept-aga.md; ON by default since
  * the user's word of 21.11., two buffers; -H off or ZOD_AGA_HWSCROLL=off
  * switch it off). The screen's bitmap is larger than the display and
@@ -673,23 +691,33 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		if(zod_aga_hw_option == 2) dbuf_on = 0;
 	}
 
+	if(together_on < 0) together_on = zod_env_switch("ZOD_AGA_TOGETHER", 1);
+
 	dbuf = 0;
 
 	if(dbuf_on)
 	{
 		safe_port = CreateMsgPort();
 		disp_port = CreateMsgPort();
-		sbuf[0] = AllocScreenBuffer(scr, 0, SB_SCREEN_BITMAP);
 
-		/* hardware scrolling: a second large bitmap of our own (a copy of
-		 * the screen's would only have the screen's size) */
+		/* hardware scrolling: the screen has our bitmap (SA_BitMap), and
+		 * for such a screen the first buffer is made from that bitmap --
+		 * SB_SCREEN_BITMAP is only for a bitmap Intuition allocated (the
+		 * AllocScreenBuffer autodoc). With SB_SCREEN_BITMAP here every
+		 * soft-scrolling run since the own bitmaps (21.11. ~08:20) fell
+		 * back to one buffer. The second large bitmap is our own too (a
+		 * copy of the screen's would only have the screen's size). */
 		if(hw)
 		{
+			sbuf[0] = AllocScreenBuffer(scr, hw_bm[0], 0);
 			hw_bm[1] = AllocBitMap((ULONG)hw_bw, (ULONG)hw_bh, 8, BMF_DISPLAYABLE | BMF_CLEAR, hw_bm[0]);
 			sbuf[1] = hw_bm[1] ? AllocScreenBuffer(scr, hw_bm[1], 0) : 0;
 		}
 		else
+		{
+			sbuf[0] = AllocScreenBuffer(scr, 0, SB_SCREEN_BITMAP);
 			sbuf[1] = AllocScreenBuffer(scr, 0, SB_COPY_BITMAP);
+		}
 
 		if(safe_port && disp_port && sbuf[0] && sbuf[1])
 		{
@@ -707,7 +735,10 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		}
 		else
 		{
-			ZLOG("AGA: no second buffer (chip RAM?) -- one buffer\n");
+			ZLOG("AGA: no second buffer -- one buffer (message ports %s, the screen's buffer %s, "
+			     "the second bitmap %s, its buffer %s)\n",
+			     safe_port && disp_port ? "ok" : "FAILED", sbuf[0] ? "ok" : "FAILED",
+			     !hw ? "--" : hw_bm[1] ? "ok" : "FAILED (chip RAM)", sbuf[1] ? "ok" : "FAILED");
 			if(sbuf[1]) FreeScreenBuffer(scr, sbuf[1]);
 			if(sbuf[0]) FreeScreenBuffer(scr, sbuf[0]);
 			sbuf[0] = sbuf[1] = 0;
@@ -1339,6 +1370,39 @@ int zod_aga_raw_y(int y)
 	return y - split_b + split_off;
 }
 
+/* ZOD_AGA_CHECK: the map ViewPort's first plane pointer and BPLCON1 as its
+ * long-frame copper list loads them -- what the display takes from the
+ * next frame on (read only) */
+static int copper_read(const struct ViewPort *vp, ULONG *pt, UWORD *con1)
+{
+	const UWORD *c;
+	int i, have = 0;
+
+	*pt = 0;
+	*con1 = 0;
+
+	if(!vp->DspIns || !vp->DspIns->CopLStart) return 0;
+
+	c = vp->DspIns->CopLStart;
+
+	/* the viewport's 256 colours come first (two MOVEs each and the
+	 * bank switches): the plane pointers lie past 512 instructions */
+	for(i = 0; i < 4096 && (have & 3) != 3; i++, c += 2)
+	{
+		if(c[0] == 0xFFFF && c[1] == 0xFFFE) break;     /* the list's end */
+		if(c[0] & 1) continue;                          /* WAIT or SKIP */
+
+		switch(c[0] & 0x1FE)
+		{
+		case 0x102: *con1 = c[1]; have |= 4; break;                  /* BPLCON1 */
+		case 0x0E0: *pt = (*pt & 0xFFFFUL) | ((ULONG)c[1] << 16); have |= 1; break;
+		case 0x0E2: *pt = (*pt & 0xFFFF0000UL) | c[1]; have |= 2; break;
+		}
+	}
+
+	return (have & 3) == 3;
+}
+
 /* the frame with hardware scrolling: the window placed, the picture
  * compared into the buffer's shadow there, the groups that differ through
  * c2p, the buffer shown at the window's place */
@@ -1352,7 +1416,7 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	UBYTE *const sh = hw_shadow[b];
 	unsigned long t0, bytes = 0;
 	long bpr;
-	int p, yd;
+	int p, yd, moved;
 
 	if(dbuf && !safe_ok)
 	{
@@ -1438,38 +1502,79 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		st_check_frames++;
 	}
 
-	/* the window's place first, then the buffer: ChangeScreenBuffer builds
-	 * the new bitmap's plane pointers from the RasInfo offsets, ScrollVPort
-	 * sets the fine scroll as well */
 	/* offsets someone else reset (a display rebuilt by Intuition) count
 	 * as a move: ScrollVPort again */
 	if(vp->RasInfo->RxOffset != hw_shown_rx || vp->RasInfo->RyOffset != hw_shown_ry)
 		hw_shown_rx = hw_shown_ry = -1;
 
+	moved = hw_rx != hw_shown_rx || hw_ry != hw_shown_ry;
 	vp->RasInfo->RxOffset = (WORD)hw_rx;
 	vp->RasInfo->RyOffset = (WORD)hw_ry;
 
 	if(dbuf)
 	{
+		ULONG p0 = 0, p1 = 0, p2 = 0;
+		UWORD c0 = 0, c1 = 0, c2 = 0;
+		int cop;
+
 		if(!disp_ok)
 		{
 			while(!GetMsg(disp_port)) WaitPort(disp_port);
 			disp_ok = 1;
 		}
 
-		if(ChangeScreenBuffer(scr, sbuf[b]))
+		cop = check_on > 0 && moved && copper_read(vp, &p0, &c0);
+
+		if(moved && together_on)
 		{
-			safe_ok = 0;
-			disp_ok = 0;
-			cur = b ^ 1;
+			struct BitMap *const was = vp->RasInfo->BitMap;
+
+			/* the new buffer at the new place, one ScrollVPort */
+			vp->RasInfo->BitMap = sbuf[b]->sb_BitMap;
+			ScrollVPort(vp);
+			if(cop) copper_read(vp, &p1, &c1);
+
+			if(ChangeScreenBuffer(scr, sbuf[b]))
+			{
+				safe_ok = 0;
+				disp_ok = 0;
+				cur = b ^ 1;
+			}
+			else
+			{
+				/* Intuition busy (menus, gadgets): its buffer back, at
+				 * the new place; this frame goes into b again */
+				vp->RasInfo->BitMap = was;
+				ScrollVPort(vp);
+				st_change_failed++;
+			}
 		}
 		else
-			st_change_failed++;
-	}
+		{
+			if(ChangeScreenBuffer(scr, sbuf[b]))
+			{
+				safe_ok = 0;
+				disp_ok = 0;
+				cur = b ^ 1;
+			}
+			else
+				st_change_failed++;
 
-	if(hw_rx != hw_shown_rx || hw_ry != hw_shown_ry)
-	{
+			if(cop) copper_read(vp, &p1, &c1);
+			if(moved) ScrollVPort(vp);
+		}
+
+		if(cop && copper_read(vp, &p2, &c2))
+		{
+			st_cop_checked++;
+			if(!(p1 == p0 && c1 == c0) && !(p1 == p2 && c1 == c2)) st_cop_mixed++;
+		}
+	}
+	else if(moved)
 		ScrollVPort(vp);
+
+	if(moved)
+	{
 		hw_shown_rx = hw_rx;
 		hw_shown_ry = hw_ry;
 		st_hw_moved++;
@@ -1669,6 +1774,12 @@ void zod_aga_report(void)
 
 	if(check_on > 0)
 		ZLOG("; read back in %lu frames: %lu pixels differ\n", st_check_frames, st_check_differ);
+
+	if(check_on > 0 && st_cop_checked)
+		ZLOG("AGA buffer changes that moved the window (%s, ZOD_AGA_TOGETHER): copper list read "
+		     "in %lu, between the calls a buffer at the other's place in %lu\n",
+		     together_on ? "one ScrollVPort" : "ChangeScreenBuffer, then ScrollVPort",
+		     st_cop_checked, st_cop_mixed);
 
 	if(regions_on > 0 && reg_frames)
 	{

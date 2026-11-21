@@ -18,7 +18,17 @@
 ; (7) the bottom panel kept in the scrolled picture (ZOD_AGA_SPLIT off), orig04
 ;     tour, 15 s -- every other soft-scrolling run has it on its own screen
 ;     (the default), its rows read back from there.
+; (8) the old buffer change (ZOD_AGA_TOGETHER off: ChangeScreenBuffer, then
+;     ScrollVPort), orig04 tour, 15 s -- the control for the copper read:
+;     between the two calls the display holds the new buffer at the old
+;     place (the user's side panel flicker, 21.11.), so there "a buffer at
+;     the other's place" must count every moving change; in every other
+;     two-buffer run (one ScrollVPort, the default) it must stay 0.
 ; Without given margins (1, 2, 4, 6) they come from the free chip RAM.
+; Every two-buffer run (1, 3, 4, 6, 7, 8) must say "two buffers
+; (ChangeScreenBuffer)", never "no second buffer": from 21.11. ~08:20 to
+; ~10:30 they all fell back to one buffer unnoticed (SB_SCREEN_BITMAP on a
+; screen with our own bitmap) -- read the AGA line, not only the fps.
 ; LIMIT 1200
 ; MACHINE aga
 FailAt 1000
@@ -64,6 +74,12 @@ Run >NIL: Execute DEV:Test/RunZod hwn 15 -o -C pal -m Data/Campaing/Z_original/p
 Execute DEV:Test/WaitDone DEV:Test/zod-hwn.done
 Type DEV:Test/zod-hwn.log >>DEV:Test/auto.log
 UnSetEnv ZOD_AGA_SPLIT
+SetEnv ZOD_AGA_TOGETHER off
+Echo "=== the old buffer change (ZOD_AGA_TOGETHER off), orig04 tour: the copper read's control ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hwo 15 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hwo.done
+Type DEV:Test/zod-hwo.log >>DEV:Test/auto.log
+UnSetEnv ZOD_AGA_TOGETHER
 UnSetEnv ZOD_TOUR
 UnSetEnv ZOD_AGA_CHECK
 Echo "=== done ===" >>DEV:Test/auto.log
