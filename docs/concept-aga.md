@@ -239,6 +239,11 @@ Since then the margins are chosen from the free chip RAM (the widest of
 free block); ZOD_AGA_HWSCROLL=<x>x<y> still sets them. If OpenScreen
 fails anyway, the normal screen opens without hardware scrolling. FS-UAE
 (1990 KB free): 320 px with two buffers, 448 with one; 0 differ.
+voltago with them (03:37-03:45, 1975 KB free, same tour): without 5.5 fps
+(111 ms work); -H on, 320 px: 5.6 (108 ms, 34 re-anchors); -H fast,
+448 px: 7.7 (78 ms, 28 re-anchors). On the A4000D two buffers barely pay
+(every re-anchor rewrites both); one buffer is +40 %. So the eye test
+decides between "fast" (+40 % here, +110 % on the PiStorm) and its look.
 
 How it is chosen (21.11. ~02:35, still off by default): the game's
 -H off|on|fast (on = two buffers, fast = one buffer; without -H the
