@@ -30,6 +30,7 @@
 #include <graphics/view.h>
 #include <intuition/screens.h>
 
+#include <exec/memory.h>
 #include <proto/exec.h>
 #include <proto/graphics.h>
 #include <proto/intuition.h>
@@ -88,6 +89,7 @@ static unsigned long st_check_frames = 0, st_check_differ = 0;
 static int hw_on = -1;              /* ZOD_AGA_HWSCROLL asked for */
 static int hw = 0;                  /* the screen is the large one */
 static int hw_mx = 192, hw_my = 64; /* the margins around the display */
+static int hw_margins_given = 0;    /* ZOD_AGA_HWSCROLL=<x>x<y> */
 static int hw_bw = 0, hw_bh = 0;    /* the bitmap */
 static int hw_dw = 0, hw_dh = 0;    /* the display window */
 static UBYTE *hw_shadow[NBUF];      /* each buffer's planes, chunky */
@@ -228,12 +230,63 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 				{
 					hw_mx = (int)((a + 63) & ~63L);
 					hw_my = (int)b;
+					hw_margins_given = 1;
 				}
 			}
 		}
 	}
 
 	hw = 0;
+
+	/* the buffers first: the margins depend on how many bitmaps there are */
+	if(dbuf_on < 0)
+	{
+		char buf[16];
+		const char *e = zod_env("ZOD_AGA_DBUF", buf, sizeof(buf));
+
+		dbuf_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+
+		/* -H fast: hardware scrolling into the shown bitmap */
+		if(zod_aga_hw_option == 2) dbuf_on = 0;
+	}
+
+	/* Margins as wide as the chip RAM allows (measured on voltago, the
+	 * A4000D's real AGA: one buffer 6.8 fps at 192 px, 7.8 at 448; two
+	 * buffers 5.3 at 192, 6.3 at 384 -- at a few frames a second the view
+	 * moves far each frame, and every re-anchor rewrites the window). 448 px
+	 * (a 1536 px bitmap) leaves a map up to ~1430 px wide without sideways
+	 * re-anchors; 256 KB of chip RAM stay free for everyone else. */
+	if(hw_on && !hw_margins_given)
+	{
+		static const int steps[] = { 448, 384, 320, 256, 192, 128, 64 };
+		const unsigned long reserve = 256UL * 1024;
+		const unsigned long avail = AvailMem(MEMF_CHIP);
+		const unsigned long largest = AvailMem(MEMF_CHIP | MEMF_LARGEST);
+		const unsigned long nb = dbuf_on ? 2 : 1;
+		unsigned i;
+		int chosen = 0;
+
+		for(i = 0; i < sizeof(steps) / sizeof(steps[0]) && !chosen; i++)
+		{
+			/* 8 planes of (w / 8) x h bytes each, every plane one block */
+			const unsigned long bytes = (unsigned long)(sw + 2 * steps[i]) * (sh + 2 * hw_my);
+
+			if(avail > reserve && nb * bytes <= avail - reserve && largest >= bytes / 8)
+			{
+				hw_mx = steps[i];
+				chosen = 1;
+			}
+		}
+
+		if(!chosen)
+		{
+			ZLOG("AGA: %lu KB of chip RAM free -- too little for hardware scrolling\n", avail / 1024);
+			hw_on = 0;
+		}
+		else
+			ZLOG("AGA: %lu KB of chip RAM free -- hardware scrolling with margins of %d px "
+			     "(%lu buffer%s)\n", avail / 1024, hw_mx, nb, nb > 1 ? "s" : "");
+	}
 
 	if(hw_on)
 	{
@@ -310,6 +363,27 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		};
 
 		scr = OpenScreenTagList(0, sa);
+
+		/* the large bitmap did not fit (chip RAM in pieces): the normal
+		 * screen without hardware scrolling rather than no screen */
+		if(!scr && hw)
+		{
+			int i;
+
+			ZLOG("AGA: the %dx%d bitmap for hardware scrolling did not fit (error %ld) -- "
+			     "without hardware scrolling\n", hw_bw, hw_bh, (long)err);
+
+			for(i = 0; i < NBUF; i++) { free(hw_shadow[i]); hw_shadow[i] = 0; }
+			free(hw_zero);
+			hw_zero = 0;
+			hw = 0;
+
+			sa[1].ti_Data = (ULONG)sw;
+			sa[2].ti_Data = (ULONG)sh;
+			sa[3].ti_Tag = TAG_IGNORE;
+			err = 0;
+			scr = OpenScreenTagList(0, sa);
+		}
 	}
 
 	if(!scr)
