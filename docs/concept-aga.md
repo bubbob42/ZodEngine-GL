@@ -164,7 +164,68 @@ fewer updates" mode (the HUD and units refreshed every other frame).
    tests/launcher passes; ZodLaunch builds (cego's Docker toolchain).
    FS-UAE's test system has no DblPAL/Multiscan driver: the fallback is
    tested, the two modes themselves wait for a real AGA machine.
-4. Hardware scrolling (with the smooth-scrolling concept).
+4. Hardware scrolling (with the smooth-scrolling concept). -- FIRST VERSION
+   21.11. night (local branch aga-hwscroll, ZOD_AGA_HWSCROLL, off by
+   default; see "Milestone 4: first results" below).
+
+## Milestone 4: first results (21.11. 01:20-01:46)
+
+Built as the section above describes, with two changes found on the way:
+
+- **A shadow per buffer instead of block sums.** Each buffer keeps a
+  chunky copy (fast RAM) of exactly what its planes hold. Every frame the
+  picture is compared into it at the window's place, 16 bytes at a time;
+  only the 16-pixel groups that differ go through c2p. That covers the new
+  strip, units, effects and the HUD moving across the bitmap without any
+  of them being special cases, and a re-anchor is just a jump of the
+  offset. Colour 0 for the rows beside a smaller picture.
+- **Anchored again near the edge the view came from**, not in the middle:
+  the whole width of both margins lies ahead (a quarter margin kept behind
+  for a small step back). FS-UAE: re-anchors 73 -> 42 in a 30 s tour,
+  groups a frame 10 620 -> 8 960.
+
+Correctness (FS-UAE AgaHwScroll, ZOD_AGA_CHECK every frame: the shadow's
+window against the picture, every plane group under the window against the
+shadow): 0 pixels differ in all four runs -- tour with two buffers, one
+buffer, margins 64x16 (anchored again 80..129 times), still view.
+
+Speed on real AGA (the PiStorm's A1200, chip RAM over its own bus,
+orig04 tour, software, -C pal 640x512, 30 s; ABBA):
+
+| run | fps | groups a frame through c2p | work a frame |
+|---|---|---|---|
+| without (today's path) | 7.8 / 7.8 | 15 480 | 109 ms |
+| two buffers, margins 192x64 (2 x 640 KB chip) | 10.9 / 10.9 | 10 048 | 77 ms |
+| one buffer, 192x64 (640 KB) | 16.6 | 6 608 | 51 ms |
+| two buffers, 320x64 (2 x 800 KB) | 12.3 | 8 782 | 67 ms |
+| one buffer, 448x64 (960 KB) | 17.4 | 6 218 | 49 ms |
+| still view, two buffers, 192x64 | 48.8 | 260 | 3.3 ms |
+
+Where the remaining groups come from (one buffer, 192x64): re-anchors
+~1 700 a frame (43 in 519 frames, each the whole window), the HUD ~4 400
+(the right panel, 100 px x 476 rows, and the bottom 36 rows move across the
+bitmap with the view: its new place and the map put back at its old one),
+the new strip ~550. With two buffers each buffer is two frames behind, so
+the HUD's and the strip's share doubles, and every re-anchor costs both
+buffers. The HUD is inherent to a hardware-scrolled 8-bit screen (no dual
+playfield with 256 colours, no sideways viewport split); a bottom HUD in a
+viewport of its own could save its 36 rows (~1 400 groups) later.
+
+For the user (eye tests on an AGA monitor, voltago or the A1200):
+- One buffer is ~1.5x faster but writes into the shown bitmap: the HUD
+  can be seen at its new place a few pixels off for part of a frame
+  (it moves across the bitmap each frame). Two buffers never show that.
+- Chip RAM: 640 KB a buffer at 192x64; wider margins buy little (the HUD
+  dominates). Recommended default when switched on: two buffers, 192x64;
+  one buffer as the faster choice if the eye accepts it.
+
+How it is chosen (21.11. ~02:35, still off by default): the game's
+-H off|on|fast (on = two buffers, fast = one buffer; without -H the
+environment decides: ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF, and
+ZOD_AGA_HWSCROLL=<x>x<y> for other margins); ZodLaunch's "AGA scrolling"
+cycle (Off / On (two buffers) / Fast (one buffer)) under the AGA mode,
+ghosted unless AGA is the renderer, saved as agascroll=. Launcher test
+and FS-UAE AgaHwScroll (through -H) pass; ZodLaunch builds.
 
 ## First real AGA (20.11. 23:36-23:40)
 

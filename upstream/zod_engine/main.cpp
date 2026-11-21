@@ -290,6 +290,16 @@ int main(int argc, char **argv)
             zod_smooth_option = starting_conditions.smooth;
     }
 
+    /* -H: AGA hardware scrolling (port/amiga/zod_aga.cpp) */
+    if(starting_conditions.aga_hwscroll >= 0)
+    {
+        extern int zod_aga_hw_option;
+
+        zod_aga_hw_option = starting_conditions.aga_hwscroll;
+        ZLOG("Schirm: AGA hardware scrolling from the command line: %s\n",
+             zod_aga_hw_option == 2 ? "fast (one buffer)" : zod_aga_hw_option ? "on (two buffers)" : "off");
+    }
+
     /* -C: the AGA screen (port/amiga/zod_aga.cpp); before the first screen */
     if(starting_conditions.aga_mode[0])
     {

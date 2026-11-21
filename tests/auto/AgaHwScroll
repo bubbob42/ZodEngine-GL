@@ -1,0 +1,44 @@
+; AgaHwScroll -- hardware scrolling on the AGA screen (ZOD_AGA_HWSCROLL,
+; port/amiga/zod_aga.cpp, docs/concept-aga.md milestone 4): a bitmap larger
+; than the display, anchored to the map, shown with ScrollVPort; the picture
+; compared into a chunky shadow of each buffer, only differing 16-pixel
+; groups through c2p. ZOD_AGA_CHECK every frame: the shadow's window against
+; the picture, every plane group under the window against the shadow --
+; "0 pixels differ". Software (-o), -C pal (the game at 640x512).
+; (1) orig04 tour, -H on (two buffers), default margins, 30 s;
+; (2) orig04 tour, -H fast (one buffer), 20 s;
+; (3) orig04 tour, ZOD_AGA_HWSCROLL=64x16 (margins: anchored again all the
+;     time), 20 s;
+; (4) orig01 still, -H on, 20 s.
+; LIMIT 1200
+; MACHINE aga
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_AGA_CHECK on
+SetEnv ZOD_TOUR on
+Echo "=== hardware scrolling, orig04 tour, two buffers (-H on) ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hwt 30 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hwt.done
+Type DEV:Test/zod-hwt.log >>DEV:Test/auto.log
+Echo "=== hardware scrolling, orig04 tour, one buffer (-H fast) ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hw1 20 -o -C pal -H fast -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hw1.done
+Type DEV:Test/zod-hw1.log >>DEV:Test/auto.log
+SetEnv ZOD_AGA_HWSCROLL 64x16
+Echo "=== hardware scrolling, orig04 tour, margins 64x16 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hwm 20 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hwm.done
+Type DEV:Test/zod-hwm.log >>DEV:Test/auto.log
+UnSetEnv ZOD_AGA_HWSCROLL
+UnSetEnv ZOD_TOUR
+Echo "=== hardware scrolling, orig01 still (-H on) ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hws 20 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hws.done
+Type DEV:Test/zod-hws.log >>DEV:Test/auto.log
+UnSetEnv ZOD_AGA_HWSCROLL
+UnSetEnv ZOD_AGA_CHECK
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

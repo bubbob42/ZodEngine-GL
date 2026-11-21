@@ -24,6 +24,7 @@ input_options::input_options()
         smooth = -1;
         midi_cluster[0] = 0;
         aga_mode[0] = 0;
+        aga_hwscroll = -1;
         read_video_dir = false;
         video_dir.clear();
         read_settings = false;
@@ -135,7 +136,7 @@ int input_options::getoptions(int argc, char **argv)
     extern char *optarg;
     extern int optind;
 
-    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:Y:X:K:C:")) != -1)
+    while ((c = getopt(argc, argv, "c:m:l:n:t:b:z:e:g:i:wr:dhvksuoafNB:L:D:A:S:M:V:G:F:U:E:Y:X:K:C:H:")) != -1)
     {
         switch(c)
         {
@@ -347,6 +348,17 @@ int input_options::getoptions(int argc, char **argv)
                 if(!optarg) return 0;
                 strncpy(aga_mode, optarg, sizeof(aga_mode) - 1);
                 aga_mode[sizeof(aga_mode) - 1] = 0;
+                break;
+
+            case 'H':
+                /* AGA hardware scrolling (docs/concept-aga.md, milestone 4):
+                 * off, on (two buffers) or fast (one buffer -- the HUD may
+                 * be seen a few pixels off for part of a frame) */
+                if(!optarg) return 0;
+                if(!strcmp(optarg, "off")) aga_hwscroll = 0;
+                else if(!strcmp(optarg, "on")) aga_hwscroll = 1;
+                else if(!strcmp(optarg, "fast")) aga_hwscroll = 2;
+                else return 0;
                 break;
 
             case 'F':

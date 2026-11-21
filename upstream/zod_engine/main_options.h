@@ -62,6 +62,7 @@ public:
     int  smooth;             /* -X on|off: 1, 0; -1 not given */
     char midi_cluster[64];   /* -K: camd's cluster for -M gm|mt32 */
     char aga_mode[16];       /* -C: the AGA screen (pal, dblpal, prod) */
+    int  aga_hwscroll;       /* -H off|on|fast: 0, 1 (two buffers), 2 (one); -1 not given */
     /* Verzeichnis der Zwischensequenzen (-V). Leer = keine Filme. Der
      * externe Player jvplay bekommt Bild- und Tonweg aus denselben
      * Einstellungen wie das Spiel selbst. */

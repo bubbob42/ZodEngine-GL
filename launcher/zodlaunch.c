@@ -210,6 +210,14 @@ static const char *aga_namen[] =
     "Multiscan Productivity (640x480, 31 kHz)", NULL
 };
 static const char *aga_woerter[] = { "pal", "dblpal", "prod" };
+/* AGA hardware scrolling (docs/concept-aga.md, milestone 4): off by
+ * default until the user's eye test; on = two buffers, fast = one buffer.
+ * Saved as a word, passed as the game's -H (nothing when off). */
+static const char *agascroll_namen[] =
+{
+    "Off", "On (two buffers)", "Fast (one buffer)", NULL
+};
+static const char *agascroll_woerter[] = { "off", "on", "fast" };
 
 /* Die beiden Spielvarianten. Gespeichert wird der LISTENPLATZ -- es gibt
  * hier keine Zahl mit eigener Bedeutung, die man verwechseln koennte, und
@@ -373,6 +381,7 @@ struct einstellungen
     LONG  anzeige_sync;     /* index in sync_namen (MiniGL only)        */
     BOOL  smooth;           /* smooth scrolling (MiniGL only)           */
     LONG  aga_modus;        /* index in aga_namen                       */
+    LONG  aga_scroll;       /* index in agascroll_namen (0 = off)       */
     BOOL  ton;
     BOOL  musik;
     /* Deckel auf die GEZEICHNETE Groesse der Effekte, in HALBEN Schritten:
@@ -524,6 +533,13 @@ static void cfg_laden(void)
             for(i = 0; i < 3; i++)
                 if(!strcmp(wert, aga_woerter[i])) cfg.aga_modus = i;
         }
+        else if(!strcmp(zeile, "agascroll"))
+        {
+            LONG i;
+
+            for(i = 0; i < 3; i++)
+                if(!strcmp(wert, agascroll_woerter[i])) cfg.aga_scroll = i;
+        }
         else if(!strcmp(zeile, "ton"))         cfg.ton        = (BOOL)atoi(wert);
         else if(!strcmp(zeile, "musik"))       cfg.musik      = (BOOL)atoi(wert);
         /* "fenster" gab es bis zum 23.09. Der Schluessel wird jetzt
@@ -593,6 +609,8 @@ static void cfg_speichern(void)
     snprintf(zeile, sizeof(zeile), "smooth=%d\n", cfg.smooth ? 1 : 0); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "agamodus=%s\n",
              aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]); FPuts(f, zeile);
+    snprintf(zeile, sizeof(zeile), "agascroll=%s\n",
+             agascroll_woerter[cfg.aga_scroll >= 0 && cfg.aga_scroll < 3 ? cfg.aga_scroll : 0]); FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "ton=%d\n", cfg.ton ? 1 : 0);           FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "musik=%d\n", cfg.musik ? 1 : 0);       FPuts(f, zeile);
     snprintf(zeile, sizeof(zeile), "videos=%d\n", cfg.videos ? 1 : 0);     FPuts(f, zeile);
@@ -769,6 +787,12 @@ static void befehlszeile_bauen(char *aus, size_t platz)
         snprintf(teil, sizeof(teil), "-C %s ",
                  aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]);
         strncat(aus, teil, platz - strlen(aus) - 1);
+
+        if(cfg.aga_scroll > 0 && cfg.aga_scroll < 3)
+        {
+            snprintf(teil, sizeof(teil), "-H %s ", agascroll_woerter[cfg.aga_scroll]);
+            strncat(aus, teil, platz - strlen(aus) - 1);
+        }
     }
 
     if(cfg.extra[0])
@@ -1086,6 +1110,7 @@ int main(int argc, char **argv)
     Object *o_sync, *o_sync_label, *o_smooth, *o_smooth_label;
     Object *o_cluster, *o_cluster_label;
     Object *o_aga, *o_aga_label;
+    Object *o_agascroll, *o_agascroll_label;
     Object *o_ahi, *o_ahi_label, *o_ahi_gruppe, *o_ahi_waehlen, *o_ahi_vorgabe;
     Object *o_liste, *o_karte, *o_karte_an, *o_extra;
     Object *o_liste_waehlen, *o_karte_waehlen;
@@ -1268,6 +1293,18 @@ int main(int argc, char **argv)
                             "others are flicker-free on a 31 kHz monitor and\n"
                             "need their monitor drivers in DEVS:Monitors; the\n"
                             "game falls back to PAL HiRes Laced without them.",
+                    End,
+                    /* ghosted unless AGA is the renderer */
+                    Child, o_agascroll_label = Label2("AGA scrolling"),
+                    Child, o_agascroll = CycleObject,
+                        MUIA_Cycle_Entries, (ULONG)agascroll_namen,
+                        MUIA_Cycle_Active,  cfg.aga_scroll,
+                        MUIA_ShortHelp, (ULONG)"Hardware scrolling: the map moves\n"
+                            "with the display instead of being drawn again,\n"
+                            "so scrolling is faster. Two buffers never show a\n"
+                            "half-drawn frame; one buffer is faster still, but\n"
+                            "the HUD may be seen a few pixels off for part of\n"
+                            "a frame. Needs 640 KB of chip RAM per buffer.",
                     End,
                     /* ghosted unless MiniGL is the renderer */
                     Child, o_sync_label = Label2("Display sync"),
@@ -1489,6 +1526,7 @@ int main(int argc, char **argv)
             get(o_sync, MUIA_Cycle_Active, &l); cfg.anzeige_sync = (l >= 0 && l < 3) ? l : 0;
             get(o_smooth, MUIA_Selected, &l); cfg.smooth = (BOOL)l;
             get(o_aga, MUIA_Cycle_Active, &l); cfg.aga_modus = (l >= 0 && l < 3) ? l : 0;
+            get(o_agascroll, MUIA_Cycle_Active, &l); cfg.aga_scroll = (l >= 0 && l < 3) ? l : 0;
             {
                 LONG aus = (cfg.renderer == 1) ? FALSE : TRUE;
 
@@ -1510,6 +1548,8 @@ int main(int argc, char **argv)
                     aga_aus = aus;
                     set(o_aga_label, MUIA_Disabled, aus);
                     set(o_aga,       MUIA_Disabled, aus);
+                    set(o_agascroll_label, MUIA_Disabled, aus);
+                    set(o_agascroll,       MUIA_Disabled, aus);
                 }
             }
 
