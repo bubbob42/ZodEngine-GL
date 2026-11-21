@@ -1,0 +1,28 @@
+; RoundEndHeap14 -- the map change on a texture heap too small for two
+; maps (null card capped at 14 MB; Hamiller's Radeon has 16, which a long
+; game fills as far): ZOD_ROUNDEND 12, orig01 and orig02 in turn, the next
+; map unpaused, GL only, music off. Before the fix (21.11.) every change to
+; orig02 logged "no room for the 1152x1440 map ... the map stays undrawn"
+; and the map stayed undrawn for the round (the user's trails on
+; Hamiller). Must hold now: no "stays undrawn", "drawn black for want of a
+; texture 0", "earlier maps' textures deleted" > 0.
+; LIMIT 600
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+Echo "0" >DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig01.map" >>DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig02.map" >>DEV:Test/maps_round.txt
+SetEnv ZOD_ROUNDEND 12
+SetEnv RadeonGLHeapMax 14
+Echo "=== GL (null card, 14 MB heap), many map changes ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rh1 120 -u -l DEV:Test/maps_round.txt
+Execute DEV:Test/WaitDone DEV:Test/zod-rh1.done
+Type DEV:Test/zod-rh1.log >>DEV:Test/auto.log
+Type DEV:Test/zod-rh1-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_ROUNDEND
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

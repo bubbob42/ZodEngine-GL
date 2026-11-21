@@ -1,0 +1,26 @@
+; RoundEndHeap -- GL only (null card, the texture heap capped at 16 MB as on
+; Hamiller's Radeon): many map changes in one run (ZOD_ROUNDEND 12: a round
+; ends 12 s after its map was loaded, the next map 10 s later; orig01 and
+; orig02 in turn, the next map unpaused). Does the texture heap grow with
+; every map change? The library's "texture heap used ... allocations
+; refused" and the game's "no room" lines decide. Music off (-u).
+; LIMIT 600
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+Echo "0" >DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig01.map" >>DEV:Test/maps_round.txt
+Echo "Data/Campaing/Z_original/p02_bb_orig02.map" >>DEV:Test/maps_round.txt
+SetEnv ZOD_ROUNDEND 12
+SetEnv RadeonGLHeapMax 16
+Echo "=== GL (null card, 16 MB heap), many map changes ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rh1 200 -u -l DEV:Test/maps_round.txt
+Execute DEV:Test/WaitDone DEV:Test/zod-rh1.done
+Type DEV:Test/zod-rh1.log >>DEV:Test/auto.log
+Type DEV:Test/zod-rh1-lib.log >>DEV:Test/auto.log
+UnSetEnv RadeonGLHeapMax
+UnSetEnv ZOD_ROUNDEND
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

@@ -111,7 +111,9 @@ struct zod_gl_tex
 	int cols, rows;
 	GLuint *names;            /* cols * rows texture names */
 	int dx0, dy0, dx1, dy1;   /* pixels to send again; dx1 <= dx0: none */
-	int failed;               /* the library refused it: not tried again */
+	int failed;               /* the library refused it: tried again after
+	                           * RETRY_FRAMES (tex_get) */
+	unsigned long failed_frame; /* frame_no + 1 when it was seen failed, 0 not yet */
 	unsigned long gen;        /* the context it belongs to */
 	struct torus *tor;        /* a map texture instead of tiles (MAP_MIN_PX) */
 	int atlas;                /* in an atlas page (names[0] is the page):
@@ -161,6 +163,10 @@ static int cur_rgba_ok = 0;
 static unsigned long st_frames, st_binds, st_batches, st_quads, st_fills;
 static unsigned long st_made, st_made_px, st_updates, st_update_px, st_refused;
 static unsigned long st_reused, st_map_tiles, st_map_quads;
+static unsigned long st_map_dropped;     /* earlier maps' textures deleted (torus_texture) */
+static unsigned long st_retried;         /* refused textures asked for again (tex_get) */
+static unsigned long st_map_black;       /* map blits filled black: no texture (map_black) */
+enum { RETRY_FRAMES = 50 };
 static unsigned long st_map_parts, st_map_part_px;  /* changed parts sent alone */
 static unsigned long st_atlas_in, st_atlas_px, st_atlas_resets;
 static unsigned long st_bind_own;   /* binds of textures outside atlas and map */
@@ -370,6 +376,7 @@ struct old_name
 	GLuint name;
 	short tw, th;
 	unsigned long frame;
+	char map;                 /* a map texture's (struct torus) */
 };
 
 static struct old_name retired[RETIRE_MAX];
@@ -769,6 +776,7 @@ static void tex_drop_names(struct zod_gl_tex *t)
 				retired[retired_n].tw = (short)tr->W;
 				retired[retired_n].th = (short)tr->H;
 				retired[retired_n].frame = frame_no;
+				retired[retired_n].map = 1;
 				retired_n++;
 			}
 			else
@@ -833,6 +841,7 @@ static void tex_drop_names(struct zod_gl_tex *t)
 					retired[retired_n].tw = (short)t->tw;
 					retired[retired_n].th = (short)t->th;
 					retired[retired_n].frame = frame_no;
+					retired[retired_n].map = 0;
 					retired_n++;
 				}
 				else
@@ -866,6 +875,56 @@ static int torus_texture(struct torus *tr, int W, int H)
 		pool[i] = pool[--pool_n];
 		st_reused++;
 		return 1;
+	}
+
+	/* The earlier maps' textures go before a new one is asked for. In the
+	 * pool they only served a map of the very same size; every other map
+	 * size added one for good, 2.8..3.3 MB on a 16 MB heap with no
+	 * eviction -- after a round end the next map found no room and stayed
+	 * undrawn for the whole round (the user on Hamiller, 21.11.: every
+	 * object in trails, the side panel gone; RoundEndHeap14 in FS-UAE).
+	 * In the pool they are past RETIRE_FRAMES: no frame draws them. The
+	 * map freed just now is still retired (the next map's surface comes
+	 * within RETIRE_FRAMES): the card first finishes what it draws
+	 * (glFinish, once a map change), then nothing reads it any more. */
+	{
+		int j, n = 0;
+
+		for(i = 0, j = 0; i < pool_n; i++)
+		{
+			if(pool[i].map)
+			{
+				delete_name(pool[i].name);
+				n++;
+			}
+			else
+				pool[j++] = pool[i];
+		}
+
+		pool_n = j;
+
+		for(i = 0; i < retired_n && !retired[i].map; i++) ;
+
+		if(i < retired_n)
+		{
+			batch_end();
+			glFinish();
+
+			for(i = 0, j = 0; i < retired_n; i++)
+			{
+				if(retired[i].map)
+				{
+					delete_name(retired[i].name);
+					n++;
+				}
+				else
+					retired[j++] = retired[i];
+			}
+
+			retired_n = j;
+		}
+
+		st_map_dropped += (unsigned long)n;
 	}
 
 	{
@@ -2099,6 +2158,23 @@ static struct zod_gl_tex *tex_get(SDL_Surface *s)
 
 	t = e->t;
 
+	/* Refused (the texture heap full for the moment -- a map change): asked
+	 * again every RETRY_FRAMES frames instead of never. Never again had left
+	 * the new map undrawn for the whole round after one short moment
+	 * without room (the user on Hamiller, 21.11.). A try costs one
+	 * allocation the library refuses at once. */
+	if(t && t->failed)
+	{
+		if(!t->failed_frame)
+			t->failed_frame = frame_no + 1;
+		else if(frame_no + 1 - t->failed_frame >= RETRY_FRAMES)
+		{
+			tex_free(t);
+			t = e->t = 0;
+			st_retried++;
+		}
+	}
+
 	/* a new size or a new context: made again */
 	if(t && (t->w != s->w || t->h != s->h || t->gen != ctx_gen))
 	{
@@ -2447,13 +2523,37 @@ static void vertex(float u, float v, float x, float y)
 	glVertex3f(x, y, 0.0f);
 }
 
+/* The map without a texture (no room even after the retries, tex_get):
+ * black where it would be. Drawing nothing left the last frames' objects
+ * standing -- every object in trails as the view moved (the user on
+ * Hamiller, 21.11.). Clipped as zod_gl_blit clips. */
+static void map_black(SDL_Surface *s, const SDL_Rect *src, int x, int y)
+{
+	int sx0 = src ? src->x : 0, sy0 = src ? src->y : 0;
+	int sx1 = src ? src->x + src->w : s->w, sy1 = src ? src->y + src->h : s->h;
+
+	if(sx0 < 0) { x -= sx0; sx0 = 0; }
+	if(sy0 < 0) { y -= sy0; sy0 = 0; }
+	if(sx1 > s->w) sx1 = s->w;
+	if(sy1 > s->h) sy1 = s->h;
+	if(sx1 <= sx0 || sy1 <= sy0) return;
+
+	zod_gl_fill(x, y, sx1 - sx0, sy1 - sy0, 0, 0, 0);
+	st_map_black++;
+}
+
 void zod_gl_blit(SDL_Surface *s, const SDL_Rect *src, int x, int y,
                  Uint8 alpha, int hit)
 {
 	struct zod_gl_tex *t = tex_get(s);
 	int sx0, sy0, sx1, sy1, c, r;
 
-	if(!t) return;
+	if(!t)
+	{
+		if(s && s->pixels && zod_gl_active && (long)s->w * s->h > MAP_MIN_PX)
+			map_black(s, src, x, y);
+		return;
+	}
 
 	sx0 = src ? src->x : 0;
 	sy0 = src ? src->y : 0;
@@ -2628,9 +2728,10 @@ void zod_gl_report(void)
 	ZLOG("GL: %lu frames; per frame x10: batches %lu, binds %lu, quads %lu, fills %lu\n",
 	     st_frames, st_batches * 10 / f, st_binds * 10 / f, st_quads * 10 / f, st_fills * 10 / f);
 	ZLOG("GL: map texture: %lu tiles sent, %lu quads drawn (per frame x10: %lu, %lu);"
-	     " changed parts sent alone %lu (%lu px)\n",
+	     " changed parts sent alone %lu (%lu px); earlier maps' textures deleted %lu;"
+	     " drawn black for want of a texture %lu\n",
 	     st_map_tiles, st_map_quads, st_map_tiles * 10 / f, st_map_quads * 10 / f,
-	     st_map_parts, st_map_part_px);
+	     st_map_parts, st_map_part_px, st_map_dropped, st_map_black);
 	ZLOG("GL: binds of own textures (not atlas, not map) per frame x10: %lu\n", st_bind_own * 10 / f);
 	if(st_rd_n)
 		ZLOG("GL: refreshes of 8-bit own textures compared with what was sent: %lu (ZOD_REFDIFF),"
@@ -2645,8 +2746,9 @@ void zod_gl_report(void)
 	if(glcheck == 1)
 		ZLOG("GL check: %lu binds, %lu of them raised an error\n", glcheck_binds, glcheck_bad);
 
-	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu\n",
-	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused);
+	ZLOG("GL: textures made %lu (%lu texels, %lu tiles refilled from freed ones), updates %lu (%lu px), refused %lu"
+	     " (asked again %lu)\n",
+	     st_made, st_made_px, st_reused, st_updates, st_update_px, st_refused, st_retried);
 	{
 		int k;
 		unsigned long n = 0, hz = 0;
