@@ -1137,6 +1137,17 @@ merged as night-merge and then into gl (21.11. ~00:50, the user's word).
   that drew nothing is not presented (the game's first frame before the
   map arrived showed an older buffer).
 
+Backlog, LAST (the user, 21.11. ~01:25: "ignore the center stutter for now
+- put it at the end of backlog"):
+- **The stutter "when scrolling over the map centre"** (the user's eye on
+  Hamiller, hand scrolling, smooth N = 2: "maybe I'm imagining"). A
+  measuring aid is ready on the local branch centre-stutter (worktree
+  ../ZodEngine-centre): ZOD_SLOWMAP records each GL frame's work, server
+  and game time by where the view's middle is on an 8 x 8 grid of the map,
+  and the frames of 31 ms work and more (an N = 2 slip); FS-UAE
+  SlowMapCheck passes (14 331 frames in the cells against the bench's
+  14 332). Not run on Hamiller yet.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
