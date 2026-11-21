@@ -219,6 +219,14 @@ For the user (eye tests on an AGA monitor, voltago or the A1200):
   dominates). Recommended default when switched on: two buffers, 192x64;
   one buffer as the faster choice if the eye accepts it.
 
+How it is chosen (21.11. ~02:35, still off by default): the game's
+-H off|on|fast (on = two buffers, fast = one buffer; without -H the
+environment decides: ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF, and
+ZOD_AGA_HWSCROLL=<x>x<y> for other margins); ZodLaunch's "AGA scrolling"
+cycle (Off / On (two buffers) / Fast (one buffer)) under the AGA mode,
+ghosted unless AGA is the renderer, saved as agascroll=. Launcher test
+and FS-UAE AgaHwScroll (through -H) pass; ZodLaunch builds.
+
 ## First real AGA (20.11. 23:36-23:40)
 
 The PiStorm CM4 sits in an A1200: its chipset is real AGA, the CPU is
