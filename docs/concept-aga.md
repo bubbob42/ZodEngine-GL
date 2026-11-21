@@ -219,6 +219,27 @@ For the user (eye tests on an AGA monitor, voltago or the A1200):
   dominates). Recommended default when switched on: two buffers, 192x64;
   one buffer as the faster choice if the eye accepts it.
 
+voltago (A4000D, 68060, its real AGA chipset; 21.11. 03:11-03:24, orig04
+tour, software, -C pal 640x512, 30 s):
+
+| run | fps | groups a frame | work a frame | re-anchors |
+|---|---|---|---|---|
+| without | 5.5 / 5.6 | ~14 000 | 111 ms | -- |
+| two buffers, 192x64 | 5.3 / 5.2 | ~12 300 | 118 ms | 43 |
+| two buffers, 384x64 (2 x 880 KB) | 6.3 | 9 856 | 97 ms | 24 |
+| one buffer, 192x64 | 6.8 | 8 331 | 87 ms | 44 |
+| one buffer, 448x64 (960 KB) | 7.8 | 7 108 | 77 ms | 27 |
+
+The A4000D writes AGA chip RAM no faster than the PiStorm (~2 MB/s with
+this 8-plane laced display fetching), so at ~5 fps the view moves ~75 px a
+frame and the bitmap is anchored again every 4..8 frames -- with two
+buffers each re-anchor rewrites both, which ate the whole gain at 192 px.
+Since then the margins are chosen from the free chip RAM (the widest of
+448..64 px whose bitmaps fit with 256 KB to spare, a plane in the largest
+free block); ZOD_AGA_HWSCROLL=<x>x<y> still sets them. If OpenScreen
+fails anyway, the normal screen opens without hardware scrolling. FS-UAE
+(1990 KB free): 320 px with two buffers, 448 with one; 0 differ.
+
 How it is chosen (21.11. ~02:35, still off by default): the game's
 -H off|on|fast (on = two buffers, fast = one buffer; without -H the
 environment decides: ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF, and
