@@ -285,6 +285,24 @@ changes (minimap, counters: block sums as in the still view).
   bottom panel (36 rows) as the static second viewport -- **-16..20 % of
   the writes**, at the price of the 1..2 line gap above it.
 
+**DONE (the user: "make only the existing 36-row bottom panel a separate,
+unmoving screen ... for AGA"; ZOD_AGA_SPLIT, default on with soft
+scrolling; 17cb888, e341ad2):** the map screen shows the picture's rows
+above the panel, a 640x36 screen below holds the panel (attached child,
+both exclusive, colours shared), Intuition keeps 6 blank rows between
+them. FS-UAE AgaRegions: the panel's share of the scrolled writes 16 % ->
+0 %, all groups 5926 -> 4709 a frame (-20.5 %); every frame read back 0
+differ. voltago (orig04 tour, 640x512, two buffers, same binary on/off):
+**10.6 / 10.4 fps against 9.9 / 9.8**, groups 6724 / 6588 against 8189 /
+8140 (-18.5 %), AGA work 51 against 57 ms; 640x400 with it 14.1 fps (13.0
+without). The gain in fps is smaller than in writes: with 32-bit writes
+the chip writing is a smaller part of the frame now. Input: the panel
+screen's window shares the main window's port; the pointer is read from
+the panel screen in front (the map screen's MouseY stops while the
+pointer is on the panel -- measured with ZOD_MOUSELOG and AmiAgent moving
+the pointer: 'picture 293,511' on the panel, the click 'at 293,511
+(window panel)', 475 in the gap, the map's rows above).
+
 **b) A copper list that scrolls only the map: not worth it on AGA.**
 
 - The 8-pixel step is the copper's, but not the display's: an 8-plane
