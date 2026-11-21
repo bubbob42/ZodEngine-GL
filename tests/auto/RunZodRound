@@ -1,0 +1,23 @@
+.KEY tag/A,secs/A,settings/A,args/F
+.BRA {
+.KET }
+; RunZodRound -- RunZodMidi with the server settings given (-e {settings})
+; and the player on red (a fort of its own: the music's danger levels),
+; the blue bot against it: the round-end test (tests/auto/RoundEnd) runs
+; the engine's default, the next map starting paused, and without it.
+; camd.library from DEV:Libs/camd and minigl.library from DEV:Libs/RadeonGL
+; are added to LIBS: for this run only. The game's log goes to
+; DEV:Test/zod-{tag}.log, a done marker follows when the run is over.
+FailAt 1000
+Stack 262144
+CD DEV:Zod
+SetEnv RadeonGLLog DEV:Test/zod-{tag}-lib.log
+Assign LIBS: DEV:Libs/camd ADD
+Assign LIBS: DEV:Libs/RadeonGL ADD
+Version LIBS:camd.library FULL >DEV:Test/zod-{tag}.log
+DEV:Zod/zod_040 -t red -b blue -e {settings} -r 640x480 -M gm -G zod -F on -B {secs} {args} >>DEV:Test/zod-{tag}.log
+Echo "zod rc=$RC" >>DEV:Test/zod-{tag}.log
+Assign LIBS: DEV:Libs/RadeonGL REMOVE
+Assign LIBS: DEV:Libs/camd REMOVE
+UnSetEnv RadeonGLLog
+Echo >DEV:Test/zod-{tag}.done done

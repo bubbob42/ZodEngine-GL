@@ -216,6 +216,7 @@ ZServer::ZServer() : ZCore()
 	game_on = false;
 	next_end_game_check_time = 0;
 	next_reset_game_time = 0;
+	round_start_wall = 0;
 	do_reset_game = false;
 	next_scuffle_time = 0;
 	next_make_suggestions_time = 0;
@@ -518,11 +519,40 @@ void ZServer::CheckResetGame()
 	DoResetGame();
 }
 
+/* ZOD_ROUNDEND=<seconds> (tests only, unset in normal play): every round
+ * ends that many seconds of WALL time after its map was loaded, whoever
+ * still has units -- the round end and the next map (and its start paused)
+ * without playing a whole match. Wall time, not game time: the round ends
+ * even while the game stands paused. */
+static int round_end_secs(void)
+{
+	static int secs = -1;
+
+	if(secs < 0)
+	{
+		char buf[16];
+		const char *v = zod_env("ZOD_ROUNDEND", buf, sizeof(buf));
+
+		secs = (v && v[0] >= '0' && v[0] <= '9') ? atoi(v) : 0;
+		if(secs > 0)
+			ZLOG("Server: ZOD_ROUNDEND -- every round ends %d s after its map was loaded\n", secs);
+	}
+
+	return secs;
+}
+
 void ZServer::CheckEndGame()
 {
 	double &the_time = ztime.ztime;
 
 	if(!game_on) return;
+
+	if(round_end_secs() > 0 && COMMON::current_time() >= round_start_wall + round_end_secs())
+	{
+		ZLOG("Server: ZOD_ROUNDEND -- the round ends now\n");
+		ProcessEndGame();
+		return;
+	}
 
 	if(the_time >= next_end_game_check_time)
 	{
@@ -631,6 +661,7 @@ void ZServer::LoadNextMap(string override_map_name)
 
 	if(psettings.start_map_paused) PauseGame();
 
+	round_start_wall = COMMON::current_time();
 	game_on = true;
 }
 

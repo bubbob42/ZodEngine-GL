@@ -1,0 +1,46 @@
+; RoundEnd -- the end of a round and the next map (the user on Hamiller,
+; 21.11.: after the fort fell the picture stood under "Click to Start /
+; Resume Game", then smeared -- every object in trails, the side panel gone
+; -- and the music through camd ran "haywire"). ZOD_ROUNDEND ends each
+; round 25 s after its map was loaded (wall time, so also while paused);
+; 10 s later the server loads the next map (the same one: -m). Music
+; through camd (-M gm) with the test's own songs, captured raw from the
+; serial port; ZOD_AGA_CHECK is not used, these runs are RTG/GL.
+; (1) software (-o), the engine's default: the next map starts PAUSED;
+; (2) software (-o), start unpaused (psettings_nopause.txt);
+; (3) GL (null card), the default (paused).
+; Then on the Mac: tools/zmu_midi_check.py build/autotest/RoundEnd.serial
+;      dist/Test/midi-songs --log build/autotest/RoundEnd.out
+; LIMIT 900
+; SERIAL_RAW
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+MakeDir >NIL: DEV:Zod/music
+Copy DEV:Test/midi-songs/#?.zmu DEV:Zod/music/ QUIET
+Echo "use_database=0" >DEV:Test/psettings_pause.txt
+Echo "use_mysql=0" >>DEV:Test/psettings_pause.txt
+Echo "require_login=0" >>DEV:Test/psettings_pause.txt
+Echo "start_map_paused=1" >>DEV:Test/psettings_pause.txt
+Echo "bots_start_ignored=0" >>DEV:Test/psettings_pause.txt
+SetEnv ZOD_ROUNDEND 25
+Echo "=== (1) software, the next map paused ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodRound re1 75 DEV:Test/psettings_pause.txt -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-re1.done
+Type DEV:Test/zod-re1.log >>DEV:Test/auto.log
+Echo "=== (2) software, the next map unpaused ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodRound re2 75 psettings_nopause.txt -o -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-re2.done
+Type DEV:Test/zod-re2.log >>DEV:Test/auto.log
+Echo "=== (3) GL (null card), the next map paused ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZodRound re3 75 DEV:Test/psettings_pause.txt -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-re3.done
+Type DEV:Test/zod-re3.log >>DEV:Test/auto.log
+Type DEV:Test/zod-re3-lib.log >>DEV:Test/auto.log
+UnSetEnv ZOD_ROUNDEND
+Delete >NIL: DEV:Zod/music/#?.zmu
+Delete >NIL: DEV:Zod/music
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

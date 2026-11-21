@@ -37,7 +37,7 @@ for b in "$BUILD/zod_040" "$BUILD/zod_060"; do
 done
 
 cp "$LIB" dist/Libs/RadeonGL/minigl.library
-cp tests/auto/RunZod tests/auto/RunZodNoGL tests/auto/RunZodCensus tests/auto/WaitDone dist/Test/
+cp tests/auto/RunZod tests/auto/RunZodNoGL tests/auto/RunZodCensus tests/auto/RunZodMidi tests/auto/RunZodRound tests/auto/WaitDone dist/Test/
 [ -f dist/Test/Grab ] || cp ../RadeonGL/dist/Test/Grab dist/Test/ 2>/dev/null || true
 
 echo "stage_dist: dist/Zod from $DATA, minigl.library from $LIB, builds from $BUILD"

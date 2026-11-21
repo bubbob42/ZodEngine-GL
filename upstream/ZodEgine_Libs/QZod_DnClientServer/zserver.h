@@ -173,6 +173,7 @@ class QZOD_DNCLIENTSERVERSHARED_EXPORT ZServer : public ZCore
 		double next_scuffle_time;
 		double next_end_game_check_time;
 		double next_reset_game_time;
+		double round_start_wall;          /* ZOD_ROUNDEND: when this map was loaded */
 		double next_make_suggestions_time;
 		bool do_reset_game;
 

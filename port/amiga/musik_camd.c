@@ -75,6 +75,7 @@ static double p_song_start = 0.0;
 
 /* statistics (the process writes, the report reads at the end) */
 static ULONG s_events = 0, s_notes = 0, s_songs = 0, s_jumps = 0, s_loops = 0;
+static ULONG s_jumps_past = 0;       /* jumps past the song's end (song_jump) */
 static double s_late_sum = 0.0, s_late_max = 0.0;
 static ULONG s_late_n = 0;
 
@@ -367,8 +368,9 @@ static void song_reset_state(void)
 	p_step = 0;
 }
 
-/* to step `target`: the programs and volumes as they stand there, no notes */
-static void song_chase(ULONG target)
+/* to step `target`: the programs and volumes as they stand there, no notes.
+ * Returns 1, and sends nothing, when the song ends before `target`. */
+static int song_chase(ULONG target)
 {
 	ULONG pos, w;
 	UBYTE ev[4];
@@ -379,10 +381,11 @@ static void song_chase(ULONG target)
 	for(;;)
 	{
 		pos = p_pos;
-		if(!event_read(&pos, &w, ev)) break;
+		if(!event_read(&pos, &w, ev)) return 1;
 		/* the events AT the target play (its notes too): chase only those
 		 * before it */
-		if(p_step + w >= target || ev[0] == 4) break;
+		if(p_step + w >= target) break;
+		if(ev[0] == 4) return 1;
 
 		p_step += w;
 		p_pos = pos;
@@ -398,12 +401,39 @@ static void song_chase(ULONG target)
 	/* p_step stays the step of the last event read: the next one's wait
 	 * counts from it; the caller sets the clock so that `target` is now */
 	volumes_out();
+
+	return 0;
 }
 
+/* A jump past the song's end -- the danger levels' places come from the
+ * engine's own soundtrack, not from these songs, so a shorter song can be
+ * jumped past (the user on Hamiller, 21.11.: the music "haywire" after the
+ * round end). The clock was set as if the target were now, every event
+ * after it counted as overdue, and the player sent the song again and
+ * again at full speed until it had caught up (RoundEnd in FS-UAE: 13
+ * loops, up to 190 s late). Now as the mixer does it (mischer_springen,
+ * then its loop restarting the song): the song from its start, its state
+ * reset -- a jump to step 0 -- when it loops, and over when it doesn't. */
 static void song_jump(ULONG target)
 {
 	notes_off();
-	song_chase(target);
+
+	if(song_chase(target))
+	{
+		s_jumps_past++;
+		target = 0;
+
+		if(!p_loop)
+		{
+			song_reset_state();
+			m_playing = 0;
+			s_jumps++;
+			return;
+		}
+
+		song_chase(0);
+	}
+
 	p_t0 = clock_us() - (double)target * STEP_US;
 	s_jumps++;
 }
@@ -860,9 +890,10 @@ void midi_bericht(void)
 {
 	if(!s_songs && !s_events) return;
 
-	ZLOG("MIDI: %lu songs, %lu events sent, %lu notes, %lu jumps, %lu loops, %lu dropped; "
-	     "events late on average %lu us, at most %lu us\n",
+	ZLOG("MIDI: %lu songs, %lu events sent, %lu notes, %lu jumps (%lu past the song's end), "
+	     "%lu loops, %lu dropped; events late on average %lu us, at most %lu us\n",
 	     (unsigned long)s_songs, (unsigned long)s_events, (unsigned long)s_notes,
-	     (unsigned long)s_jumps, (unsigned long)s_loops, (unsigned long)s_dropped,
+	     (unsigned long)s_jumps, (unsigned long)s_jumps_past, (unsigned long)s_loops,
+	     (unsigned long)s_dropped,
 	     (unsigned long)(s_late_n ? s_late_sum / s_late_n : 0.0), (unsigned long)s_late_max);
 }
