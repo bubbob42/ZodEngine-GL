@@ -22,6 +22,10 @@ void zod_aga_flip(SDL_Surface *compose, struct Screen *scr, int dy);
 /* before CloseScreen: the screen's own bitmap back, the buffers freed */
 void zod_aga_close(struct Screen *scr);
 
+/* after CloseScreen: frees the large bitmap of hardware scrolling, which
+ * the screen used and does not free itself */
+void zod_aga_closed(void);
+
 /* the report line at the end */
 void zod_aga_report(void);
 

@@ -300,6 +300,7 @@ static void close_all(void)
 	{
 		if(aga_aktiv) zod_aga_close(screen_ptr);
 		CloseScreen(screen_ptr);
+		if(aga_aktiv) zod_aga_closed();
 		screen_ptr = 0;
 	}
 

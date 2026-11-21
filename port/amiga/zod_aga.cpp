@@ -100,6 +100,12 @@ static UBYTE *hw_zero = 0;          /* a row of colour 0 (rows beside the pictur
 static int hw_anchored = 0, hw_ox = 0, hw_oy = 0;   /* map pixel at bitmap (0,0) */
 static int hw_rx = 0, hw_ry = 0;    /* the display window's place in the bitmap */
 static int hw_shown_rx = -1, hw_shown_ry = -1;      /* what the ViewPort shows */
+/* the large bitmaps are our own (SA_BitMap, AllocScreenBuffer with a
+ * bitmap): the screen keeps the size of the picture, so its display window
+ * is exactly the picture's -- an oversized screen showed its whole bitmap
+ * height (voltago, pal400: 528 rows instead of 400). [0] the screen's,
+ * freed after CloseScreen (zod_aga_closed); [1] the second buffer's. */
+static struct BitMap *hw_bm[NBUF];
 static int view_set = 0, view_sx = 0, view_sy = 0;
 static unsigned long st_hw_anchors = 0, st_hw_scrolls = 0, st_hw_moved = 0;
 
@@ -260,6 +266,10 @@ static void buffers_free(struct Screen *scr)
 	FreeScreenBuffer(scr, sbuf[1]);
 	FreeScreenBuffer(scr, sbuf[0]);
 	sbuf[0] = sbuf[1] = 0;
+
+	/* our second large bitmap: not on display any more (the screen's own
+	 * is back), FreeScreenBuffer leaves a given bitmap to its owner */
+	if(hw_bm[1]) { WaitBlit(); FreeBitMap(hw_bm[1]); hw_bm[1] = 0; }
 	DeleteMsgPort(safe_port);
 	DeleteMsgPort(disp_port);
 	safe_port = disp_port = 0;
@@ -425,6 +435,23 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		return 0;
 	}
 
+	if(hw)
+	{
+		hw_bm[0] = AllocBitMap((ULONG)hw_bw, (ULONG)hw_bh, 8, BMF_DISPLAYABLE | BMF_CLEAR, 0);
+
+		if(!hw_bm[0])
+		{
+			int i;
+
+			ZLOG("AGA: no chip RAM for the %dx%d bitmap of hardware scrolling -- without it\n",
+			     hw_bw, hw_bh);
+			for(i = 0; i < NBUF; i++) { free(hw_shadow[i]); hw_shadow[i] = 0; }
+			free(hw_zero);
+			hw_zero = 0;
+			hw = 0;
+		}
+	}
+
 	{
 		/* the display window: the whole mode, or for pal400 the 400 rows in
 		 * the middle of PAL HiRes Laced's 512 (the screen placed there, its
@@ -434,9 +461,12 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		struct Rectangle dclip = { 0, (WORD)top, (WORD)(sw - 1), (WORD)(top + sh - 1) };
 		struct TagItem sa[] = {
 			{ SA_DisplayID,   id },
-			{ SA_Width,       (ULONG)(hw ? hw_bw : sw) },
-			{ SA_Height,      (ULONG)(hw ? hw_bh : sh) },
-			{ (hw || top) ? SA_DClip : TAG_IGNORE, (ULONG)&dclip },
+			{ SA_Width,       (ULONG)sw },
+			{ SA_Height,      (ULONG)sh },
+			{ top ? SA_DClip : TAG_IGNORE, (ULONG)&dclip },
+			/* hardware scrolling: our larger bitmap behind a screen of the
+			 * picture's size (the offsets move the picture over it) */
+			{ hw ? SA_BitMap : TAG_IGNORE, (ULONG)hw_bm[0] },
 			{ top ? SA_Top : TAG_IGNORE, (ULONG)top },
 			/* nothing else on the display above or below a shorter picture */
 			{ top ? SA_Exclusive : TAG_IGNORE, TRUE },
@@ -454,23 +484,23 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 		scr = OpenScreenTagList(0, sa);
 
-		/* the large bitmap did not fit (chip RAM in pieces): the normal
-		 * screen without hardware scrolling rather than no screen */
+		/* the screen did not open with the large bitmap: the normal screen
+		 * without hardware scrolling rather than no screen */
 		if(!scr && hw)
 		{
 			int i;
 
-			ZLOG("AGA: the %dx%d bitmap for hardware scrolling did not fit (error %ld) -- "
-			     "without hardware scrolling\n", hw_bw, hw_bh, (long)err);
+			ZLOG("AGA: the screen with the %dx%d bitmap for hardware scrolling did not open "
+			     "(error %ld) -- without hardware scrolling\n", hw_bw, hw_bh, (long)err);
 
 			for(i = 0; i < NBUF; i++) { free(hw_shadow[i]); hw_shadow[i] = 0; }
 			free(hw_zero);
 			hw_zero = 0;
 			hw = 0;
+			FreeBitMap(hw_bm[0]);
+			hw_bm[0] = 0;
 
-			sa[1].ti_Data = (ULONG)sw;
-			sa[2].ti_Data = (ULONG)sh;
-			if(!top) sa[3].ti_Tag = TAG_IGNORE;   /* pal400 keeps its window */
+			sa[4].ti_Tag = TAG_IGNORE;            /* no SA_BitMap */
 			err = 0;
 			scr = OpenScreenTagList(0, sa);
 		}
@@ -483,9 +513,8 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		return 0;
 	}
 
-	/* the bitmap starts as the shadow does: colour 0 everywhere (before a
-	 * second buffer copies it) */
-	if(hw) SetRast(&scr->RastPort, 0);
+	/* (the large bitmap starts as the shadow does: colour 0 everywhere --
+	 * BMF_CLEAR) */
 
 	*dy = (sh - h) / 2;
 
@@ -514,7 +543,16 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		safe_port = CreateMsgPort();
 		disp_port = CreateMsgPort();
 		sbuf[0] = AllocScreenBuffer(scr, 0, SB_SCREEN_BITMAP);
-		sbuf[1] = AllocScreenBuffer(scr, 0, SB_COPY_BITMAP);
+
+		/* hardware scrolling: a second large bitmap of our own (a copy of
+		 * the screen's would only have the screen's size) */
+		if(hw)
+		{
+			hw_bm[1] = AllocBitMap((ULONG)hw_bw, (ULONG)hw_bh, 8, BMF_DISPLAYABLE | BMF_CLEAR, hw_bm[0]);
+			sbuf[1] = hw_bm[1] ? AllocScreenBuffer(scr, hw_bm[1], 0) : 0;
+		}
+		else
+			sbuf[1] = AllocScreenBuffer(scr, 0, SB_COPY_BITMAP);
 
 		if(safe_port && disp_port && sbuf[0] && sbuf[1])
 		{
@@ -536,6 +574,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 			if(sbuf[1]) FreeScreenBuffer(scr, sbuf[1]);
 			if(sbuf[0]) FreeScreenBuffer(scr, sbuf[0]);
 			sbuf[0] = sbuf[1] = 0;
+			if(hw_bm[1]) { FreeBitMap(hw_bm[1]); hw_bm[1] = 0; }
 			if(safe_port) DeleteMsgPort(safe_port);
 			if(disp_port) DeleteMsgPort(disp_port);
 			safe_port = disp_port = 0;
@@ -606,9 +645,9 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	     w, h, *dy, dbuf ? "two buffers (ChangeScreenBuffer)" : "into the shown bitmap",
 	     check_on ? "; every frame read back (ZOD_AGA_CHECK)" : "");
 
-	if(mi == 3)
-		ZLOG("AGA: the screen at row %d of the display, %d rows shown (exclusive)\n",
-		     (int)scr->TopEdge, (int)scr->ViewPort.DHeight);
+	ZLOG("AGA: the display window %dx%d at row %d%s\n",
+	     (int)scr->ViewPort.DWidth, (int)scr->ViewPort.DHeight, (int)scr->TopEdge,
+	     mi == 3 ? " (exclusive)" : "");
 
 	if(hw)
 		ZLOG("AGA: hardware scrolling (ZOD_AGA_HWSCROLL): a %dx%d bitmap (%ld KB of chip RAM a buffer), "
@@ -1042,6 +1081,11 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	/* the window's place first, then the buffer: ChangeScreenBuffer builds
 	 * the new bitmap's plane pointers from the RasInfo offsets, ScrollVPort
 	 * sets the fine scroll as well */
+	/* offsets someone else reset (a display rebuilt by Intuition) count
+	 * as a move: ScrollVPort again */
+	if(vp->RasInfo->RxOffset != hw_shown_rx || vp->RasInfo->RyOffset != hw_shown_ry)
+		hw_shown_rx = hw_shown_ry = -1;
+
 	vp->RasInfo->RxOffset = (WORD)hw_rx;
 	vp->RasInfo->RyOffset = (WORD)hw_ry;
 
@@ -1211,6 +1255,12 @@ void zod_aga_flip(SDL_Surface *cs, struct Screen *scr, int dy)
 	}
 
 	st_frames++;
+}
+
+/* after CloseScreen: the large bitmap the screen used (SA_BitMap) */
+void zod_aga_closed(void)
+{
+	if(hw_bm[0]) { WaitBlit(); FreeBitMap(hw_bm[0]); hw_bm[0] = 0; }
 }
 
 void zod_aga_close(struct Screen *scr)
