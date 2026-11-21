@@ -260,6 +260,64 @@ cycle (Off / On (two buffers) / Fast (one buffer)) under the AGA mode,
 ghosted unless AGA is the renderer, saved as agascroll=. Launcher test
 and FS-UAE AgaHwScroll (through -H) pass; ZodLaunch builds.
 
+## The side panel flicker (21.11. ~10:00, the user's A4000T)
+
+The user's video: "side panel flickers on AGA while scrolling" (ZodLaunch
+"On (two buffers)", 640x512). Two causes, both fixed (aaa50a0):
+
+1. **"Two buffers" had been one buffer since the own bitmaps (93cb055).**
+   The first ScreenBuffer was asked for with SB_SCREEN_BITMAP, which the
+   AllocScreenBuffer autodoc keeps for a bitmap Intuition allocated; on a
+   screen with our bitmap (SA_BitMap) it fails, and the game fell back to
+   one buffer -- the log said "no second buffer", every soft-scrolling
+   run from 21.11. ~08:20 on, FS-UAE and voltago alike, unnoticed. One
+   buffer writes into the shown bitmap: the side panel, which moves across
+   the bitmap every frame, is seen half at its old place and half at its
+   new one. Now the first buffer is made from our bitmap (as the autodoc
+   says for such screens); the fallback line names the allocation that
+   failed, and AgaHwScroll notes that every two-buffer run must say "two
+   buffers".
+2. **The buffer and its place shown in two steps.** ChangeScreenBuffer
+   puts the new buffer on display at the place the display had; the
+   ScrollVPort after it moves it to the new place. A frame that starts
+   between the two calls shows the new buffer at the old place: the map,
+   anchored in the bitmap, looks right, but the side panel, drawn at the
+   new place, is off by the scroll step for that frame. Intuition does
+   the change in its input task, so while the mouse moves the gap can be
+   milliseconds. Now the RasInfo gets the new buffer and the new offsets
+   and one ScrollVPort shows both (the ScrollVPort autodoc's "double
+   buffering effect"); ChangeScreenBuffer then finds that buffer on
+   display and only sends its messages and tells Intuition (if it fails,
+   Intuition being busy, the old buffer goes back at the new place).
+   ZOD_AGA_TOGETHER=off keeps the old order for a comparison by eye.
+
+The check: with ZOD_AGA_CHECK the game reads the map ViewPort's copper
+list (its first plane pointer and BPLCON1) before, between and after the
+two calls; between them the display must hold the old buffer at the old
+place or the new one at the new. FS-UAE AgaHwScroll: the old order 231 of
+231 moving buffer changes "a buffer at the other's place", one ScrollVPort
+0 of 473 / 292 / 388 / 232; every two-buffer run two buffers, 0 pixels
+differ.
+
+What two buffers really cost (voltago, orig04 tour, 30 s, the bottom panel
+on its own screen, same binary, ABBA; 21.11. 10:21-10:29):
+
+| | two buffers | one buffer ("fast") |
+|---|---|---|
+| 640x512 | 8.9 / 8.7 fps, 9 340 groups, 65 ms AGA work | 10.4 / 10.4 fps, 6 400 groups, 54 ms |
+| 640x400 | 12.3 fps, 6 459 groups, 45 ms | 13.0 fps, 4 898 groups, 40 ms |
+
+Each buffer is two frames behind, so the newly shown strip and the moving
+units are larger per write (FS-UAE AgaRegions: map view 2 524 groups a
+frame with two buffers against 1 773 with one; the side panel, rewritten
+almost whole every frame either way, 3 076 against 2 857): two buffers
+cost ~15 % at 640x512 and ~5 % at 640x400 --
+not "almost nothing", as the one-buffer runs of the morning had made it
+look (docs/research-aga-speed.md 3.9 corrected). The A4000T now has the
+fixed zod_060 (the morning's build kept as zod_060.onebuf) for the
+user's eye: two buffers should show no panel flicker at all; "fast"
+still tears by design.
+
 ## First real AGA (20.11. 23:36-23:40)
 
 The PiStorm CM4 sits in an A1200: its chipset is real AGA, the CPU is

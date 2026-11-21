@@ -1196,6 +1196,18 @@ merged as night-merge and then into gl (21.11. ~00:50, the user's word).
   env_switch_test.cpp (gmake envtest) checks the word rules on the host.
   The variable names stay (some are German: ZOD_STEINE, ZOD_ZONEN,
   ZOD_ZEIGER, ZOD_LADEBALKEN, ZOD_LUECKE, ZOD_BREIT, ZOD_SCHLAF).
+- **AGA: the side panel flickered while scrolling** (the user's video,
+  21.11. ~09:56, the A4000T, "On (two buffers)"): two causes, fixed in
+  aaa50a0 on aga-split -- (1) since the own bitmaps the first ScreenBuffer
+  failed (SB_SCREEN_BITMAP on a screen with our bitmap) and "two buffers"
+  quietly ran as one, writing into the shown bitmap; (2) ChangeScreenBuffer
+  then ScrollVPort showed the new buffer at the old place for a frame that
+  began between them -- now one ScrollVPort shows buffer and place
+  together (ZOD_AGA_TOGETHER, default on). FS-UAE copper read: old order
+  231 of 231 moving changes wrong, new 0. voltago with real two buffers:
+  640x512 8.9 fps (one buffer 10.4), 640x400 12.3 (13.0); the morning's
+  "two buffers" figures were one buffer (research-aga-speed 3.9, 3.10
+  corrected). The A4000T has the fixed zod_060 for the user's eye.
 
 Backlog, LAST (the user, 21.11. ~01:25: "ignore the center stutter for now
 - put it at the end of backlog"):

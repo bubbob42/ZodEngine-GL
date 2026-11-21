@@ -222,16 +222,35 @@ soft scrolling:
   of our own behind it (SA_BitMap; the second buffer our own too). The
   window is now exactly "640x512 at row 0" / "640x400 at row 56":
 
-| voltago, orig04 tour | two buffers | one buffer | AGA work a frame |
+| voltago, orig04 tour | "two buffers" (really one, see below) | one buffer | AGA work a frame |
 |---|---|---|---|
-| 640x512 | **10.0 / 10.0 fps** | 10.1 | 56 ms |
-| 640x400 | **13.0 / 12.9 fps** | 13.2 | 42 ms |
+| 640x512 | 10.0 / 10.0 fps | 10.1 | 56 ms |
+| 640x400 | 13.0 / 12.9 fps | 13.2 | 42 ms |
 
-640x400 is +30 %. The fix alone took 640x512 from 8.6 to 10.0 fps (no
-fetches beyond the picture any more), and two buffers now cost almost
-nothing against one. Over the morning, voltago's AGA scrolling went from
-5.5 fps (no soft scrolling, 16-bit writes) to 10.0 (640x512) / 13.0
-(640x400).
+**CORRECTED (21.11. ~10:30):** with the own bitmaps the first
+ScreenBuffer failed (SB_SCREEN_BITMAP on a screen with our bitmap, see
+docs/concept-aga.md "The side panel flicker"), and every "two buffers" run
+from here on fell back to one buffer -- the log said "no second buffer".
+So both columns above are one buffer; "two buffers now cost almost
+nothing" was wrong, and "the fix took 640x512 from 8.6 to 10.0" compared
+two buffers (8.6) with one (10.0) -- the fix's own share is not known
+from these runs. 640x400 against 640x512 (+30 %, one buffer each) stands.
+Measured again with the first buffer fixed (aaa50a0; the bottom panel on
+its own screen, same binary, ABBA):
+
+| voltago, orig04 tour | two buffers | one buffer |
+|---|---|---|
+| 640x512 | **8.9 / 8.7 fps** (65 ms AGA work) | 10.4 / 10.4 (54 ms) |
+| 640x400 | **12.3 fps** (45 ms) | 13.0 (40 ms) |
+
+Two buffers cost ~15 % at 640x512 and ~5 % at 640x400. Each buffer is two
+frames behind, so the newly shown strip and the moving units are larger
+per write; the side panel is rewritten almost whole every frame either
+way (FS-UAE AgaRegions, panel screen on: map view 2524 groups a frame with
+two buffers against 1773 with one, side panel 3076 against 2857). Over the morning
+voltago's AGA scrolling went from 5.5 fps (no soft scrolling, 16-bit
+writes) to 8.9 (640x512) / 12.3 (640x400) with two buffers, 10.4 / 13.0
+with one.
 
 ### 3.10 The HUD's share, a HUD below the map, a copper split (21.11. ~08:40)
 
@@ -247,6 +266,13 @@ scrolling writes, by the part of the picture it shows; orig04 tour):
 | 640x512, two buffers | 1777 a frame (29 %) | 3145 (53 %) | 1004 (16 %) |
 | 640x512, one buffer | 1765 (29 %) | 3117 (52 %) | 1003 (17 %) |
 | 640x400, two buffers | 1455 (29 %) | 2503 (50 %) | 1003 (20 %) |
+
+(CORRECTED 21.11. ~10:40: the "two buffers" rows above were one buffer --
+the first ScreenBuffer failed, see 3.9. Again with two buffers that are
+two, the bottom panel on its own screen by then (aaa50a0): 640x512 two
+buffers map view 2524 (45 %), side panel 3076 (54 %), bottom 0; one buffer
+1773 (38 %) / 2857 (61 %); 640x400 two buffers 2077 (46 %) / 2378 (53 %).
+The HUD's share stands: the side panel alone is about half of all writes.)
 
 **About 70 % of the chip RAM writes while scrolling are the HUD**: it
 stands still on screen, so it moves across the scrolled bitmap -- its new
@@ -292,11 +318,19 @@ above the panel, a 640x36 screen below holds the panel (attached child,
 both exclusive, colours shared), Intuition keeps 6 blank rows between
 them. FS-UAE AgaRegions: the panel's share of the scrolled writes 16 % ->
 0 %, all groups 5926 -> 4709 a frame (-20.5 %); every frame read back 0
-differ. voltago (orig04 tour, 640x512, two buffers, same binary on/off):
-**10.6 / 10.4 fps against 9.9 / 9.8**, groups 6724 / 6588 against 8189 /
-8140 (-18.5 %), AGA work 51 against 57 ms; 640x400 with it 14.1 fps (13.0
-without). The gain in fps is smaller than in writes: with 32-bit writes
-the chip writing is a smaller part of the frame now. Input: the panel
+differ. voltago (orig04 tour, 640x512, same binary on/off): 10.6 / 10.4
+fps against 9.9 / 9.8, groups 6724 / 6588 against 8189 / 8140 (-18.5 %),
+AGA work 51 against 57 ms; 640x400 with it 14.1 fps (13.0 without) --
+**CORRECTED (21.11. ~10:35): these runs were one buffer on both sides**
+(the first ScreenBuffer failed, see 3.9), so the comparison is fair but
+not the two-buffer default. With the first buffer fixed (aaa50a0), two
+buffers, ABBA, 10:30-10:35: **9.0 / 9.1 fps against 8.1 / 8.0 (+12 %)**,
+groups 9424 / 9477 against 11225 / 11280 (-16 %), AGA work 65 against 72
+ms. With two buffers the panel's own screen saves more (~1 800 groups a
+frame against ~1 500 with one, the frames being slower a larger part of
+them). The gain in
+fps is smaller than in writes: with 32-bit writes the chip writing is a
+smaller part of the frame now. Input: the panel
 screen's window shares the main window's port; the pointer is read from
 the panel screen in front (the map screen's MouseY stops while the
 pointer is on the panel -- measured with ZOD_MOUSELOG and AmiAgent moving
