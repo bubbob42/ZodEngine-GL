@@ -233,6 +233,83 @@ nothing against one. Over the morning, voltago's AGA scrolling went from
 5.5 fps (no soft scrolling, 16-bit writes) to 10.0 (640x512) / 13.0
 (640x400).
 
+### 3.10 The HUD's share, a HUD below the map, a copper split (21.11. ~08:40)
+
+The user: "a) what could we gain by placing the sidebar below the map
+area? b) could we gain something by aligning the sidebar at 8px beam step
+and use a custom copperlist for scrolling only the map?"
+
+Measured first (FS-UAE AgaRegions, ZOD_AGA_REGIONS: every group soft
+scrolling writes, by the part of the picture it shows; orig04 tour):
+
+| run | map view | side panel | bottom panel |
+|---|---|---|---|
+| 640x512, two buffers | 1777 a frame (29 %) | 3145 (53 %) | 1004 (16 %) |
+| 640x512, one buffer | 1765 (29 %) | 3117 (52 %) | 1003 (17 %) |
+| 640x400, two buffers | 1455 (29 %) | 2503 (50 %) | 1003 (20 %) |
+
+**About 70 % of the chip RAM writes while scrolling are the HUD**: it
+stands still on screen, so it moves across the scrolled bitmap -- its new
+place and the map put back at its old place, every frame, whatever the
+speed. (FS-UAE ran these at ~65 fps; at voltago's ~10 fps the map strips
+are larger per frame, the HUD share still ~70..75 %.)
+
+**a) The sidebar below the map: the largest gain left.** With the whole
+HUD as one band below the map, the display splits top to bottom into two
+viewports: the map above, scrolled over its large bitmap, the HUD below in
+a small bitmap of its own that never moves -- written only where it
+changes (minimap, counters: block sums as in the still view).
+
+- ~70 % fewer chip writes while scrolling (~3x). On voltago (640x512, 10
+  fps: ~56 ms of AGA work a frame, of it ~45 ms the writes) roughly 30 ms
+  a frame less -> **~14..15 fps instead of 10** (+40..50 %); with 640x400
+  ~17..18; the PiStorm gains more (its CPU part is smaller).
+- The map gets the full width: 640 instead of 540 px.
+- The second viewport can have its own depth (the panels need 65..70
+  colours for 99 %: 7 planes) -- a few % more bandwidth, minor.
+- System-friendly: two Intuition screens, the HUD screen attached to the
+  map screen (SA_Parent / SA_FrontChild, V39) so they move as one; between
+  two viewports AGA shows 1..2 blank lines while the copper reloads the
+  bitplane pointers -- with one shared palette (VC_NoColorPaletteLoad,
+  V40) the gap stays that small; with a palette of its own ~9 lines (256
+  colours to load).
+- The cost: the HUD's layout. The engine draws a side panel 100 px wide;
+  below the map it becomes a band ~110..130 rows high (its ~47 600 px of
+  panel plus the 36-row bottom panel). Either the engine's HUD is laid
+  out anew (cego's code, all renderers -- a design change, the user's and
+  cego's call), or the AGA layer only rearranges the panel's pieces into
+  the band and maps the mouse back (the engine untouched; the map view
+  then stays 540 px wide unless the engine draws wider). Input from two
+  screens has to be merged either way.
+- A cheaper first step without any layout change: only the existing
+  bottom panel (36 rows) as the static second viewport -- **-16..20 % of
+  the writes**, at the price of the 1..2 line gap above it.
+
+**b) A copper list that scrolls only the map: not worth it on AGA.**
+
+- The 8-pixel step is the copper's, but not the display's: an 8-plane
+  hires screen needs AGA's 64-bit fetch (FMODE 3), so the bitplane data
+  comes in 64-pixel units; a switch to another bitmap mid-line can only
+  take effect at a fetch boundary (512 or 576, not 540).
+- The fine scroll (BPLCON1) delays the whole line's output; changing it
+  mid-line shifts the pixels at the switch at once -- a seam of doubled or
+  lost pixels at the panel's edge in every scroll position not a multiple
+  of 64.
+- The switch itself is 16 copper MOVEs (8 bitplane pointers) plus the
+  scroll register, ~70 colour clocks -- a quarter of the line -- during
+  which the fetches mix the two bitmaps. Every line needs it: ~20 copper
+  instructions x 256 lines a field x 50 fields = ~0.5 M chip slots a
+  second, in the display lines where the CPU's slots are scarce already
+  -- about the bandwidth the HUD writes cost now.
+- And it is the kind of hardware banging the project keeps out: a user
+  copper list writing bitplane pointers fights graphics.library's own
+  (ScrollVPort, ChangeScreenBuffer).
+- The one way AGA gives two scroll offsets on one line is dual playfield
+  (BPLCON1 has one delay per playfield; VC_DUALPF_Disable even keeps one
+  256-entry palette) -- but then the map has 4 planes, 16 colours, against
+  the 33..55 it needs (3.3). A vertical split (a) gives the same gain
+  without a seam and without losing colours.
+
 ## 4. Recommendation
 
 1. **32-bit chip writes (3.1)** -- next, no change to the look, ~25..30 %

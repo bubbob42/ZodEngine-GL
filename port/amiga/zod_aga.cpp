@@ -141,6 +141,30 @@ static int colors_on = -1;
 static unsigned long col_hist[COL_N][256];
 static unsigned long col_frames = 0, col_seen = 0;
 
+/* ZOD_AGA_REGIONS (research, docs/research-aga-speed.md): the groups soft
+ * scrolling writes, by the part of the picture they show -- how much of
+ * the chip RAM writing the HUD causes */
+static int regions_on = -1;
+static unsigned long reg_groups[COL_N], reg_frames = 0;
+
+static void regions_count(int brow, int ga, int gb)
+{
+	const int y = brow - hw_ry;
+	int g;
+
+	if(regions_on < 0) regions_on = zod_env_switch("ZOD_AGA_REGIONS", 0);
+	if(!regions_on || view_w <= 0) return;
+
+	for(g = ga; g <= gb; g++)
+	{
+		const int x = g * 16 + 8 - hw_rx;   /* the group's middle on the picture */
+
+		if(x >= view_rx + view_w) reg_groups[COL_SIDE]++;
+		else if(y >= view_ry + view_h) reg_groups[COL_BOTTOM]++;
+		else reg_groups[COL_VIEW]++;
+	}
+}
+
 static void colors_count(const SDL_Surface *cs)
 {
 	int x, y;
@@ -1058,6 +1082,7 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 				if(c2p32_on) { ga &= ~1; gb |= 1; }
 
 				c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
+				regions_count((int)brow, ga, gb);
 				st_groups += (unsigned long)(gb - ga + 1);
 				bytes += 16UL * (gb - ga + 1);
 				run = -1;
@@ -1116,6 +1141,7 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	}
 
 	st_hw_scrolls++;
+	if(regions_on > 0) reg_frames++;
 	st_frames++;
 }
 
@@ -1301,6 +1327,17 @@ void zod_aga_report(void)
 
 	if(check_on > 0)
 		ZLOG("; read back in %lu frames: %lu pixels differ\n", st_check_frames, st_check_differ);
+
+	if(regions_on > 0 && reg_frames)
+	{
+		const unsigned long t = reg_groups[COL_VIEW] + reg_groups[COL_SIDE] + reg_groups[COL_BOTTOM];
+
+		ZLOG("AGA soft scrolling, groups written by part (ZOD_AGA_REGIONS), %lu frames: "
+		     "map view %lu a frame (%lu %%), side panel %lu (%lu %%), bottom panel %lu (%lu %%)\n",
+		     reg_frames, reg_groups[COL_VIEW] / reg_frames, t ? reg_groups[COL_VIEW] * 100 / t : 0UL,
+		     reg_groups[COL_SIDE] / reg_frames, t ? reg_groups[COL_SIDE] * 100 / t : 0UL,
+		     reg_groups[COL_BOTTOM] / reg_frames, t ? reg_groups[COL_BOTTOM] * 100 / t : 0UL);
+	}
 
 	if(col_frames)
 	{

@@ -1,0 +1,29 @@
+; AgaRegions -- research for docs/research-aga-speed.md: which part of the
+; picture the chip RAM writes of AGA soft scrolling go to (ZOD_AGA_REGIONS:
+; map view, side panel, bottom panel), orig04 tour, 20 s each: -C pal two
+; buffers, -C pal one buffer, -C pal400 two buffers.
+; LIMIT 1200
+; MACHINE aga
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+SetEnv ZOD_AGA_REGIONS on
+SetEnv ZOD_TOUR on
+Echo "=== -C pal, two buffers ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rg2 20 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rg2.done
+Type DEV:Test/zod-rg2.log >>DEV:Test/auto.log
+Echo "=== -C pal, one buffer ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rg1 20 -o -C pal -H fast -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rg1.done
+Type DEV:Test/zod-rg1.log >>DEV:Test/auto.log
+Echo "=== -C pal400, two buffers ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod rg4 20 -o -C pal400 -H on -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-rg4.done
+Type DEV:Test/zod-rg4.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_AGA_REGIONS
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
