@@ -66,6 +66,9 @@ extern "C" void zod_roto_peak_report(unsigned long *calls, unsigned long *made,
 extern "C" void zod_size_hist_report(unsigned long *h);
 /* zplayer.cpp -- die schlimmsten drei Bilder, einzeln aufgeschluesselt */
 extern "C" void zod_worst_report(void);
+#ifdef __amigaos__
+extern "C" int zod_aga_fallback_ahead(int w, int h);   /* port/amiga/sdl_screen.cpp */
+#endif
 /* zplayer.cpp -- Effektliste */
 extern "C" unsigned long zod_eff_mittel_get(void);
 extern "C" unsigned long zod_roto_max_greift_get(void);
@@ -317,6 +320,25 @@ int main(int argc, char **argv)
             starting_conditions.resolution_height = 512;
             starting_conditions.read_resolution = true;
             ZLOG("Schirm: AGA %s -- the game runs at 640x512\n", zod_aga_mode);
+        }
+    }
+    else
+    {
+        /* No -C, but no RTG card: the screen code would fall back to the
+         * AGA screen by itself -- then as -C pal does, with the whole
+         * 640x512 (the user's choice, 21.11.) instead of 640x480 centred */
+        extern char zod_aga_mode[16];
+        const int aw = starting_conditions.resolution_width;
+        const int ah = starting_conditions.resolution_height;
+
+        if(zod_aga_fallback_ahead(aw, ah))
+        {
+            strcpy(zod_aga_mode, "pal");
+            starting_conditions.resolution_width = 640;
+            starting_conditions.resolution_height = 512;
+            starting_conditions.read_resolution = true;
+            ZLOG("Schirm: no RTG mode for %dx%d -- the AGA screen, PAL HiRes Laced; "
+                 "the game runs at 640x512\n", aw, ah);
         }
     }
 #endif
