@@ -260,6 +260,45 @@ cycle (Off / On (two buffers) / Fast (one buffer)) under the AGA mode,
 ghosted unless AGA is the renderer, saved as agascroll=. Launcher test
 and FS-UAE AgaHwScroll (through -H) pass; ZodLaunch builds.
 
+## The gap above the bottom panel (21.11. midday, for review)
+
+The user: "cover up the black gap on AGA between lower hud and sidebar a
+little ... giving the lower hud a smooth edge and shifting elements
+between huds so they don't get split by the blackness? Setting another
+background colour for the gap could also be an option".
+
+Facts. Between the map screen and the panel screen the display keeps 6
+blank laced rows; the panel screen sits that much lower than in the
+picture (FS-UAE, SeamProbe: it shows all 36 rows, 482..517 at 640x512,
+past the text overscan's 511; 426..461 at 640x400). The seam is always
+row 448 of the side panel's art (the engine anchors the side panel at
+the bottom: its top is at h - 484), so one rearrangement fits every
+height. At the seam the side panel's lower plate (art rows ~406..484)
+holds: the CNU3 tiles (art 440..450: 8 rows above the seam, 3 below),
+the knob plate's top edge (445..447, above), the hazard stripes
+(438..444, period 6 rows), the grid display and its bracket above,
+the dial below. Over the map the gap reads as a frame line; the bottom
+panel's own top frame starts right under it.
+
+Options (mockups from a real frame on the review page, "Midday"):
+
+- **B (recommended): move what the seam cuts.** Above the seam the right
+  plate's contents move up (bracket and grid 2 rows, the CNU3 tiles 3
+  rows: whole above the gap), the hazard stripes run 3 rows longer down
+  to the gap; below it the tiles' leftovers become plain plate and the
+  knob plate starts at the gap. AGA layer only: the map path and the
+  panel path take the side column's rows next to the seam from a
+  rearranged copy (~40 rows of 46/28 px a frame); the checks compare
+  against the same rows. The engine's picture is untouched.
+- **B2:** B plus the bottom panel's top frame rail across the side
+  column; the art below it 8 rows lower (most of the dial drops off).
+- **D:** B with the gap in dark grey. The gap shows colour 0, which is
+  also the border's colour: the border around the picture turns grey
+  as well, and the two boxes the HUD fills with black (unit picture,
+  chat line: index 0 through SDL_MapRGB) need the palette's second
+  black (80). Colouring only the gap would take a copper list or
+  sprites -- not done here. To be checked in FS-UAE before promising.
+
 ## The side panel flicker (21.11. ~10:00, the user's A4000T)
 
 The user's video: "side panel flickers on AGA while scrolling" (ZodLaunch

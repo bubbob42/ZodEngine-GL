@@ -1,0 +1,20 @@
+; SeamProbe -- the bottom panel's own screen (ZOD_AGA_SPLIT): how many of
+; its rows the display really shows (ViewPort.DHeight) against the mode's
+; text overscan, -C pal and -C pal400, orig01 still, software, 10 s each.
+; LIMIT 400
+; MACHINE aga
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+Echo "=== pal ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sp1 10 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sp1.done
+Type DEV:Test/zod-sp1.log >>DEV:Test/auto.log
+Echo "=== pal400 ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod sp2 10 -o -C pal400 -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sp2.done
+Type DEV:Test/zod-sp2.log >>DEV:Test/auto.log
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done

@@ -664,10 +664,21 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 				split_off = (int)(pnl_scr->TopEdge - scr->TopEdge);
 			}
 
-			ZLOG("AGA: the bottom panel on a screen of its own: rows %d..%d of the picture at "
-			     "row %d of the display (%d blank rows above it); the map screen shows %d rows\n",
-			     split_b, sh - 1, (int)pnl_scr->TopEdge, split_off - split_b,
-			     (int)scr->ViewPort.DHeight);
+			{
+				/* the panel screen reaches below the picture by the gap: the
+				 * rows it really shows, and the mode's text overscan */
+				struct Rectangle txt;
+
+				txt.MinY = txt.MaxY = -1;
+				QueryOverscan(id, &txt, OSCAN_TEXT);
+
+				ZLOG("AGA: the bottom panel on a screen of its own: rows %d..%d of the picture at "
+				     "row %d of the display (%d blank rows above it); the map screen shows %d rows, "
+				     "the panel screen %d of %d (text overscan rows %d..%d)\n",
+				     split_b, sh - 1, (int)pnl_scr->TopEdge, split_off - split_b,
+				     (int)scr->ViewPort.DHeight, (int)pnl_scr->ViewPort.DHeight, PANEL_H,
+				     (int)txt.MinY, (int)txt.MaxY);
+			}
 		}
 	}
 
