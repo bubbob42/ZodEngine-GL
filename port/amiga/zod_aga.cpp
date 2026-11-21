@@ -98,6 +98,10 @@ static int hw_shown_rx = -1, hw_shown_ry = -1;      /* what the ViewPort shows *
 static int view_set = 0, view_sx = 0, view_sy = 0;
 static unsigned long st_hw_anchors = 0, st_hw_scrolls = 0, st_hw_moved = 0;
 
+/* -H off|on|fast (main.cpp): 0, 1 two buffers, 2 one buffer; -1 = the
+ * environment decides (ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF) */
+int zod_aga_hw_option = -1;
+
 /* ZMap::DoRender's view offset this frame (from zod_rtgscroll_view) */
 extern "C" void zod_aga_view(int sx, int sy)
 {
@@ -208,7 +212,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	{
 		char buf[16];
 		const char *e = zod_env("ZOD_AGA_HWSCROLL", buf, sizeof(buf));
-		hw_on = env_on("ZOD_AGA_HWSCROLL");
+		hw_on = zod_aga_hw_option >= 0 ? (zod_aga_hw_option > 0) : env_on("ZOD_AGA_HWSCROLL");
 
 		/* "<x>x<y>": the margins (x rounded up to 64 px: AGA's 64-bit fetch) */
 		if(hw_on && e && e[0] >= '0' && e[0] <= '9')
@@ -340,6 +344,9 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		const char *e = zod_env("ZOD_AGA_DBUF", buf, sizeof(buf));
 
 		dbuf_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+
+		/* -H fast: hardware scrolling into the shown bitmap */
+		if(zod_aga_hw_option == 2) dbuf_on = 0;
 	}
 
 	dbuf = 0;
