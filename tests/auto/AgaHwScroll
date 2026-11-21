@@ -9,7 +9,11 @@
 ; (2) orig04 tour, -H fast (one buffer), 20 s;
 ; (3) orig04 tour, ZOD_AGA_HWSCROLL=64x16 (margins: anchored again all the
 ;     time), 20 s;
-; (4) orig01 still, -H on, 20 s.
+; (4) orig01 still, -H on, 20 s;
+; (5) margins 1024x512 (a ~4 MB bitmap: cannot fit in 2 MB of chip RAM):
+;     the game must fall back to the normal screen without hardware
+;     scrolling ("did not fit") and still show every frame right, 15 s.
+; Without given margins (1, 2, 4) they come from the free chip RAM.
 ; LIMIT 1200
 ; MACHINE aga
 FailAt 1000
@@ -38,6 +42,11 @@ Echo "=== hardware scrolling, orig01 still (-H on) ===" >>DEV:Test/auto.log
 Run >NIL: Execute DEV:Test/RunZod hws 20 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
 Execute DEV:Test/WaitDone DEV:Test/zod-hws.done
 Type DEV:Test/zod-hws.log >>DEV:Test/auto.log
+SetEnv ZOD_AGA_HWSCROLL 1024x512
+Echo "=== hardware scrolling asked for, margins 1024x512: must fall back ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hwf 15 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hwf.done
+Type DEV:Test/zod-hwf.log >>DEV:Test/auto.log
 UnSetEnv ZOD_AGA_HWSCROLL
 UnSetEnv ZOD_AGA_CHECK
 Echo "=== done ===" >>DEV:Test/auto.log
