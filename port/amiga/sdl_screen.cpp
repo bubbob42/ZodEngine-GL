@@ -28,6 +28,7 @@
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
 #include <graphics/modeid.h>
+#include <graphics/gfxbase.h>
 #include <exec/io.h>
 #include <devices/inputevent.h>
 #include <devices/input.h>   /* IND_WRITEEVENT */
@@ -361,6 +362,36 @@ static ULONG find_mode(int w, int h, int depth)
 	if(id == INVALID_ID || !IsCyberModeID(id)) return INVALID_ID;
 
 	return id;
+}
+
+/* Before the first screen (main.cpp): will the game fall back to the AGA
+ * screen by itself? Not asked for (no -C, no ZOD_AGA), an AGA chipset, and
+ * no RTG mode at 8 or 16 bits, neither of w x h nor of 640x480 -- or no
+ * cybergraphics.library at all. The library is opened for the question
+ * and closed again. */
+extern "C" int zod_aga_fallback_ahead(int w, int h)
+{
+	struct Library *const old = CyberGfxBase;
+	struct Library *cgx;
+	int rtg = 0;
+
+	if(zod_aga_wanted()) return 0;
+	if(!(GfxBase->ChipRevBits0 & GFXF_AA_ALICE)) return 0;
+
+	cgx = OpenLibrary((CONST_STRPTR)CYBERGFXNAME, 41L);
+
+	if(cgx)
+	{
+		CyberGfxBase = cgx;
+		/* the size asked for, or the launcher's usual 640x480 (without -r
+		 * the game may still take its own size): any RTG mode = RTG */
+		rtg = find_mode(w, h, 8) != INVALID_ID || find_mode(w, h, 16) != INVALID_ID ||
+		      find_mode(640, 480, 8) != INVALID_ID || find_mode(640, 480, 16) != INVALID_ID;
+		CyberGfxBase = old;
+		CloseLibrary(cgx);
+	}
+
+	return !rtg;
 }
 
 static void load_palette_now(void)
