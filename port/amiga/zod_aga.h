@@ -22,6 +22,12 @@ void zod_aga_flip(SDL_Surface *compose, struct Screen *scr, int dy);
 /* before CloseScreen: the screen's own bitmap back, the buffers freed */
 void zod_aga_close(struct Screen *scr);
 
+/* ZOD_SHOTOUT on the AGA screen (sdl_screen.cpp): what the display shows
+ * at that frame, read back from the planes -- with hardware scrolling the
+ * map screen's rows, the blank rows between the screens (colour 0) and the
+ * panel screen's rows -- into a BMP (the name must end in .bmp) */
+void zod_aga_shot_request(const char *name, unsigned long frame);
+
 /* The bottom panel on a screen of its own (soft scrolling; ZOD_AGA_SPLIT):
  * its window shares the main window's message port (open after the main
  * window, close before it); the pointer, the palette and the mouse go to

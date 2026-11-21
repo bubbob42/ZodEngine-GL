@@ -790,6 +790,15 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 
 				shotout_name[0] = 0;
 			}
+			else if(aga_aktiv)
+			{
+				/* AGA: read back from the planes by zod_aga.cpp -- the map
+				 * screen, the blank rows, the panel screen as displayed */
+				zod_aga_shot_request(shotout_name, shotout_bild);
+
+				ZLOG("Foto aus dem Grafikspeicher: '%s' bei Bild %ld (AGA)\n",
+				     shotout_name, (long)shotout_bild);
+			}
 			else
 			{
 				shotout_puffer = (unsigned char*)malloc((size_t)compose->h

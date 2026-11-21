@@ -148,6 +148,53 @@ static unsigned long st_pnl_groups = 0, st_pnl_frames = 0;
 static int view_set = 0, view_sx = 0, view_sy = 0;
 static unsigned long st_hw_anchors = 0, st_hw_scrolls = 0, st_hw_moved = 0;
 
+/* The gap's edges (the user, 21.11.: look B2 "but the sidebar should get a
+ * bevel at its lower edge, too"; docs/concept-aga.md). The gap between the
+ * two screens cut the side panel's art: the CNU3 tiles, the knob plate's
+ * top edge. Shown instead, in the side column (the picture's last 100
+ * columns) only:
+ *   above the gap -- the right plate's bracket and grid 2 rows higher, the
+ *     grid one row and one cell row shorter, the tiles whole and 6 rows
+ *     higher with a plain row below them; the bottom 4 rows a ledge, the
+ *     side panel's own shelf (the rows 42..45 above the gap);
+ *   below the gap -- the bottom panel's top rail (8 rows) across the side
+ *     column, the side art 8 rows lower under it (its last 8 rows drop
+ *     off), the tiles' remains plain plate.
+ * Nothing the engine draws moves there (its minimap ends 60 rows above the
+ * gap, the pointer is a sprite). Never written into the picture: the
+ * engine redraws the panels only when they change. A copy of those rows
+ * per frame (76 x 116 bytes), from the 16 columns left of the side column
+ * on, so a group of 16 that reaches into it reads from one place. Only in
+ * frames that drew the map (a loading picture stays as it is);
+ * ZOD_AGA_SEAM off: the picture's own rows. */
+enum {
+	SIDE_W = 100,                       /* the side column */
+	PLATE_X = 54,                       /* the right plate, in the side column */
+	SHELF_ROW = 46,                     /* the shelf's first row, above the gap */
+	LEDGE_H = 4,
+	RAIL_X = 240,                       /* the rail's source, left of the side column */
+	RAIL_H = 8,
+	DRESS_ABOVE = 40,                   /* rows dressed above the gap */
+	DRESS_ROWS = DRESS_ABOVE + PANEL_H,
+	DRESS_BPR = 16 + SIDE_W
+};
+static int seam_on = -1;
+static UBYTE *dress_buf = 0;            /* DRESS_ROWS rows of DRESS_BPR bytes */
+static int dress_x = 0;                 /* the side column's first column */
+static int dress_now = 0;               /* this frame: the dressed rows are current */
+static unsigned long st_dress_frames = 0;
+
+/* the right plate's rows above the ledge (DRESS_ABOVE - LEDGE_H of them):
+ * the picture's row each comes from, relative to the gap (at 640x480 the
+ * gap is above row 444) */
+static const signed char plate_src[DRESS_ABOVE - LEDGE_H] = {
+	-38, -37, -36, -35, -34, -33, -32, -31, -30, -29, -28,     /* the bracket */
+	-27, -25, -24, -23, -22, -21, -20, -19, -18, -17, -16, -15,  /* the grid */
+	-11, -10, -9,                                   /* its last row, bezel, plain */
+	-7, -6, -5, -4, -3, -2, -1, 0, 1,               /* the tiles */
+	-9                                              /* a plain row */
+};
+
 /* -H off|on|fast (main.cpp): 0, 1 two buffers, 2 one buffer; -1 = the
  * environment decides (ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF) */
 int zod_aga_hw_option = -1;
@@ -679,6 +726,22 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 				     (int)scr->ViewPort.DHeight, (int)pnl_scr->ViewPort.DHeight, PANEL_H,
 				     (int)txt.MinY, (int)txt.MaxY);
 			}
+
+			/* the gap's edges (see dress_buf) */
+			if(seam_on < 0) seam_on = zod_env_switch("ZOD_AGA_SEAM", 1);
+			dress_x = w - SIDE_W;
+			free(dress_buf);
+			dress_buf = seam_on ? (UBYTE *)malloc((size_t)DRESS_ROWS * DRESS_BPR) : 0;
+			st_dress_frames = 0;
+
+			if(!seam_on)
+				ZLOG("AGA: the gap's edges: the picture's own rows (ZOD_AGA_SEAM off)\n");
+			else if(!dress_buf)
+				ZLOG("AGA: the gap's edges: no memory for their rows (%d bytes) -- the picture's "
+				     "own rows\n", DRESS_ROWS * DRESS_BPR);
+			else
+				ZLOG("AGA: the gap's edges: dressed -- a ledge under the side panel, the bottom "
+				     "panel's rail across it (ZOD_AGA_SEAM)\n");
 		}
 	}
 
@@ -1064,6 +1127,72 @@ static int part_take(const UBYTE *s, UBYTE *d, int n)
 	return differ;
 }
 
+/* the gap's edges this frame (see dress_buf): the side column's rows next
+ * to the gap as they are shown */
+static void dress_build(const SDL_Surface *cs)
+{
+	const UBYTE *const pic = (const UBYTE *)cs->pixels;
+	const long pitch = cs->pitch;
+	const int gap = split_b, x = dress_x;
+	int r;
+
+	for(r = 0; r < DRESS_ROWS; r++)
+	{
+		const int y = gap - DRESS_ABOVE + r;
+		const UBYTE *const row = pic + (long)y * pitch;
+		UBYTE *const d = dress_buf + (long)r * DRESS_BPR;
+		UBYTE *const side = d + 16;
+
+		/* the 16 columns left of the side column, as they are */
+		memcpy(d, row + x - 16, 16);
+
+		if(y < gap - LEDGE_H)
+		{
+			memcpy(side, row + x, PLATE_X);
+			memcpy(side + PLATE_X, pic + (long)(gap + plate_src[r]) * pitch + x + PLATE_X,
+			       SIDE_W - PLATE_X);
+		}
+		else if(y < gap)
+		{
+			/* the ledge: the shelf's rows, its 6 columns of the frame left
+			 * of it as its first */
+			const UBYTE *const shelf = pic + (long)(gap - SHELF_ROW + y - (gap - LEDGE_H)) * pitch + x;
+
+			memset(side, shelf[6], 6);
+			memcpy(side + 6, shelf + 6, SIDE_W - 6);
+		}
+		else if(y < gap + RAIL_H)
+			memcpy(side, row + x - RAIL_X, SIDE_W);
+		else
+		{
+			/* 8 rows lower, the frame's 4 columns on the left stay; the
+			 * tiles' remains (the 3 rows below the gap) are replaced by
+			 * what is 8 rows below them, plain plate */
+			const UBYTE *const up = row - RAIL_H * pitch;
+
+			memcpy(side, row + x, 4);
+			if(y < gap + RAIL_H + 3)
+			{
+				memcpy(side + 4, up + x + 4, PLATE_X - 4);
+				memcpy(side + PLATE_X, row + x + PLATE_X, SIDE_W - PLATE_X);
+			}
+			else
+				memcpy(side + 4, up + x + 4, SIDE_W - 4);
+		}
+	}
+}
+
+/* picture row y as shown from 16 columns left of the side column on, or 0
+ * where the picture's own row is shown */
+static const UBYTE *dress_row(int y)
+{
+	const int r = y - (split_b - DRESS_ABOVE);
+
+	if(!dress_now || r < 0 || r >= DRESS_ROWS) return 0;
+
+	return dress_buf + (long)r * DRESS_BPR;
+}
+
 /* where the display window lies in the bitmap this frame */
 static void hw_place(void)
 {
@@ -1120,11 +1249,12 @@ static unsigned long check_hw(const SDL_Surface *cs, UBYTE *const *pl, int bpr, 
 	{
 		const int y = yd - dy;
 		const UBYTE *s = (y >= 0 && y < cs->h) ? (const UBYTE *)cs->pixels + (long)y * cs->pitch : hw_zero;
+		const UBYTE *const ds = dress_row(y);
 		const long brow = (long)(yd + hw_ry);
 		const UBYTE *srow = sh + brow * hw_bw;
 
 		for(i = 0; i < hw_dw; i++)
-			if(srow[hw_rx + i] != s[i]) differ++;
+			if(srow[hw_rx + i] != ((ds && i >= dress_x) ? ds[i - dress_x + 16] : s[i])) differ++;
 
 		for(g = hw_rx >> 4; g <= (hw_rx + hw_dw - 1) >> 4; g++)
 		{
@@ -1179,12 +1309,15 @@ static unsigned long panel_out(const SDL_Surface *cs)
 	{
 		const int y = split_b + r;
 		const UBYTE *s = (y < cs->h) ? (const UBYTE *)cs->pixels + (long)y * cs->pitch : hw_zero;
+		const UBYTE *const ds = dress_row(y);
+		const int gs = ds ? dress_x >> 4 : ng;      /* the first group from ds */
 		UBYTE *const srow = pnl_shadow + (long)r * hw_dw;
 		int g, run = -1;
 
 		for(g = 0; g <= ng; g++)
 		{
-			const int differ = (g < ng) ? group_take(s + g * 16, srow + g * 16) : 0;
+			const int differ = (g < gs) ? group_take(s + g * 16, srow + g * 16) :
+			                   (g < ng) ? group_take(ds + g * 16 - (dress_x - 16), srow + g * 16) : 0;
 
 			if(differ)
 			{
@@ -1221,10 +1354,11 @@ static unsigned long check_panel(const SDL_Surface *cs)
 	{
 		const int y = split_b + r;
 		const UBYTE *s = (y < cs->h) ? (const UBYTE *)cs->pixels + (long)y * cs->pitch : hw_zero;
+		const UBYTE *const ds = dress_row(y);
 		const UBYTE *srow = pnl_shadow + (long)r * hw_dw;
 
 		for(i = 0; i < hw_dw; i++)
-			if(srow[i] != s[i]) differ++;
+			if(srow[i] != ((ds && i >= dress_x) ? ds[i - dress_x + 16] : s[i])) differ++;
 
 		for(g = 0; g < hw_dw / 16; g++)
 		{
@@ -1259,6 +1393,106 @@ static unsigned long check_panel(const SDL_Surface *cs)
 	}
 
 	return differ;
+}
+
+/* ZOD_SHOTOUT (zod_aga_shot_request) */
+static char shot_name[128];
+static unsigned long shot_frame = 0;
+
+void zod_aga_shot_request(const char *name, unsigned long frame)
+{
+	strncpy(shot_name, name, sizeof(shot_name) - 1);
+	shot_name[sizeof(shot_name) - 1] = 0;
+	shot_frame = frame ? frame : 1;
+}
+
+/* 16 pixels of a bitmap row (the word group g) from its 8 planes */
+static void planes_group(UBYTE *const *pl, long bpr, long row, int g, UBYTE *px)
+{
+	UWORD wd[8];
+	ULONG a, b, c, d;
+	int p, i;
+
+	for(p = 0; p < 8; p++) wd[p] = *(const UWORD *)(pl[p] + row * bpr + g * 2);
+
+	a = ((ULONG)(wd[7] >> 8) << 24) | ((ULONG)(wd[6] >> 8) << 16) |
+	    ((ULONG)(wd[5] >> 8) << 8) | (wd[4] >> 8);
+	b = ((ULONG)(wd[3] >> 8) << 24) | ((ULONG)(wd[2] >> 8) << 16) |
+	    ((ULONG)(wd[1] >> 8) << 8) | (wd[0] >> 8);
+	c = ((ULONG)(wd[7] & 0xFF) << 24) | ((ULONG)(wd[6] & 0xFF) << 16) |
+	    ((ULONG)(wd[5] & 0xFF) << 8) | (wd[4] & 0xFF);
+	d = ((ULONG)(wd[3] & 0xFF) << 24) | ((ULONG)(wd[2] & 0xFF) << 16) |
+	    ((ULONG)(wd[1] & 0xFF) << 8) | (wd[0] & 0xFF);
+	transpose8(a, b);
+	transpose8(c, d);
+
+	for(i = 0; i < 4; i++)
+	{
+		px[i]      = (UBYTE)(a >> (24 - 8 * i));
+		px[4 + i]  = (UBYTE)(b >> (24 - 8 * i));
+		px[8 + i]  = (UBYTE)(c >> (24 - 8 * i));
+		px[12 + i] = (UBYTE)(d >> (24 - 8 * i));
+	}
+}
+
+/* the display of this frame (hardware scrolling: the window in the buffer
+ * just written, pl) into shot_name */
+static void shot_write(const SDL_Surface *cs, UBYTE *const *pl, long bpr)
+{
+	const int gap = pnl_scr ? split_off - split_b : 0;
+	const int hh = hw_dh + (pnl_scr ? gap + PANEL_H : 0);
+	UBYTE *const img = (UBYTE *)calloc((size_t)hw_dw * hh, 1);
+	SDL_Surface *bild;
+	UBYTE px[16];
+	int y, g, k, ok = 0;
+
+	if(img)
+	{
+		for(y = 0; y < hw_dh; y++)
+			for(g = hw_rx >> 4; g <= (hw_rx + hw_dw - 1) >> 4; g++)
+			{
+				planes_group(pl, bpr, (long)(y + hw_ry), g, px);
+
+				for(k = 0; k < 16; k++)
+				{
+					const int col = g * 16 + k - hw_rx;
+
+					if(col >= 0 && col < hw_dw) img[(long)y * hw_dw + col] = px[k];
+				}
+			}
+
+		if(pnl_scr)
+		{
+			struct BitMap *bm = pnl_scr->RastPort.BitMap;
+			UBYTE *ppl[8];
+			int p;
+
+			for(p = 0; p < 8; p++) ppl[p] = (UBYTE *)bm->Planes[p];
+
+			for(y = 0; y < PANEL_H; y++)
+				for(g = 0; g < hw_dw / 16; g++)
+					planes_group(ppl, bm->BytesPerRow, (long)y, g,
+					             img + (long)(hw_dh + gap + y) * hw_dw + g * 16);
+		}
+
+		bild = SDL_CreateRGBSurfaceFrom(img, hw_dw, hh, 8, hw_dw, 0, 0, 0, 0);
+
+		if(bild)
+		{
+			if(bild->format->palette && cs->format->palette)
+				memcpy(bild->format->palette->colors, cs->format->palette->colors,
+				       sizeof(SDL_Color) * 256);
+			ok = SDL_SaveBMP(bild, shot_name) == 0;
+			SDL_FreeSurface(bild);
+		}
+
+		free(img);
+	}
+
+	ZLOG("AGA: the display read back at frame %lu (%dx%d: %d rows of the map screen, %d blank, "
+	     "%d of the panel screen) into '%s'%s\n",
+	     shot_frame, hw_dw, hh, hw_dh, gap, pnl_scr ? PANEL_H : 0, shot_name,
+	     ok ? "" : " -- FAILED");
 }
 
 /* the panel screen's window: on the main window's message port, so its
@@ -1439,6 +1673,16 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	}
 
 	t0 = zod_fineclock_ticks();
+
+	/* the gap's edges: in frames that drew the map (hw_place takes the
+	 * view's mark) */
+	dress_now = view_set && dress_buf && pnl_scr;
+	if(dress_now)
+	{
+		dress_build(cs);
+		st_dress_frames++;
+	}
+
 	hw_place();
 
 	bm = dbuf ? sbuf[b]->sb_BitMap : scr->RastPort.BitMap;
@@ -1450,10 +1694,15 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		const int y = yd - dy;
 		/* the rows beside a smaller picture: colour 0 */
 		const UBYTE *s = (y >= 0 && y < h) ? (const UBYTE *)cs->pixels + (long)y * cs->pitch : hw_zero;
+		const UBYTE *const ds = dress_row(y);
 		const long brow = (long)(yd + hw_ry);
 		UBYTE *const srow = sh + brow * hw_bw;
 		const int x0 = hw_rx, x1 = hw_rx + w;     /* the window's columns */
 		const int g0 = x0 >> 4, g1 = (x1 - 1) >> 4;
+		/* from this group on the row comes from ds, which begins 16
+		 * columns left of the side column: a group reaching into the side
+		 * column lies wholly in it */
+		const int gs = ds ? (x0 + dress_x) >> 4 : g1 + 1;
 		int g, run = -1;
 
 		for(g = g0; g <= g1 + 1; g++)
@@ -1463,15 +1712,17 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 			if(g <= g1)
 			{
 				const int bx = g * 16;
+				const UBYTE *const from = (g < gs) ? s : ds;
+				const int fx = (g < gs) ? x0 : x0 + dress_x - 16;   /* from's column 0 */
 
 				if(bx >= x0 && bx + 16 <= x1)
-					differ = group_take(s + (bx - x0), srow + bx);
+					differ = group_take(from + (bx - fx), srow + bx);
 				else
 				{
 					const int a = bx < x0 ? x0 : bx;
 					const int e = bx + 16 > x1 ? x1 : bx + 16;
 
-					differ = part_take(s + (a - x0), srow + a, e - a);
+					differ = part_take(from + (a - fx), srow + a, e - a);
 				}
 			}
 
@@ -1511,6 +1762,12 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		st_check_differ += check_hw(cs, pl, bpr, dy, sh);
 		if(pnl_scr) st_check_differ += check_panel(cs);
 		st_check_frames++;
+	}
+
+	if(shot_name[0] && zod_dirty_frames == shot_frame)
+	{
+		shot_write(cs, pl, bpr);
+		shot_name[0] = 0;
 	}
 
 	/* offsets someone else reset (a display rebuilt by Intuition) count
@@ -1749,6 +2006,9 @@ void zod_aga_close(struct Screen *scr)
 	if(pnl_scr) { CloseScreen(pnl_scr); pnl_scr = 0; }
 	free(pnl_shadow);
 	pnl_shadow = 0;
+	free(dress_buf);
+	dress_buf = 0;
+	dress_now = 0;
 	split_b = 0;
 
 	buffers_free(scr);
@@ -1813,8 +2073,9 @@ void zod_aga_report(void)
 	}
 
 	if(st_pnl_frames)
-		ZLOG("AGA bottom panel screen: %lu frames, %lu groups a frame written\n",
-		     st_pnl_frames, st_pnl_groups / st_pnl_frames);
+		ZLOG("AGA bottom panel screen: %lu frames, %lu groups a frame written; the gap's "
+		     "edges dressed in %lu frames\n",
+		     st_pnl_frames, st_pnl_groups / st_pnl_frames, st_dress_frames);
 
 	if(st_hw_scrolls)
 		ZLOG("AGA hardware scrolling: %lu frames, the window moved in %lu, anchored again %lu times "

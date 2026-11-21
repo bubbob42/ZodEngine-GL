@@ -299,6 +299,39 @@ Options (mockups from a real frame on the review page, "Midday"):
   black (80). Colouring only the gap would take a copper list or
   sprites -- not done here. To be checked in FS-UAE before promising.
 
+**Decided (the user, 21.11. ~13:00): "I like B2, but the sidebar should
+get a bevel at its lower edge, too".** Built that way (ZOD_AGA_SEAM,
+default on; port/amiga/zod_aga.cpp, dress_build), rows relative to the
+gap:
+
+- above it, the right plate: bracket and grid 2 rows higher, the grid
+  without one inner row and one cell row (5 rows of cells -> 4), the
+  CNU3 tiles without their outer rows, whole and 6 rows higher, a plain
+  row below them; the hazard stripes end one row earlier (6 rows, one
+  full period); the bottom 4 rows a ledge across the whole side column,
+  the side panel's own shelf (the rows 46..43 above the gap, its 6 frame
+  columns on the left as its first);
+- below it, B2: the bottom panel's 8-row top rail across the side
+  column (its columns 240 to the left), the side art 8 rows lower (its
+  4 frame columns on the left stay), the tiles' remains plain plate.
+
+Only the side column's rows from 40 above the gap to the panel's end;
+nothing the engine draws moves there (the minimap ends 60 rows above
+the gap, the pointer is a sprite). Never written into the picture -- the
+engine redraws the panels only when they change, so dressing in place
+would pile up. A 76 x 116-byte copy per frame (the side column and the
+16 columns left of it, so a 16-pixel group reaching into the side column
+reads from one place); the map path, the panel path and both checks read
+those rows from it. Only in frames that drew the map: a loading picture
+is shown as it is.
+
+FS-UAE (tests/auto/AgaSeam, 21.11. 13:48): pal, pal400 and the orig04
+tour dressed in every frame that drew the map, read back 0 pixels differ
+in all four runs; the control (ZOD_AGA_SEAM off) dressed 0 frames, 0
+differ. ZOD_SHOTOUT now works on AGA too: it reads the display back from
+the planes (the map screen's rows, the blank rows, the panel screen) --
+the review page shows those pictures beside the mockup. They match it.
+
 ## The side panel flicker (21.11. ~10:00, the user's A4000T)
 
 The user's video: "side panel flickers on AGA while scrolling" (ZodLaunch

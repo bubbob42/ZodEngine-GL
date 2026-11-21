@@ -1,0 +1,55 @@
+; AgaSeam -- the gap's edges (ZOD_AGA_SEAM, port/amiga/zod_aga.cpp,
+; docs/concept-aga.md): the side panel's rows next to the gap between the
+; map screen and the panel screen are shown dressed (a ledge under the side
+; panel, the bottom panel's rail across the side column), never written
+; into the picture. ZOD_AGA_CHECK every frame compares the shadows against
+; the dressed rows and the planes against the shadows: "0 pixels differ".
+; ZOD_SHOTOUT reads the display back from the planes at frame 120 (200 in the tour; the map
+; screen, the blank rows, the panel screen) into DEV:Test/seam-*.bmp --
+; look at them. Software (-o), soft scrolling (-H on).
+; (1) -C pal (the game at 640x512), orig01 still, 10 s;
+; (2) -C pal400 (640x400), orig01 still, 10 s;
+; (3) the control: ZOD_AGA_SEAM off, -C pal, orig01 still, 10 s -- the
+;     picture's own rows ("the picture's own rows" in the log, the
+;     dressed-frames count 0);
+; (4) -C pal, orig04 tour (the view scrolls: the map screen's window moves,
+;     the dressed rows with it), 20 s.
+; Every run's AGA lines: "two buffers (ChangeScreenBuffer)", the panel
+; screen's line, the gap's edges "dressed" (1, 2, 4) or "own rows" (3).
+; LIMIT 900
+; MACHINE aga
+FailAt 1000
+Wait 5
+Echo "=== machine ===" >DEV:Test/auto.log
+CPU >>DEV:Test/auto.log
+Delete >NIL: DEV:Test/zod-#?
+Delete >NIL: DEV:Test/seam-#?.bmp
+SetEnv ZOD_AGA_CHECK on
+Echo "=== (1) pal, orig01 still ===" >>DEV:Test/auto.log
+SetEnv ZOD_SHOTOUT DEV:Test/seam-pal.bmp:120
+Run >NIL: Execute DEV:Test/RunZod sm1 10 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm1.done
+Type DEV:Test/zod-sm1.log >>DEV:Test/auto.log
+Echo "=== (2) pal400, orig01 still ===" >>DEV:Test/auto.log
+SetEnv ZOD_SHOTOUT DEV:Test/seam-pal400.bmp:120
+Run >NIL: Execute DEV:Test/RunZod sm2 10 -o -C pal400 -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm2.done
+Type DEV:Test/zod-sm2.log >>DEV:Test/auto.log
+Echo "=== (3) control: ZOD_AGA_SEAM off, pal, orig01 still ===" >>DEV:Test/auto.log
+SetEnv ZOD_AGA_SEAM off
+SetEnv ZOD_SHOTOUT DEV:Test/seam-off.bmp:120
+Run >NIL: Execute DEV:Test/RunZod sm3 10 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig01.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm3.done
+Type DEV:Test/zod-sm3.log >>DEV:Test/auto.log
+UnSetEnv ZOD_AGA_SEAM
+Echo "=== (4) pal, orig04 tour ===" >>DEV:Test/auto.log
+SetEnv ZOD_TOUR on
+SetEnv ZOD_SHOTOUT DEV:Test/seam-tour.bmp:200
+Run >NIL: Execute DEV:Test/RunZod sm4 20 -o -C pal -H on -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-sm4.done
+Type DEV:Test/zod-sm4.log >>DEV:Test/auto.log
+UnSetEnv ZOD_TOUR
+UnSetEnv ZOD_SHOTOUT
+UnSetEnv ZOD_AGA_CHECK
+Echo "=== done ===" >>DEV:Test/auto.log
+Echo >DEV:Test/AutoDone done
