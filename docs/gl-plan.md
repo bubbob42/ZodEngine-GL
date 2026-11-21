@@ -1137,6 +1137,47 @@ merged as night-merge and then into gl (21.11. ~00:50, the user's word).
   that drew nothing is not presented (the game's first frame before the
   map arrived showed an older buffer).
 
+## 5j. The rest of the night, 21.11. (the user, ~01:20: "continue implementing through the night without asking")
+
+- **gl pushed** to the private origin only, 62943ba..51a6d79, after all 10
+  FS-UAE tests passed on the merged build.
+- **MiniGL's rect lists, measured with Zod** (Hamiller, n17 060, 60 s, p q
+  q p against pansample): quadrect2 tour 28.3 / 27.7 against 29.9 / 29.5
+  fps, still 45.0 / 45.9 against 45.3 / 50.5; quadrect3 (the cheaper one)
+  tour 28.9 / 28.4 against 30.1 / 30.7, still 47.4 / 49.9 against 50.9 /
+  49.1. mglSwitchDisplay 0.4..0.7 ms cheaper a present, but the library's
+  time inside Zod's drawing calls +0.4..1.0 ms (~6..7 us a rectangle to
+  detect and move it; nearly every Zod quad is a rectangle: 134..140 a
+  frame on the tour). By the user's stop rule Zod does not gain.
+- **Profile of the gl tip** (prof-gl21-tour, Hamiller, pansample, orig04
+  tour, 4000 samples): program 73.9 %, library 19.6 %, outside 6.5 %, no
+  waiting. Zod's GL glue (zod_gl_blit 5.8, vertex 3.4, tex_get 2.4,
+  batch_begin/_end 1.6, quad_colour 0.5) ~14 % = ~33 us a quad, spread
+  over cache misses rather than one hot spot; ZMap::DoEffects 5.0 % (the
+  original's per-tile random draws, see 5h); A* path finding ~3.3 %.
+- **REJECTED before building: the texture lookup's hash** (branch perf-n1,
+  census only): tex_get looks a surface up by address in an 8192-slot table
+  with linear probing and tombstones. FS-UAE GLTour census: 1.54 slots a
+  lookup (at most 14..29), 6..7 tombstones in the table at the end -- no
+  long chains, so nothing to gain there; tex_get's cost is the reads of
+  the surface and texture records.
+- **NOT ADOPTED: a smaller path budget under smooth N = 2**
+  (ZOD_PFBUDGET=8000 against the default 32 ms, an env knob only; gl21
+  060, pansample, smooth on, orig04 tour, b32 b8 b8 b32): fps 22.6 / 23.9
+  against 24.6 / 23.8; frames late for their blank 17.7 / 15.0 % against
+  13.7 / 19.8 %; frames over 50 ms 134 / 123 against 70 / 110, over 100 ms
+  11 / 9 against 4 / 4; server.wegjobs peaks 37.5 / 39.2 against 25.8 /
+  30.7 ms. Fewer very slow frames, but the share that misses its blank --
+  the stutter under N = 2 -- does not move, and units would get their
+  paths later (cego's 32 ms was the user's choice on the V1200). Default
+  kept.
+- **AGA hardware scrolling** (branch aga-hwscroll, ZOD_AGA_HWSCROLL, off):
+  see docs/concept-aga.md, milestone 4 -- FS-UAE 0 pixels differ; the
+  PiStorm's A1200 tour 7.8 -> 10.9 fps (two buffers) / 16.6 (one).
+- **AGA without RTG at the whole 640x512** (branch aga-fb512): the
+  automatic fallback now runs the game at 640x512 like -C pal (the user's
+  decision 7); FS-UAE AgaCheck 0 differ, GLSmoke and SwSums unchanged.
+
 Backlog, LAST (the user, 21.11. ~01:25: "ignore the center stutter for now
 - put it at the end of backlog"):
 - **The stutter "when scrolling over the map centre"** (the user's eye on
