@@ -208,6 +208,31 @@ longword per plane -- and checked bit for bit on the host. What is not
 done yet: spreading the writes (C gives the compiler the order; a later
 step, measured on its own, possibly in assembler like BlazeWCP).
 
+### 3.9 640x400 on voltago, and the display window (21.11. 08:10-08:42)
+
+The 640x400 option (-C pal400) on voltago, orig04 tour, same binary,
+soft scrolling:
+
+- First round (the screen as large as its bitmap): 640x512 8.6 / 8.7 fps,
+  640x400 11.5 / 11.8 -- but the log said "the screen at row 56, 528 rows
+  shown": an oversized Intuition screen shows its whole bitmap height, 128
+  rows of stale margin below the 400-row picture (and 640x512 likewise
+  past row 512, in the overscan), with display fetches for them.
+- Fixed (93cb055): the screen has the picture's size and a larger bitmap
+  of our own behind it (SA_BitMap; the second buffer our own too). The
+  window is now exactly "640x512 at row 0" / "640x400 at row 56":
+
+| voltago, orig04 tour | two buffers | one buffer | AGA work a frame |
+|---|---|---|---|
+| 640x512 | **10.0 / 10.0 fps** | 10.1 | 56 ms |
+| 640x400 | **13.0 / 12.9 fps** | 13.2 | 42 ms |
+
+640x400 is +30 %. The fix alone took 640x512 from 8.6 to 10.0 fps (no
+fetches beyond the picture any more), and two buffers now cost almost
+nothing against one. Over the morning, voltago's AGA scrolling went from
+5.5 fps (no soft scrolling, 16-bit writes) to 10.0 (640x512) / 13.0
+(640x400).
+
 ## 4. Recommendation
 
 1. **32-bit chip writes (3.1)** -- next, no change to the look, ~25..30 %
