@@ -689,10 +689,11 @@ void run_single_player()
     bool schlaf_immer = false;
     bool schlaf_nie   = false;
     {
+        /* ZOD_SCHLAF=always / never (old: immer / nie) */
         char buf[16];
         const char *e = zod_env("ZOD_SCHLAF", buf, sizeof(buf));
 
-        if(e && (*e == 'i' || *e == 'I')) schlaf_immer = true;
+        if(e && (*e == 'a' || *e == 'A' || *e == 'i' || *e == 'I')) schlaf_immer = true;
         if(e && (*e == 'n' || *e == 'N')) schlaf_nie   = true;
     }
 
@@ -1163,7 +1164,7 @@ void run_single_player()
         //drei Proben, kein Preis je Schlaf. Wer damit Guthaben verrechnet,
         //rechnet mit dem Doppelten des Verbrauchs.
         //
-        //`SetEnv ZOD_SCHLAF immer` stellt das alte Verhalten her, `nie`
+        //`SetEnv ZOD_SCHLAF always` stellt das alte Verhalten her, `nie`
         //schaltet das Schlafen ganz ab -- beides fuer den A/B im selben Binary.
         const double left = ZOD_FRAME_TARGET
                             - (double)(zod_fineclock_ticks() - frame_start_ticks)

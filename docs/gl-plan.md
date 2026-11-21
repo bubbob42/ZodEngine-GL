@@ -308,12 +308,12 @@ What the numbers said, and what was done:
   redraw costs 2983 us there, so GL itself draws the HUD cheaply.
 - **Scrolling.** Each 128x128 map tile went up as RGBA bytes, converted
   twice: ~20 ms a tile, 1.7 tiles a frame. Now RGB565 words the library
-  only copies (adc3502, ZOD_GL_565=aus to compare).
+  only copies (adc3502, ZOD_GL_565=off to compare).
 - **Map section in a still view** costs the same in S and GL (~7 ms): the
   game's own work, not drawing.
 
 **After a reboot (18:59), D measured (still H D D H, tour E D D E; E = D with
-ZOD_GL_565=aus):**
+ZOD_GL_565=off):**
 
 | run | variant | fps | draw ms | map ms | HUD ms | gui ms |
 |---|---|---|---|---|---|---|
@@ -519,12 +519,12 @@ mglSwitchDisplay): 402 of them in a 30 s FS-UAE run against the library's
 (new images and run-time slots into a page already drawn from); map tiles,
 the minimap and other refreshes never. Now such an upload is HELD: its
 pixels go into the page at the next frame's first draw, until then the image
-draws from a texture of its own (ZOD_GL_HOLD=aus: at once). FS-UAE and the
+draws from a texture of its own (ZOD_GL_HOLD=off: at once). FS-UAE and the
 A4000D: 0 idle waits.
 
 **The map as one texture** where it fits (RadeonGL, at most 6 MB at 16 bit:
 orig01, orig04; p08's 4096x4096 keeps the ring of tiles), all of it sent
-when the map is made (ZOD_GL_MAPRES=aus: the ring). A changed part of a
+when the map is made (ZOD_GL_MAPRES=off: the ring). A changed part of a
 tile (crater, zone marker, shadow) now goes up alone instead of the whole
 128x128 tile: a quarter of a tile on average (FS-UAE: 249 parts in 30 s
 still, 387 in 60 s tour).
@@ -600,7 +600,7 @@ Margins from a census (ZOD_BANDCENSUS on: every object that drew in
 DoRender, how far its key lay outside the view): over orig01 still, orig04
 and p08 scrolling, 1.83 M draws, never above the view's top, at most 47 px
 below its bottom (a rock), and 0 draws outside the band. FS-UAE: 18 / 34 /
-12 % of the objects visited; GLResHold and SwSums pass. ZOD_BAND aus: all.
+12 % of the objects visited; GLResHold and SwSums pass. ZOD_BAND off: all.
 
 **The bots' 0.6..1 s tick** is their map download at the start of a match
 (it sits between the "map_data_size" lines: each bot parses the map and
@@ -890,7 +890,7 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   parameters and the upload -- the texture had no image, the quad drew in
   its vertex colour. Since 3e5c455 (held uploads, 19.11 07:30) every run's
   RadeonGL log said "first GL error raised by glBindTexture"; runs with
-  ZOD_GL_HOLD=aus never. Fixed in 17261a8 (batch_end first); ZOD_GLCHECK
+  ZOD_GL_HOLD=off never. Fixed in 17261a8 (batch_end first); ZOD_GLCHECK
   on checks every bind: 378 of 71 492 failed before, 0 after (FS-UAE), 0
   of 37 297 on the A4000D. My first answer (the hit flash, from mapping
   the time to a software run) was wrong: the log line was the clue.
@@ -908,13 +908,13 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   drew it whole (812 of them because something drew over it first, 111
   after, 6 a part changed, 67 asked for); HUD quads 10.4 a frame against ~31 drawn
   whole. The user, right after: "yes, hud on by default" -- on by default
-  since then (ZOD_HUDKEEP=aus draws the HUD whole every frame, for A/Bs).
+  since then (ZOD_HUDKEEP=off draws the HUD whole every frame, for A/Bs).
 - **The load bar on the A4000D** (same run): all steps 22.7 s; the
   longest EFFECTS 3.1 s, PORTRAITS 3.0 s, VEHICLES 2.7 s, UNITS 2.3 s,
   ANIMALS 2.3 s, BUILDINGS 2.1 s -- the numbers a faster start would work
   from.
 - **The A4000D stopped answering at ~23:28** (no ping, no amiagent) while
-  zod_run.py set up the second run of a floor A/B (t38, ZOD_FASTFLOOR=aus):
+  zod_run.py set up the second run of a floor A/B (t38, ZOD_FASTFLOOR=off):
   its blanker check answered, the data check did not; no game had started,
   the first run (t38, fast floor) had ended normally a minute before. The
   user rebooted it. Cause unknown; nothing in our logs (the run's log
@@ -1000,7 +1000,7 @@ Backlog (not started):
   0.15's cure B waits for the beam before the first frame into a left
   third, tear-free by a blind eye test), ChangeScreenBuffer (slow); vsync
   is the default since 1.5.1. Zod today: three buffers panned
-  (sdl_screen.cpp, mglEnableSync on, ZOD_GL_SYNC aus for benchmarks).
+  (sdl_screen.cpp, mglEnableSync on, ZOD_GL_SYNC off for benchmarks).
   What Zod would need:
   - the same "Display sync" choice in ZodLaunch (off / vsync / panned),
     panned as the default on RadeonGL 0.15+, vsync on older libraries;
@@ -1178,11 +1178,24 @@ merged as night-merge and then into gl (21.11. ~00:50, the user's word).
   the changes in, softscrolling becomes default"): two buffers, margins
   from the free chip RAM; -H off|on|fast, ZodLaunch "AGA scrolling".
   FS-UAE AgaCheck (the whole-view path kept checked with
-  ZOD_AGA_HWSCROLL=aus, the fallback with the default), AgaHwScroll,
+  ZOD_AGA_HWSCROLL=off, the fallback with the default), AgaHwScroll,
   GLSmoke and the launcher test pass. night2-merge merged into gl.
 - **AGA without RTG at the whole 640x512** (branch aga-fb512): the
   automatic fallback now runs the game at 640x512 like -C pal (the user's
   decision 7); FS-UAE AgaCheck 0 differ, GLSmoke and SwSums unchanged.
+
+- **The environment switches in English** (the user, 21.11. ~07:35: "make
+  all env switches english on/off"): every ZOD_ on/off switch is read by
+  one helper, zod_env_switch (port/amiga/amiga_startup.cpp): on / off (also
+  1/0, yes/no, true/false, any case); the old German ein/an/ja and
+  aus/nein are still read so an old ENV: setting keeps working. The words
+  with more choices: ZOD_FLIP_SUMS=check (old pruefen), ZOD_SMOOTH=
+  off/on/scroll/always/measure/auto, ZOD_ZEIGER=picture (old bild),
+  ZOD_SCHLAF=always/never (old immer/nie). The tests, the runner tools,
+  the log lines and these documents now write on/off. tests/host/
+  env_switch_test.cpp (gmake envtest) checks the word rules on the host.
+  The variable names stay (some are German: ZOD_STEINE, ZOD_ZONEN,
+  ZOD_ZEIGER, ZOD_LADEBALKEN, ZOD_LUECKE, ZOD_BREIT, ZOD_SCHLAF).
 
 Backlog, LAST (the user, 21.11. ~01:25: "ignore the center stutter for now
 - put it at the end of backlog"):

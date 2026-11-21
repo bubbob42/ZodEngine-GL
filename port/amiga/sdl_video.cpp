@@ -292,9 +292,8 @@ extern "C" void zod_dirty_set_target(SDL_Surface *s)
 {
 	char wahl[16];
 
-	if(zod_env("ZOD_DIRTY", wahl, sizeof(wahl)))
-		if(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0')
-			dirty_an = 0;
+	if(!zod_env_switch("ZOD_DIRTY", 1))
+		dirty_an = 0;
 
 	/* Laeufe zusammenfassen: SetEnv ZOD_LUECKE <bloecke>. Kein atoi -- das
 	 * liest unter libnix nichts Falsches, aber die Ziffern hier selbst zu
@@ -317,9 +316,8 @@ extern "C" void zod_dirty_set_target(SDL_Surface *s)
 		}
 	}
 
-	if(zod_env("ZOD_SWEEP", wahl, sizeof(wahl)))
-		if(wahl[0] == '1' || wahl[0] == 'j' || wahl[0] == 'J')
-			sweep_an = 1;
+	if(zod_env_switch("ZOD_SWEEP", 0))
+		sweep_an = 1;
 
 	/* Der Schalter selbst wird beim ersten Gebrauch gelesen (siehe
 	 * zod_surface_big_hint) -- hier nur die Protokollzeile, damit ein
@@ -340,7 +338,7 @@ extern "C" void zod_dirty_set_target(SDL_Surface *s)
 	if(grid_h > ZOD_GRID_H) grid_h = ZOD_GRID_H;
 
 	ZLOG("Ausgabe: %s, Raster %ldx%ld Bloecke zu %ld Punkten, Luecke %ld\n",
-	     dirty_an ? "nur geaenderte Bereiche" : "ganzes Bild (ZOD_DIRTY=aus)",
+	     dirty_an ? "nur geaenderte Bereiche" : "ganzes Bild (ZOD_DIRTY=off)",
 	     (long)grid_w, (long)grid_h, (long)(1 << ZOD_BLOCK_SHIFT),
 	     (long)luecke);
 
@@ -641,10 +639,7 @@ extern "C" void zod_dirty_force_full(void)
 #ifndef DISABLE_OPENGL
 	if(dirtylazy < 0)
 	{
-		char b[16];
-		const char *e = zod_env("ZOD_DIRTYLAZY", b, sizeof(b));
-
-		dirtylazy = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+		dirtylazy = zod_env_switch("ZOD_DIRTYLAZY", 1);
 	}
 
 	if(zod_gl_active && dirtylazy)

@@ -1,9 +1,6 @@
 #include "orock.h"
-#ifdef __amigaos__
-#include "amiga_startup.h"   /* zod_env: ZOD_ROCK_COMBO */
-#else
+#include "amiga_startup.h"   /* zod_env_switch: ZOD_ROCK_COMBO (every build) */
 #include <stdlib.h>
-#endif
 
 ZSDL_Surface ORock::rock_pal[MAX_PLANET_TYPES];
 
@@ -325,7 +322,7 @@ void ORock::DoPreRender(ZMap &the_map, SDL_Surface *dest, int shift_x, int shift
  * few dozen), made when a rock first needs it, kept for the run. A rock
  * whose parts change (a neighbour destroyed: EditRockRender) gets the image
  * of its new combination. Parts that are not 16x16 keep the three blits.
- * ZOD_ROCK_COMBO aus: three blits, as before. */
+ * ZOD_ROCK_COMBO off: three blits, as before. */
 struct rock_combo_entry
 {
 	ZSDL_Surface *part[3];
@@ -340,17 +337,11 @@ static bool rock_combo_wanted()
 	if(rock_combo_on < 0)
 	{
 		rock_combo_on = 1;
-#ifdef __amigaos__
-		char v[16];
-		const char *e = zod_env("ZOD_ROCK_COMBO", v, sizeof(v));
-#else
-		const char *e = getenv("ZOD_ROCK_COMBO");
-#endif
-		if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+		if(!zod_env_switch("ZOD_ROCK_COMBO", 1))
 			rock_combo_on = 0;
 
 		ZLOG("Rocks: %s\n", rock_combo_on ? "one 16x48 image a rock (the three parts stacked)"
-		                                   : "three blits a rock (ZOD_ROCK_COMBO aus)");
+		                                   : "three blits a rock (ZOD_ROCK_COMBO off)");
 	}
 
 	return rock_combo_on != 0;

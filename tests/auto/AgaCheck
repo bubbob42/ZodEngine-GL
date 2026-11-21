@@ -6,13 +6,13 @@
 ; (1) ZOD_AGA set, orig01, a still bot match, 30 s;
 ; (2) ZOD_AGA not set: no RTG, so the game must fall back to AGA itself;
 ;     orig04 with the view scrolling (ZOD_TOUR), 30 s.
-; (3) -C dblpal (the launcher's option), one buffer (ZOD_AGA_DBUF aus), 20 s.
+; (3) -C dblpal (the launcher's option), one buffer (ZOD_AGA_DBUF off), 20 s.
 ; (4) the plain path: no block sums, one buffer, no hardware scrolling
 ;     (every dirty run converted as it is), orig04 tour, 15 s.
 ; (5) -C pal400 (640x400 centred, the faster choice), orig01 still, no
 ;     hardware scrolling, 15 s.
 ; Hardware scrolling is on by default since 21.11.: (1) and (3) switch it
-; off (ZOD_AGA_HWSCROLL aus) to keep the whole-view path checked, (2) runs
+; off (ZOD_AGA_HWSCROLL off) to keep the whole-view path checked, (2) runs
 ; with the default.
 ; Software (-o): no GL without RTG.
 ; LIMIT 900
@@ -23,7 +23,7 @@ Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Delete >NIL: DEV:Test/zod-#?
 SetEnv ZOD_AGA_CHECK on
-SetEnv ZOD_AGA_HWSCROLL aus
+SetEnv ZOD_AGA_HWSCROLL off
 SetEnv ZOD_AGA pal
 Echo "=== AGA (ZOD_AGA), orig01, still ===" >>DEV:Test/auto.log
 Run >NIL: Execute DEV:Test/RunZod ags 30 -o -m Data/Campaing/Z_original/p02_bb_orig01.map
@@ -38,15 +38,15 @@ Execute DEV:Test/WaitDone DEV:Test/zod-agt.done
 Type DEV:Test/zod-agt.log >>DEV:Test/auto.log
 UnSetEnv ZOD_TOUR
 Echo "=== -C dblpal (a flicker-free mode: shown, or PAL HiRes Laced without its monitor driver); one buffer ===" >>DEV:Test/auto.log
-SetEnv ZOD_AGA_DBUF aus
-SetEnv ZOD_AGA_HWSCROLL aus
+SetEnv ZOD_AGA_DBUF off
+SetEnv ZOD_AGA_HWSCROLL off
 Run >NIL: Execute DEV:Test/RunZod agd 20 -o -C dblpal -m Data/Campaing/Z_original/p02_bb_orig01.map
 Execute DEV:Test/WaitDone DEV:Test/zod-agd.done
 Type DEV:Test/zod-agd.log >>DEV:Test/auto.log
 UnSetEnv ZOD_AGA_DBUF
 Echo "=== the plain path: no sums, one buffer, no hardware scrolling; orig04 tour ===" >>DEV:Test/auto.log
-SetEnv ZOD_AGA_SUMS aus
-SetEnv ZOD_AGA_DBUF aus
+SetEnv ZOD_AGA_SUMS off
+SetEnv ZOD_AGA_DBUF off
 SetEnv ZOD_TOUR on
 Run >NIL: Execute DEV:Test/RunZod agp 15 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig04.map
 Execute DEV:Test/WaitDone DEV:Test/zod-agp.done

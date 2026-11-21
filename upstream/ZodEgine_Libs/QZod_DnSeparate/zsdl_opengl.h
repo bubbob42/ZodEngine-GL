@@ -107,7 +107,7 @@ public:
 	 * frei zu rotieren -- das Verhalten der Original-CD. Flugbogen und
 	 * Wachsen BLEIBEN, anders als bei -N.
 	 *
-	 * Vorgabe auf dem Amiga: an (also nicht drehen). `SetEnv ZOD_SPIN ein`
+	 * Vorgabe auf dem Amiga: an (also nicht drehen). `SetEnv ZOD_SPIN on`
 	 * schaltet das freie Drehen zurueck, fuer den A/B-Vergleich in derselben
 	 * Binaerdatei. Geschosse und Voegel sind NICHT betroffen: die drehen
 	 * einmal, und dort ist der Winkel die Flugrichtung. */

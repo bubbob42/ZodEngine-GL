@@ -1,11 +1,8 @@
 #include "zserver.h"
 #include "fineclock.h"   /* feine Uhr -- current_time() loest hier 20 ms auf */
-#ifdef __amigaos__
-#include "amiga_startup.h"  /* zod_env: ZOD_ROCKS_IDLE (proto/dos.h's macros
-                             * Read and SetOwner collide with member names) */
-#else
+#include "amiga_startup.h"  /* zod_env_switch (every build; not proto/dos.h:
+                             * its Read and SetOwner collide with member names) */
 #include <stdlib.h>
-#endif
 
 /* The server's per-tick passes over every object but the rocks (see
  * ZOLists::server_olist); ZOD_ROCKS_IDLE=off: over all objects, as before. */
@@ -16,18 +13,8 @@ static int rocks_idle_on(void)
 	if(rocks_idle < 0)
 	{
 		rocks_idle = 1;
-#ifdef __amigaos__
-		char v[16];
-		const char *e = zod_env("ZOD_ROCKS_IDLE", v, sizeof(v));
-
-		if(e && ((e[0] == 'o' && e[1] == 'f') || e[0] == '0' || e[0] == 'a' || e[0] == 'A'))
+		if(!zod_env_switch("ZOD_ROCKS_IDLE", 1))
 			rocks_idle = 0;
-#else
-		const char *e = getenv("ZOD_ROCKS_IDLE");
-
-		if(e && ((e[0] == 'o' && e[1] == 'f') || e[0] == '0' || e[0] == 'a' || e[0] == 'A'))
-			rocks_idle = 0;
-#endif
 		ZLOG("Server: rocks %s\n", rocks_idle ? "left out of the per-tick passes"
 		                                       : "in every per-tick pass (ZOD_ROCKS_IDLE off)");
 	}
@@ -51,18 +38,7 @@ unsigned long zod_srvmap_checked = 0, zod_srvmap_bad = 0, zod_srvmap_passes = 0;
 
 static int srv_switch(const char *name, int dflt)
 {
-#ifdef __amigaos__
-	char buf[16];
-	const char *e = zod_env(name, buf, sizeof(buf));
-#else
-	const char *e = getenv(name);
-#endif
-
-	if(!e) return dflt;
-	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
-	if(e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
-
-	return dflt;
+	return zod_env_switch(name, dflt);   /* on / off (amiga_startup.h) */
 }
 
 static bool srvmapcheck_on()
@@ -85,15 +61,7 @@ static bool killfast_on()
 {
 	if(killfast < 0)
 	{
-#ifdef __amigaos__
-		char buf[16];
-		const char *e = zod_env("ZOD_KILLFAST", buf, sizeof(buf));
-#else
-		const char *e = getenv("ZOD_KILLFAST");
-#endif
-
-		killfast = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
-		                  (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
+		killfast = zod_env_switch("ZOD_KILLFAST", 1);
 	}
 
 	return killfast == 1;

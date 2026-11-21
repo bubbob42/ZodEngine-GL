@@ -130,7 +130,7 @@ fewer updates" mode (the HUD and units refreshed every other frame).
 - Checks: the screen opens (mode, depth, palette), a still bot match runs
   and a dumped frame of the planar bitmap equals the compose surface
   through the palette (a planar-to-chunky read-back in the test, the same
-  idea as ZOD_FLIP_SUMS=pruefen: "0 differ"); the software RTG tests stay
+  idea as ZOD_FLIP_SUMS=check: "0 differ"); the software RTG tests stay
   green.
 - Real hardware: the A1200 (.31) when it answers; the user's eye for
   flicker and colours.
@@ -246,7 +246,7 @@ voltago with them (03:37-03:45, 1975 KB free, same tour): without 5.5 fps
 decides between "fast" (+40 % here, +110 % on the PiStorm) and its look.
 
 **Default since the user's word (21.11. ~06:50, "softscrolling becomes
-default"): ON with two buffers** -- -H off (or ZOD_AGA_HWSCROLL=aus)
+default"): ON with two buffers** -- -H off (or ZOD_AGA_HWSCROLL=off)
 switches it off, -H fast takes one buffer; ZodLaunch's "AGA scrolling"
 starts at "On (two buffers)" and always passes its -H. Two buffers as the
 default because they never show a half-drawn frame; "fast" (the bigger

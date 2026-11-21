@@ -94,7 +94,8 @@ static int read_mode(void)
 
 	/* on by default while the view moves (the user's eye test, 21.11.:
 	 * N = 2 fixed felt better than off and than the automatic N);
-	 * ZOD_SMOOTH=aus (or -X off) switches it off */
+	 * ZOD_SMOOTH=off (or -X off) switches it off; the other words: on,
+	 * scroll, always, measure (the old aus / immer / messen still read) */
 	if(!e || !*e) return 1;
 	if(e[0] == 'a' && e[1] == 'u' && e[2] == 's') return 0;   /* aus */
 	if(e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
@@ -559,7 +560,7 @@ void zod_smooth_open(void)
 
 	ZLOG("Smooth: %s, N %s%d\n",
 	     mode == 1 ? "while the view moves (ZOD_SMOOTH scroll)" :
-	     mode == 2 ? "always (ZOD_SMOOTH always)" : "measuring only (ZOD_SMOOTH messen)",
+	     mode == 2 ? "always (ZOD_SMOOTH always)" : "measuring only (ZOD_SMOOTH measure)",
 	     fix_n ? "fixed " : "chosen, now ", n_cur);
 }
 

@@ -6,7 +6,7 @@
  * moved, SDL_Flip first moves the map area's screen content with one
  * BltBitMap inside the screen bitmap (the board's blitter, no bus traffic),
  * then sends only the blocks that differ from the moved previous frame.
- * ZOD_RTGSCROLL=ein switches it on (off by default until measured).
+ * ZOD_RTGSCROLL=on switches it on (off by default until measured).
  */
 
 #ifdef __cplusplus

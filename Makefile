@@ -276,7 +276,7 @@ $(OBJDIR)/port/amiga/musik_kern.o: port/amiga/musik_kern.s
 
 # --- Host-Tests ---
 # wiretest  = normaler Build, wiretest-swap = Big-Endian-Simulation (ZOD_WIRE_SWAPTEST)
-.PHONY: wiretest hosttest shimtest launchtest mapcliptest c2ptest
+.PHONY: wiretest hosttest shimtest launchtest mapcliptest c2ptest envtest
 wiretest: $(BUILD)/wire_test $(BUILD)/wire_test_swap
 	$(BUILD)/wire_test
 	$(BUILD)/wire_test_swap
@@ -308,6 +308,14 @@ launchtest: $(BUILD)/launch_logic_test
 # Bildpunkte (bewegte Einheiten) -- genauso viel wie alt gegen neu.
 mapcliptest: $(BUILD)/mapclip_test
 	$(BUILD)/mapclip_test
+
+# The on/off words of the ZOD_ switches (port/amiga/amiga_startup.cpp).
+envtest: $(BUILD)/env_switch_test
+	$(BUILD)/env_switch_test
+
+$(BUILD)/env_switch_test: tests/host/env_switch_test.cpp port/amiga/amiga_startup.cpp port/amiga/amiga_startup.h
+	@mkdir -p $(dir $@)
+	$(CXX) -O1 -g -Wall -Iport -Iport/amiga tests/host/env_switch_test.cpp port/amiga/amiga_startup.cpp -o $@
 
 # The AGA chunky-to-planar routines (port/amiga/zod_c2p.h), bit for bit
 # against a plain reference on the host.

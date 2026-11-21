@@ -91,7 +91,7 @@ same path, so it works on Amigas without GL unchanged.
 
 ## Switch
 
-`ZOD_LADEBALKEN aus` (env) shows the old screen without the bar.
+`ZOD_LADEBALKEN off` (env) shows the old screen without the bar.
 
 ## Eye test (morning)
 
@@ -104,7 +104,7 @@ original loading pictures if an install with `zod_screens.zpk` is at hand.
   the frame of an original picture, with the bar's own palette),
   `zod_lade_beginn/schritt/ende()`, `zod_schirm_ausgeben_teil()` (only the
   bar's region: `zod_dirty_mark` for the software path, `zod_sdl_flip_teil`
-  -> `zod_gl_show_surface_teil` for GL). `ZOD_LADEBALKEN aus`: as before.
+  -> `zod_gl_show_surface_teil` for GL). `ZOD_LADEBALKEN off`: as before.
 - `zplayer.cpp`: the five steps before `Load_Graphics` and its 80, each
   named by its group (TEAMS, MAP, HUD, ROCKS, SELECTION, MESSAGES, SOUNDS,
   CURSORS, OBJECTS, UNITS, ANIMALS, BUILDINGS, MAP OBJECTS, CANNONS,

@@ -1,5 +1,5 @@
 ; GLTour -- the GL path while the view scrolls (ZOD_TOUR) and debris spins
-; (ZOD_SPIN ein: the rotation path), on the large orig04 map; the same run
+; (ZOD_SPIN on: the rotation path), on the large orig04 map; the same run
 ; in software to compare (frame 500 of each). Then p08_bb_p08m01, whose
 ; 4096x4096 map is twice the 16 MB heap: drawn through the map texture
 ; while the view scrolls (frame 400 dumped). FS-UAE + RadeonGL 0.16's null card.
@@ -10,9 +10,9 @@ Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Delete >NIL: DEV:Test/zod-#?
 SetEnv ZOD_CENSUS on
-SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_GL_SYNC off
 SetEnv ZOD_TOUR on
-SetEnv ZOD_SPIN ein
+SetEnv ZOD_SPIN on
 SetEnv RadeonGLHeapMax 16
 SetEnv RadeonGLDump 500
 SetEnv RadeonGLDumpFile DEV:Test/zod-tour-f500.r2d

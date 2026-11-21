@@ -21,7 +21,7 @@ items, smooth scrolling under GL first.
   texture (orig04: 1376x1760), a different position only moves its texture
   coordinates; units, effects and the HUD are quads at whole pixels.
 - RadeonGL shows the frame through three panned buffers; with sync on (the
-  players' default; ZOD_GL_SYNC=aus only in benchmarks) a pan waits for the
+  players' default; ZOD_GL_SYNC=off only in benchmarks) a pan waits for the
   card's blank. Hamiller's 640x480 mode runs at 60 Hz (the library's line
   model: ~32.8 us a line, a refresh ~16.7 ms).
 - Frame times while scrolling on Hamiller: ~30..34 ms (29.6 fps on orig04's
@@ -164,7 +164,7 @@ Baseline before any change (Hamiller, 20.11. 21:30, gl n17, stock RadeonGL
 0.16, orig04 tour, sync on, 60 s): 27.5 fps; mglSwitchDisplay 5.3 ms a
 present on average, 252 presents of 8 ms and more in the first 600 frames
 (PanPace's early holds, fixed in RadeonGL main, not released) and none
-after. The judder in numbers needs the blank clock: ZOD_SMOOTH=messen on
+after. The judder in numbers needs the blank clock: ZOD_SMOOTH=measure on
 the same run gives it.
 
 ### Switches
@@ -188,7 +188,7 @@ after a 116 ms hiccup: since then a percentile and up to three tries).
 
 | run | shown for 1 / 2 / 3 / 4+ refreshes | late | view px per refresh: mean, spread | fps |
 |---|---|---|---|---|
-| today (ZOD_SMOOTH=messen) | 551 / 961 / 113 / 114 | -- | 7.37, **2.76** | 28.1 |
+| today (ZOD_SMOOTH=measure) | 551 / 961 / 113 / 114 | -- | 7.37, **2.76** | 28.1 |
 | N = 2 fixed | 0 / 1252 / 154 / 103 | 208 (14 %) | 6.85, **1.84** | 24.3 |
 | N = 3 fixed | 0 / 0 / 886 / 149 | 100 (10 %) | 6.77, **1.38** | 16.4 |
 | N chosen (first rule) | climbed to N = 4 | 61 | 6.74, 1.30 | 12.6 |
@@ -223,7 +223,7 @@ maybe I'm imagining" (to be checked against the cadence logs).
 
 **The user's decisions:** smooth ON by default with N = 2 fixed (the
 automatic N only with ZOD_SMOOTH_N=auto), the step carrying the fraction
-(exact 400 px/s); ZodLaunch's "Smooth scrolling" ticked; ZOD_SMOOTH=aus or
+(exact 400 px/s); ZodLaunch's "Smooth scrolling" ticked; ZOD_SMOOTH=off or
 -X off to switch it off. Benchmarks (tools/hw/zod_run.py) run without it
 unless ZSMOOTH=1.
 
@@ -248,7 +248,7 @@ frame (kept in fast RAM, following the same dirty runs) at the moved place
 and sends only the blocks that differ. No compose-surface shift is needed:
 the comparison is against the previous frame directly.
 
-FS-UAE RtgScrollCheck (software, ZOD_FLIP_SUMS pruefen reads the whole
+FS-UAE RtgScrollCheck (software, ZOD_FLIP_SUMS check reads the whole
 screen back after every flip): orig04 tour 0 differ; 1087 of 1103 flips
 moved the map on the card, 69 % of the dirty blocks kept; 94 196 bytes a
 frame to the screen instead of 304 645 (-69 %), but 791 copy calls a frame
@@ -294,6 +294,6 @@ buffer, the exposed strip through c2p -- described there.
 ## Eye tests (morning)
 
 - Smooth on/off, blind A/B, orig04, scrolling by keys and by the edge:
-  ZOD_SMOOTH=aus (28 fps, uneven) against ZOD_SMOOTH=scroll with
+  ZOD_SMOOTH=off (28 fps, uneven) against ZOD_SMOOTH=scroll with
   ZOD_SMOOTH_N=3 (20 fps, even) and N=2 (24 fps, 14 % late) -- which reads
   smoother.

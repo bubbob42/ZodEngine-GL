@@ -42,16 +42,7 @@ static unsigned long ifloor_calls = 0, ifloor_bad = 0, ifloor_down = 0;
 
 static int ifloor_switch(const char *name)
 {
-#ifdef __amigaos__
-	char buf[16];
-	const char *e = zod_env(name, buf, sizeof(buf));
-#else
-	const char *e = getenv(name);
-#endif
-
-	if(!e) return -1;
-	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
-	return 1;
+	return zod_env_switch(name, -1);   /* -1 not set, 0 off, 1 on */
 }
 
 int ifloor_other(double v)

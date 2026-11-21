@@ -84,10 +84,10 @@ enum
  * A4000D a tile cost ~10 ms, a view crossing a row of tiles 6 of them in
  * one frame (orig04 tour: map 11.8 ms a frame, the worst frames 100 ms).
  * Stale tiles go up when drawn, one more a frame ahead of time.
- * ZOD_GL_MAPRES=aus keeps the ring (the same binary, to compare). */
+ * ZOD_GL_MAPRES=off keeps the ring (the same binary, to compare). */
 enum { MAP_RESIDENT_MAX = 6 * 1024 * 1024 };
 static int map_resident_ok = 1;
-static int own_pot = 0;          /* ZOD_GL_OWNPOT=ein: own textures as powers of two */
+static int own_pot = 0;          /* ZOD_GL_OWNPOT=on: own textures as powers of two */
 
 struct torus
 {
@@ -213,7 +213,7 @@ static unsigned long guard_hits = 0;
  * frame's first draw, when every texture is free to rewrite again; until
  * then the image draws from a texture of its own that nothing has drawn
  * from. The page place is taken at once, so nothing else lands there.
- * ZOD_GL_HOLD=aus sends at once (the same binary, to compare). */
+ * ZOD_GL_HOLD=off sends at once (the same binary, to compare). */
 enum { HELD_MAX = 64, HELD_OLD_MAX = 256 };
 struct held_up
 {
@@ -389,10 +389,7 @@ static int glcheck_on(void)
 {
 	if(glcheck < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_GLCHECK", buf, sizeof(buf));
-
-		glcheck = (e && (e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'))) ? 1 : 0;
+		glcheck = zod_env_switch("ZOD_GLCHECK", 0);
 	}
 
 	return glcheck;
@@ -1779,7 +1776,7 @@ static struct zod_gl_tex *tex_make(SDL_Surface *s, int atlas_ok)
 	/* RadeonGL: small own textures at their own size too (even width: whole
 	 * longwords a row), one level instead of a power of two with its mip
 	 * chain. The minimap's refresh took 11 ms on the A4000D in a 64x128
-	 * texture (ZOD_GL_OWNPOT=ein: powers of two, to compare). */
+	 * texture (ZOD_GL_OWNPOT=on: powers of two, to compare). */
 	if(npot_ok && !own_pot)
 	{
 		if(s->w <= 256) t->tw = (s->w + 1) & ~1;
@@ -1941,12 +1938,8 @@ static void tex_refresh(struct zod_gl_tex *t)
 
 	if(refdiff_ok < 0)
 	{
-		char b[16];
-		const char *e = zod_env("ZOD_REFDIFF", b, sizeof(b));
-
-		refdiff_ok = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
-		e = zod_env("ZOD_REFDIFFCHECK", b, sizeof(b));
-		refdiffcheck_ok = e && (e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'));
+		refdiff_ok = zod_env_switch("ZOD_REFDIFF", 1);
+		refdiffcheck_ok = zod_env_switch("ZOD_REFDIFFCHECK", 0);
 	}
 
 	/* an 8-bit own one-tile texture whose surface still has its size */
@@ -2256,43 +2249,26 @@ void zod_gl_init(int w, int h)
 		/* the same for RGBA, which RadeonGL 0.16 keeps as ARGB4444 */
 		copy4444_ok = npot_ok;
 
-		/* ZOD_GL_565=aus: map tiles as RGBA bytes (to measure the
+		/* ZOD_GL_565=off: map tiles as RGBA bytes (to measure the
 		 * difference); default on */
 		{
-			char buf[16];
-			const char *e = zod_env("ZOD_GL_565", buf, sizeof(buf));
-
-			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+			if(!zod_env_switch("ZOD_GL_565", 1))
 				copy565_ok = 0;
 
-			/* ZOD_GL_4444=aus: RGBA textures as RGBA bytes (to measure) */
-			e = zod_env("ZOD_GL_4444", buf, sizeof(buf));
-
-			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+			/* ZOD_GL_4444=off: RGBA textures as RGBA bytes (to measure) */
+			if(!zod_env_switch("ZOD_GL_4444", 1))
 				copy4444_ok = 0;
 
-			/* ZOD_GL_MAPRES=aus: the map through the ring of tiles even
+			/* ZOD_GL_MAPRES=off: the map through the ring of tiles even
 			 * where it fits as one texture (to measure) */
-			map_resident_ok = 1;
-			e = zod_env("ZOD_GL_MAPRES", buf, sizeof(buf));
+			map_resident_ok = zod_env_switch("ZOD_GL_MAPRES", 1);
 
-			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
-				map_resident_ok = 0;
+			/* ZOD_GL_OWNPOT=on: small own textures as powers of two again */
+			own_pot = zod_env_switch("ZOD_GL_OWNPOT", 0);
 
-			/* ZOD_GL_OWNPOT=ein: small own textures as powers of two again */
-			own_pot = 0;
-			e = zod_env("ZOD_GL_OWNPOT", buf, sizeof(buf));
-
-			if(e && (e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')))
-				own_pot = 1;
-
-			/* ZOD_GL_HOLD=aus: atlas uploads at once, into a page drawn
+			/* ZOD_GL_HOLD=off: atlas uploads at once, into a page drawn
 			 * this frame too (to measure) */
-			hold_ok = 1;
-			e = zod_env("ZOD_GL_HOLD", buf, sizeof(buf));
-
-			if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
-				hold_ok = 0;
+			hold_ok = zod_env_switch("ZOD_GL_HOLD", 1);
 		}
 
 		/* the hit flash's white silhouette needs GL_ADD. A library without
@@ -2418,7 +2394,7 @@ int zod_gl_atlas_prepare(void)
 	e = zod_env("ZOD_GL_PREPAGES", buf, sizeof(buf));
 	if(e)
 	{
-		if(e[0] == 'a' || e[0] == 'A' || (e[0] == 'o' && e[1] == 'f')) want = 0;
+		if(!zod_switch_value(e, 1)) want = 0;   /* off (old: aus) */
 		else if(e[0] >= '0' && e[0] <= '9') want = e[0] - '0';
 	}
 

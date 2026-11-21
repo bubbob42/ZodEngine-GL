@@ -34,10 +34,7 @@ int zod_rtgscroll_on(void)
 {
 	if(on < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_RTGSCROLL", buf, sizeof(buf));
-
-		on = (e && (e[0] == 'e' || e[0] == 'E' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'))) ? 1 : 0;
+		on = zod_env_switch("ZOD_RTGSCROLL", 0);
 
 		if(on) ZLOG("RTG scroll: the map area moves on the card while the view scrolls (ZOD_RTGSCROLL)\n");
 	}

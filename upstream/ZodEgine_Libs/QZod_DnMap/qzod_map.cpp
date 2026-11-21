@@ -332,7 +332,7 @@ void ZMap::DoRender(SDL_Surface *dest, int shift_x_dest, int shift_y_dest)
      *
      * Zurueck auf den vollen Blit, sobald sich der Ausschnitt verschiebt:
      * dann stimmt keine einzige Zeile mehr. Ebenso beim ersten Bild und bei
-     * abgeschalteter Spur (ZOD_DIRTY=aus).
+     * abgeschalteter Spur (ZOD_DIRTY=off).
      *
      * Zeilen werden zu Rechtecken zusammengefasst, solange sie unmittelbar
      * aufeinanderfolgen -- ein Blit je Zeile waere bei 444 Zeilen teurer als
@@ -574,10 +574,9 @@ void ZMap::RenderMap()
     /* ZOD_MAPCOLORS (research, docs/research-aga-speed.md): the colour
      * indices the terrain alone uses (the map surface as drawn) */
     {
-        char wahl[8];
         SDL_Surface *ms = full_render.GetBaseSurface();
 
-        if(ms && ms->format->BitsPerPixel == 8 && zod_env("ZOD_MAPCOLORS", wahl, sizeof(wahl)))
+        if(ms && ms->format->BitsPerPixel == 8 && zod_env_switch("ZOD_MAPCOLORS", 0))
         {
             static unsigned long h[256];
             unsigned long total = 0, acc = 0, s[256];
@@ -1038,14 +1037,7 @@ unsigned long zod_effpos_skipped = 0, zod_effcheck_n = 0, zod_effcheck_bad = 0;
 
 static int eff_switch(const char *name, int dflt)
 {
-    char buf[16];
-    const char *e = zod_env(name, buf, sizeof(buf));
-
-    if(!e) return dflt;
-    if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
-    if(e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
-
-    return dflt;
+    return zod_env_switch(name, dflt);   /* on / off (amiga_startup.h) */
 }
 
 static bool effpos_on()
@@ -2090,7 +2082,7 @@ unsigned long zod_zone_wasser = 0;     /* davon Wasser (bewegt sich)*/
 unsigned long zod_zone_bilder = 0;
 unsigned long zod_zone_gebacken = 0;   /* Einbackvorgaenge (Start + Wechsel) */
 
-/* A/B-Schalter NUR fuer die Messung: `SetEnv ZOD_ZONEN aus` laesst die Blits
+/* A/B-Schalter NUR fuer die Messung: `SetEnv ZOD_ZONEN off` laesst die Blits
  * der Zonenmarker weg und behaelt Schleife, Sichttest und GetBlitInfo. Die
  * Differenz zweier Laeufe im Posten `zeichnen.zonen` ist damit genau der Preis
  * der 69 Blits -- die Frage "kostet der Aufruf oder das Pixel", die sich beim
@@ -2109,10 +2101,7 @@ static int zone_blits_an(void)
 
     if(wahl < 0)
     {
-        char buf[16];
-        const char *e = zod_env("ZOD_ZONEN", buf, sizeof(buf));
-
-        wahl = (e && (*e == 'a' || *e == 'A')) ? 0 : 1;
+        wahl = zod_env_switch("ZOD_ZONEN", 1);
 
         if(!wahl) ZLOG("Zonenmarker: Blits AUS (nur Messung)\n");
     }
@@ -2211,7 +2200,7 @@ void ZMap::BakeZoneMarkers()
 {
     if(!full_render.GetBaseSurface()) return;
 
-    /* `ZOD_ZONEN aus` schaltet die Marker weiterhin ganz ab -- sonst wuerde der
+    /* `ZOD_ZONEN off` schaltet die Marker weiterhin ganz ab -- sonst wuerde der
      * Schalter nach dem Umbau nur noch die Wassermarker treffen und der
      * A/B-Vergleich waere still bedeutungslos geworden. */
     if(!zone_blits_an()) return;

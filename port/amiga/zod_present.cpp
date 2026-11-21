@@ -91,17 +91,14 @@ int zod_present_wanted(void)
 	struct Library *card;
 	LONG ver = -1;
 	const char *id;
-	char buf[16];
-	const char *e;
 
 	if(!MiniGLBase) return 0;
 
 	id = (const char *)MiniGLBase->lib_IdString;
 	if(!id || !strstr(id, "PiStorm3D")) return 0;
 
-	/* ZOD_GL_PRESENT=aus: the library's own screen (one buffer, tearing) */
-	e = zod_env("ZOD_GL_PRESENT", buf, sizeof(buf));
-	if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
+	/* ZOD_GL_PRESENT=off: the library's own screen (one buffer, tearing) */
+	if(!zod_env_switch("ZOD_GL_PRESENT", 1))
 		return 0;
 
 	Forbid();

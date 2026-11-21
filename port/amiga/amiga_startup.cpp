@@ -244,3 +244,41 @@ const char *zod_env(const char *name, char *buf, int size)
 	}
 #endif
 }
+
+/* the word, lower case, against a list */
+static int switch_word(const char *v, const char *const *words)
+{
+	int i, k;
+
+	for(i = 0; words[i]; i++)
+	{
+		for(k = 0; v[k] && words[i][k]; k++)
+		{
+			char c = v[k];
+
+			if(c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+			if(c != words[i][k]) break;
+		}
+
+		if(!v[k] && !words[i][k]) return 1;
+	}
+
+	return 0;
+}
+
+int zod_switch_value(const char *v, int dflt)
+{
+	static const char *const off[] = { "off", "0", "no", "false", "aus", "nein", 0 };
+
+	if(!v || !*v) return dflt;
+	if(switch_word(v, off)) return 0;
+
+	return 1;   /* on, 1, yes, true -- and ein/an/ja, or any other value */
+}
+
+int zod_env_switch(const char *name, int dflt)
+{
+	char buf[32];
+
+	return zod_switch_value(zod_env(name, buf, sizeof(buf)), dflt);
+}

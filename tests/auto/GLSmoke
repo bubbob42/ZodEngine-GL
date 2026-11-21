@@ -10,7 +10,7 @@ Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Delete >NIL: DEV:Test/zod-#?
 SetEnv ZOD_CENSUS on
-SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_GL_SYNC off
 ; the A4000D's screen-context heap: 16 MB, no eviction
 SetEnv RadeonGLHeapMax 16
 SetEnv RadeonGLDump 300

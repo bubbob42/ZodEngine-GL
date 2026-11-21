@@ -72,7 +72,7 @@ namespace COMMON
 	 * the same result as (int)floor(v). libm's floor is a call into a
 	 * bit-by-bit ___fpu_round_to_integer on the 060: _floor and it were
 	 * 1.4 % of the A4000D's tour samples (SmoothMove, ProcessMove, the hut
-	 * animals). ZOD_FASTFLOOR aus: libm's floor again; ZOD_FLOORCHECK on:
+	 * animals). ZOD_FASTFLOOR off: libm's floor again; ZOD_FLOORCHECK on:
 	 * both, the differences counted (ifloor_report). */
 	extern int ifloor_mode;            /* -1 not read yet, 1 fast, 0 libm, 2 check */
 	extern int ifloor_other(double v);

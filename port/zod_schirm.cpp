@@ -875,7 +875,7 @@ int zod_schirm_zeigen_schwarz(void)
  * forts' countdown digits (green_building) in a recessed box, the step in
  * font19's small set, dimmed. Picture coordinates, the picture's palette.
  * At most four updates a second; each redraws and outputs only the bar's
- * region. Every step's time goes to the log. ZOD_LADEBALKEN aus: off. */
+ * region. Every step's time goes to the log. ZOD_LADEBALKEN off: off. */
 enum
 {
 	LB_X = 70, LB_Y = 148, LB_B = 180, LB_H = 10,   /* the plate */
@@ -935,8 +935,7 @@ static int lade_switch(void)
 
 		e = zod_env("ZOD_LADEBALKEN", buf, sizeof(buf));
 #endif
-		lade_an = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
-		                  (e[0] == 'o' && e[1] == 'f')));
+		lade_an = zod_switch_value(e, 1);
 	}
 
 	return lade_an;

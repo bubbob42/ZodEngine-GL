@@ -4,14 +4,14 @@
 ;     ("Smooth: no blank clock ... smooth off"), the game running as without;
 ; (2) with ZOD_SMOOTH_HZ 60 (a nominal clock) the paced path runs: the report
 ;     must show the frames in the rhythm at N refreshes and the view's steps;
-; (3) ZOD_SMOOTH messen with the nominal clock: counted, nothing paced.
+; (3) ZOD_SMOOTH measure with the nominal clock: counted, nothing paced.
 ; LIMIT 1200
 FailAt 1000
 Wait 5
 Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Delete >NIL: DEV:Test/zod-#?
-SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_GL_SYNC off
 SetEnv RadeonGLHeapMax 16
 SetEnv ZOD_TOUR on
 SetEnv ZOD_SMOOTH scroll
@@ -24,8 +24,8 @@ Echo "=== GL, orig04, tour, ZOD_SMOOTH scroll, nominal 60 Hz ===" >>DEV:Test/aut
 Run >NIL: Execute DEV:Test/RunZod sm2 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
 Execute DEV:Test/WaitDone DEV:Test/zod-sm2.done
 Type DEV:Test/zod-sm2.log >>DEV:Test/auto.log
-SetEnv ZOD_SMOOTH messen
-Echo "=== GL, orig04, tour, ZOD_SMOOTH messen, nominal 60 Hz ===" >>DEV:Test/auto.log
+SetEnv ZOD_SMOOTH measure
+Echo "=== GL, orig04, tour, ZOD_SMOOTH measure, nominal 60 Hz ===" >>DEV:Test/auto.log
 Run >NIL: Execute DEV:Test/RunZod sm3 40 -m Data/Campaing/Z_original/p02_bb_orig04.map
 Execute DEV:Test/WaitDone DEV:Test/zod-sm3.done
 Type DEV:Test/zod-sm3.log >>DEV:Test/auto.log

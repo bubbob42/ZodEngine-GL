@@ -48,6 +48,17 @@ void zod_big_free(void *block);
  * Liefert `buf` oder 0, wenn die Variable nicht gesetzt ist. */
 const char *zod_env(const char *name, char *buf, int size);
 
+/* An on/off switch from the environment. The words are English: "on" and
+ * "off" (1/0, yes/no, true/false too, any case). The German words of the
+ * earlier builds -- ein/an/ja, aus/nein -- are still read, so an old
+ * ENV: setting keeps working; everything is written as on/off now.
+ * Returns 1 on, 0 off, dflt when the variable is missing or empty; any
+ * other value counts as on (as "set" did before). */
+int zod_env_switch(const char *name, int dflt);
+
+/* the same word test for a value that was read already (dflt for 0/"") */
+int zod_switch_value(const char *v, int dflt);
+
 #ifdef __cplusplus
 }
 #endif

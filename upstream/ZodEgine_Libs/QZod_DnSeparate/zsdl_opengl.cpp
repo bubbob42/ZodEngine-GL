@@ -1470,11 +1470,7 @@ static void zod_sincos(float angle, double *s, double *c)
 
 	if(trigcache < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_TRIGCACHE", buf, sizeof(buf));
-
-		trigcache = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
-		                   (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
+		trigcache = zod_env_switch("ZOD_TRIGCACHE", 1);
 	}
 
 	if(trigcache)
@@ -1954,10 +1950,7 @@ static bool zod_hitcheck_on()
 {
 	if(zod_hitcheck < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_HITCHECK", buf, sizeof(buf));
-
-		zod_hitcheck = (e && ((e[0] == 'o' && e[1] == 'n') || e[0] == 'e' || e[0] == '1')) ? 1 : 0;
+		zod_hitcheck = zod_env_switch("ZOD_HITCHECK", 0);
 	}
 
 	return zod_hitcheck == 1;

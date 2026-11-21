@@ -119,7 +119,7 @@ int zod_schirm_zeigen_schwarz(void);
  * beginn after the picture is up, schritt after each step (`done` of
  * `total` finished, `name` the one that just finished: font19's
  * characters only), ende before the game. At most four updates a second;
- * every step's time to the log ("[load] ..."). ZOD_LADEBALKEN aus: off. */
+ * every step's time to the log ("[load] ..."). ZOD_LADEBALKEN off: off. */
 int zod_lade_balken_an(void);
 void zod_lade_beginn(void);
 void zod_lade_schritt(const char *name, int done, int total);

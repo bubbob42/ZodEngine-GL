@@ -840,7 +840,7 @@ void ZPath_Finding_Engine::ProcessJobs(double budget_seconds)
         {
             char wahl[8];
 
-            selbsttest = zod_env("ZOD_PFSELFTEST", wahl, sizeof(wahl)) ? 1 : 0;
+            selbsttest = zod_env_switch("ZOD_PFSELFTEST", 0);
 
             if(selbsttest)
                 ZLOG("ZOD_PFSELFTEST ist AKTIV -- jede Wegsuche wird doppelt "
@@ -1424,7 +1424,7 @@ namespace ZPath_Finding_AStar
         {
             char wahl[8];
 
-            zod_pf_pruefen = zod_env("ZOD_PFCHECK", wahl, sizeof(wahl)) ? 1 : 0;
+            zod_pf_pruefen = zod_env_switch("ZOD_PFCHECK", 0);
 
             if(zod_pf_pruefen)
                 ZLOG("ZOD_PFCHECK ist AKTIV -- die Wegsuche rechnet doppelt. "
@@ -1512,7 +1512,7 @@ namespace ZPath_Finding_AStar
              * Die geschlossene wird nie nach dem Kleinsten gefragt und aendert
              * f an Ort und Stelle -- ein Baum darueber wuerde still veralten.
              *
-             * `SetEnv ZOD_PFHEAP aus` erzwingt die alte lineare Suche. Das ist
+             * `SetEnv ZOD_PFHEAP off` erzwingt die alte lineare Suche. Das ist
              * der Rueckweg UND das Gegenstueck fuer den A/B-Vergleich im
              * SELBEN Binary -- zwei getrennte Bauten waeren nicht vergleichbar,
              * weil die Spielsituation eine andere ist. */
@@ -1525,12 +1525,11 @@ namespace ZPath_Finding_AStar
 
                     heap_an = 1;
 
-                    if(zod_env("ZOD_PFHEAP", wahl, sizeof(wahl)) &&
-                       !strcmp(wahl, "aus"))
+                    if(!zod_env_switch("ZOD_PFHEAP", 1))
                         heap_an = 0;
 
                     ZLOG("Wegsuche: Auswahl %s\n",
-                         heap_an ? "ueber Turnierbaum" : "linear (ZOD_PFHEAP aus)");
+                         heap_an ? "ueber Turnierbaum" : "linear (ZOD_PFHEAP off)");
                 }
 
                 /* Reihenfolge: erst den Baum anmelden, dann die Listen

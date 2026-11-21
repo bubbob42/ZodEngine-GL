@@ -12,7 +12,7 @@ Wait 5
 Echo "=== machine ===" >DEV:Test/auto.log
 CPU >>DEV:Test/auto.log
 Delete >NIL: DEV:Test/zod-#?
-SetEnv ZOD_GL_SYNC aus
+SetEnv ZOD_GL_SYNC off
 SetEnv RadeonGLHeapMax 16
 Echo "=== GL, orig01, still ===" >>DEV:Test/auto.log
 SetEnv RadeonGLDump 300

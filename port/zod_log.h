@@ -25,7 +25,7 @@ enum zod_log_target
 	ZOD_LOG_SERIAL
 };
 
-void zod_log_open(void);           /* wertet ZOD_LOG aus, Standard: stdout */
+void zod_log_open(void);           /* wertet ZOD_LOG off, Standard: stdout */
 /* Ziel als Name: "stdout", "none", "serial" oder ein Dateiname */
 void zod_log_open_name(const char *target);
 void zod_log_set(int target, const char *filename);

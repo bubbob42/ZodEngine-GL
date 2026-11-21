@@ -18,14 +18,7 @@ extern unsigned long zod_sicht_treffer;   /* zsdl_opengl.cpp */
 
 static int hut_switch(const char *name, int dflt)
 {
-	char buf[16];
-	const char *e = zod_env(name, buf, sizeof(buf));
-
-	if(!e) return dflt;
-	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
-	if(e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
-
-	return dflt;
+	return zod_env_switch(name, dflt);   /* on / off (amiga_startup.h) */
 }
 
 static bool hutcull_on()

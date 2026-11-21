@@ -9,11 +9,7 @@ static bool minipart_on()
 {
 	if(minipart < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_MINIPART", buf, sizeof(buf));
-
-		minipart = (e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
-		                  (e[0] == 'o' && e[1] == 'f'))) ? 0 : 1;
+		minipart = zod_env_switch("ZOD_MINIPART", 1);
 	}
 
 	return minipart == 1;
@@ -30,10 +26,7 @@ static bool minicheck_on()
 {
 	if(minicheck < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_MINICHECK", buf, sizeof(buf));
-
-		minicheck = (e && (e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n'))) ? 1 : 0;
+		minicheck = zod_env_switch("ZOD_MINICHECK", 0);
 	}
 
 	return minicheck == 1;

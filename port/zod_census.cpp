@@ -185,10 +185,7 @@ static int seen_add(const SDL_Surface **list, int *count, const SDL_Surface *s)
 
 void zod_census_init(void)
 {
-	char buf[16];
-	const char *e = zod_env("ZOD_CENSUS", buf, sizeof(buf));
-
-	if(!e || !*e || !strcmp(e, "0") || !strcmp(e, "off")) return;
+	if(!zod_env_switch("ZOD_CENSUS", 0)) return;
 
 	reg = (struct reg_entry *)calloc(REG_SIZE, sizeof(struct reg_entry));
 

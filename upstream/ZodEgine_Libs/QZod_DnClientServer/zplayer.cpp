@@ -597,7 +597,7 @@ void ZPlayer::Setup()
 
 		/* With the load progress bar: a black screen in the frame of an
 		 * original picture, "LOADING" and the bar on it
-		 * (docs/concept-load-progress.md). ZOD_LADEBALKEN aus: black. */
+		 * (docs/concept-load-progress.md). ZOD_LADEBALKEN off: black. */
 		if(zod_lade_balken_an() && zod_schirm_zeigen_schwarz())
 		{
 			lade_schirm_steht = true;
@@ -705,7 +705,7 @@ void ZPlayer::InitSDL()
 	/* Das je Bild neue Drehen der vier Truemmerklassen -- auf dem Amiga
 	 * Vorgabe AUS, weil es dort den schwersten Einbruch verursacht (gemessen
 	 * 167 ms in einem Bild bei 22 Drehungen). Auf anderen Systemen bleibt es
-	 * an. `SetEnv ZOD_SPIN ein|aus` stellt beides um, fuer den A/B in
+	 * an. `SetEnv ZOD_SPIN on|aus` stellt beides um, fuer den A/B in
 	 * derselben Binaerdatei. */
 	{
 #ifdef __amigaos__
@@ -713,14 +713,7 @@ void ZPlayer::InitSDL()
 #else
 		bool spin = true;
 #endif
-		char buf[16];
-		const char *e = zod_env("ZOD_SPIN", buf, sizeof(buf));
-
-		if(e)
-		{
-			if(*e == 'e' || *e == 'E' || *e == '1') spin = true;
-			if(*e == 'a' || *e == 'A' || *e == '0') spin = false;
-		}
+		spin = zod_env_switch("ZOD_SPIN", spin ? 1 : 0) != 0;
 
 		ZSDL_Surface::SetNoSpin(!spin);
 
@@ -764,7 +757,7 @@ void ZPlayer::InitSDL()
 
 		ZLOG("Truemmer drehen: %s\n", spin
 		     ? "ja (frei, je Bild)"
-		     : "nein (Bildfolge wie Original) -- SetEnv ZOD_SPIN ein zum Vergleichen");
+		     : "nein (Bildfolge wie Original) -- SetEnv ZOD_SPIN on zum Vergleichen");
 	}
 
 	/* Ins Protokoll, weil sonst ein Mitschnitt nicht zuzuordnen ist -- genau
@@ -1513,11 +1506,7 @@ static bool zod_hud_all_on()
 {
 	if(zod_hud_all < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_HUD_ALL", buf, sizeof(buf));
-
-		zod_hud_all = (e && *e && !(e[0] == '0' && !e[1]) &&
-		               !(e[0] == 'o' && e[1] == 'f')) ? 1 : 0;
+		zod_hud_all = zod_env_switch("ZOD_HUD_ALL", 0);
 
 		if(zod_hud_all) ZLOG("HUD: drawn whole every frame (ZOD_HUD_ALL)\n");
 	}
@@ -1580,14 +1569,7 @@ static unsigned long zod_ord_sort = 0, zod_ord_proc = 0, zod_ord_pre = 0, zod_or
 
 static int zod_switch(const char *name, int dflt)
 {
-	char buf[16];
-	const char *e = zod_env(name, buf, sizeof(buf));
-
-	if(!e) return dflt;
-	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
-	if(e[0] == 'e' || e[0] == '1' || (e[0] == 'o' && e[1] == 'n')) return 1;
-
-	return dflt;
+	return zod_env_switch(name, dflt);   /* on / off (amiga_startup.h) */
 }
 
 /* ZOD_ROCKPRESKIP / ZOD_ROCKPRECHECK, see RenderObjects */
@@ -1620,7 +1602,7 @@ static int sortfix_on(void)
 	{
 		sortfix = zod_switch("ZOD_SORTFIX", 1);
 		ZLOG("Draw order: %s\n", sortfix ? "rocks' keys read once (they never change)"
-		                                   : "every key read each frame (ZOD_SORTFIX aus)");
+		                                   : "every key read each frame (ZOD_SORTFIX off)");
 	}
 
 	return sortfix;
@@ -1637,7 +1619,7 @@ unsigned long zod_steine_gebacken = 0;
 extern unsigned long zod_steine_kacheln;
 extern unsigned long zod_steine_besucht;
 
-/* `ZOD_STEINE aus` -- Rueckweg und A/B-Gegenstueck im selben Binary. */
+/* `ZOD_STEINE off` -- Rueckweg und A/B-Gegenstueck im selben Binary. */
 static int steine_backen = -1;
 
 static int steine_backen_an(void)
@@ -1645,18 +1627,9 @@ static int steine_backen_an(void)
 	if(steine_backen < 0)
 	{
 		steine_backen = 1;
-#ifdef __amigaos__
-		char wahl[16];
-
-		if(GetVar((CONST_STRPTR)"ZOD_STEINE", (STRPTR)wahl, sizeof(wahl), 0) > 0)
-			steine_backen = !(wahl[0] == 'a' || wahl[0] == 'A');
-#else
-		const char *e = getenv("ZOD_STEINE");
-
-		if(e && (e[0] == 'a' || e[0] == 'A')) steine_backen = 0;
-#endif
+		if(!zod_env_switch("ZOD_STEINE", 1)) steine_backen = 0;
 		ZLOG("Steinschatten: %s\n",
-		     steine_backen ? "eingebacken" : "dynamisch (ZOD_STEINE aus)");
+		     steine_backen ? "eingebacken" : "dynamisch (ZOD_STEINE off)");
 	}
 
 	return steine_backen;
@@ -2074,7 +2047,7 @@ extern "C" void zod_render_sections_report(long frames)
 		     (zod_ord_sort / zod_ord_frames) * 1000UL / f,
 		     (zod_ord_proc / zod_ord_frames) * 1000UL / f,
 		     (zod_ord_pre / zod_ord_frames) * 1000UL / f,
-		     sortfix_on() ? "ZOD_SORTFIX on" : "ZOD_SORTFIX aus");
+		     sortfix_on() ? "ZOD_SORTFIX on" : "ZOD_SORTFIX off");
 	}
 
 	{
@@ -2093,7 +2066,7 @@ extern "C" void zod_render_sections_report(long frames)
 	if(zod_snd_frames)
 		ZLOG("building sounds: ZOD_SNDCHECK %lu frames, %lu differ (%s);"
 		     " radar heard in %lu, a factory in %lu\n",
-		     zod_snd_frames, zod_snd_bad, sndlist ? "ZOD_SNDLIST on" : "ZOD_SNDLIST aus",
+		     zod_snd_frames, zod_snd_bad, sndlist ? "ZOD_SNDLIST on" : "ZOD_SNDLIST off",
 		     zod_snd_radar, zod_snd_robot);
 
 #ifndef DISABLE_OPENGL
@@ -2357,18 +2330,7 @@ static int zod_centercheck_an(void)
 	if(centercheck < 0)
 	{
 		centercheck = 0;
-#ifdef __amigaos__
-		char wahl[16];
-
-		/* GetVar, nicht getenv -- libnix sieht SetEnv nicht. */
-		if(GetVar((CONST_STRPTR)"ZOD_CENTERCHECK", (STRPTR)wahl,
-		          sizeof(wahl), 0) > 0)
-			centercheck = (wahl[0] != '0');
-#else
-		const char *e = getenv("ZOD_CENTERCHECK");
-
-		if(e) centercheck = (e[0] != '0');
-#endif
+		centercheck = zod_env_switch("ZOD_CENTERCHECK", 0);
 		if(centercheck) ZLOG("Mittelpunkt-Sonde: an\n");
 	}
 
@@ -2421,7 +2383,7 @@ void ZPlayer::PruefeMittelpunkte()
  * both objects -- on the A4000D 4.2 % of the scrolling frame in that call
  * alone (~1200 comparisons a frame over the four lists). The order is the
  * same by construction: the same comparisons on the same values.
- * ZOD_SORTKEYS aus: the comparator again. */
+ * ZOD_SORTKEYS off: the comparator again. */
 #ifndef DISABLE_OPENGL
 #include "zod_gl.h"
 
@@ -2586,16 +2548,7 @@ static int band_census_on(void)
 	if(band_census < 0)
 	{
 		band_census = 0;
-#ifdef __amigaos__
-		char wahl[16];
-
-		if(GetVar((CONST_STRPTR)"ZOD_BANDCENSUS", (STRPTR)wahl, sizeof(wahl), 0) > 0)
-			band_census = (wahl[0] == 'o' && wahl[1] == 'n') || wahl[0] == 'e' || wahl[0] == '1';
-#else
-		const char *e = getenv("ZOD_BANDCENSUS");
-
-		band_census = e && ((e[0] == 'o' && e[1] == 'n') || e[0] == 'e' || e[0] == '1');
-#endif
+		band_census = zod_env_switch("ZOD_BANDCENSUS", 0);
 		for(int k = 0; k <= MAX_MAP_OBJECT_TYPES; k++)
 			band_above[k] = band_below[k] = -100000;
 	}
@@ -2692,20 +2645,9 @@ static int band_on(void)
 	if(band_flag < 0)
 	{
 		band_flag = 1;
-#ifdef __amigaos__
-		char wahl[16];
-
-		if(GetVar((CONST_STRPTR)"ZOD_BAND", (STRPTR)wahl, sizeof(wahl), 0) > 0)
-			band_flag = !(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0' ||
-			              (wahl[0] == 'o' && wahl[1] == 'f'));
-#else
-		const char *e = getenv("ZOD_BAND");
-
-		if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
-			band_flag = 0;
-#endif
+		if(!zod_env_switch("ZOD_BAND", 1)) band_flag = 0;
 		ZLOG("Objects drawn: %s\n", band_flag ? "the band around the view (sort keys)"
-		                                       : "all, each tests itself (ZOD_BAND aus)");
+		                                       : "all, each tests itself (ZOD_BAND off)");
 	}
 
 	return band_flag;
@@ -2744,19 +2686,8 @@ static int sortkeys_on(void)
 	if(sortkeys < 0)
 	{
 		sortkeys = 1;
-#ifdef __amigaos__
-		char wahl[16];
-
-		if(GetVar((CONST_STRPTR)"ZOD_SORTKEYS", (STRPTR)wahl, sizeof(wahl), 0) > 0)
-			sortkeys = !(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0' ||
-			             (wahl[0] == 'o' && wahl[1] == 'f'));
-#else
-		const char *e = getenv("ZOD_SORTKEYS");
-
-		if(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')))
-			sortkeys = 0;
-#endif
-		ZLOG("Draw order: %s\n", sortkeys ? "keys read once a frame" : "the comparator (ZOD_SORTKEYS aus)");
+		if(!zod_env_switch("ZOD_SORTKEYS", 1)) sortkeys = 0;
+		ZLOG("Draw order: %s\n", sortkeys ? "keys read once a frame" : "the comparator (ZOD_SORTKEYS off)");
 	}
 
 	return sortkeys;
@@ -3027,7 +2958,7 @@ static int sortsplit_on(void)
 	{
 		sortsplit = zod_switch("ZOD_SORTSPLIT", 1);
 		ZLOG("Draw order: %s\n", sortsplit ? "two views, rocks sorted when the lists change"
-		                                    : "one sorted list (ZOD_SORTSPLIT aus)");
+		                                    : "one sorted list (ZOD_SORTSPLIT off)");
 	}
 
 	return sortsplit;
@@ -4762,12 +4693,8 @@ static bool zod_tour_on()
 {
 	if(zod_tour < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_TOUR", buf, sizeof(buf));
-
-		/* any value but "0" and "off" switches it on */
-		zod_tour = (e && *e && !(e[0] == '0' && !e[1]) &&
-		            !(e[0] == 'o' && e[1] == 'f')) ? 1 : 0;
+		/* on (or any value but off) switches it on */
+		zod_tour = zod_env_switch("ZOD_TOUR", 0);
 
 		if(zod_tour) ZLOG("Tour: the view scrolls by itself (ZOD_TOUR)\n");
 	}
@@ -5213,7 +5140,7 @@ void ZPlayer::RenderObjects()
 	 * kehrt sofort zurueck -- das Band laeuft dann ueber eine Liste, die
 	 * nichts mehr zeichnet, und kostet zwei binaere Suchen.
 	 *
-	 * `ZOD_STEINE aus` laesst die Schatten dynamisch -- der Rueckweg und das
+	 * `ZOD_STEINE off` laesst die Schatten dynamisch -- der Rueckweg und das
 	 * Gegenstueck fuer den A/B-Vergleich im selben Binary. */
 	if(steine_backen_an() && zmap.RockBakedGen() != zmap.RockGen())
 	{
@@ -5439,7 +5366,7 @@ void ZPlayer::RenderObjects()
 	if(split_active())
 	{
 		/* the two views merged in key order: the band's part of each, or all
-		 * of both with ZOD_BAND aus (see the band below for the margins) */
+		 * of both with ZOD_BAND off (see the band below for the margins) */
 		static vector<ZObject*> seq, xcut;
 		struct split_view *sv = &split_views[SV_RENDER];
 		int bx, by, bw, bh;
@@ -5532,7 +5459,7 @@ void ZPlayer::RenderObjects()
 		 * than 47 px below its bottom (a rock: 48 tall). The band keeps
 		 * BAND_ABOVE / BAND_BELOW px around that -- also for units that
 		 * moved after the sort (the keys are the sort's). Same order: a
-		 * contiguous part of the same sorted list. ZOD_BAND aus: all. */
+		 * contiguous part of the same sorted list. ZOD_BAND off: all. */
 		int bx, by, bw, bh;
 		vector<ZObject*> &pol = ols.prender_olist;
 

@@ -76,7 +76,7 @@ static unsigned long st_wait_ticks = 0;    /* waiting for a safe buffer */
 static unsigned long st_check_frames = 0, st_check_differ = 0;
 
 /* Hardware scrolling (milestone 4, docs/concept-aga.md; ON by default since
- * the user's word of 21.11., two buffers; -H off or ZOD_AGA_HWSCROLL=aus
+ * the user's word of 21.11., two buffers; -H off or ZOD_AGA_HWSCROLL=off
  * switch it off). The screen's bitmap is larger than the display and
  * anchored to the map: a map pixel keeps its place in the bitmap while the
  * view moves over it, and the display is moved with the ViewPort's RasInfo
@@ -191,13 +191,7 @@ static void colors_line(const char *name, const unsigned long *h)
 
 static int env_on(const char *name)
 {
-	char buf[16];
-	const char *e = zod_env(name, buf, sizeof(buf));
-
-	if(!e || !*e) return 0;
-	if(e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')) return 0;
-
-	return 1;
+	return zod_env_switch(name, 0);
 }
 
 /* -C <mode> (the launcher's AGA choice); ZOD_AGA for tests */
@@ -298,7 +292,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		const char *e = zod_env("ZOD_AGA_HWSCROLL", buf, sizeof(buf));
 		/* -H decides; else ZOD_AGA_HWSCROLL (aus/off/0 = off); else on */
 		hw_on = zod_aga_hw_option >= 0 ? (zod_aga_hw_option > 0) :
-		        (!e || !*e) ? 1 : env_on("ZOD_AGA_HWSCROLL");
+		        zod_env_switch("ZOD_AGA_HWSCROLL", 1);
 
 		/* "<x>x<y>": the margins (x rounded up to 64 px: AGA's 64-bit fetch) */
 		if(hw_on && e && e[0] >= '0' && e[0] <= '9')
@@ -325,10 +319,7 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	/* the buffers first: the margins depend on how many bitmaps there are */
 	if(dbuf_on < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_AGA_DBUF", buf, sizeof(buf));
-
-		dbuf_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+		dbuf_on = zod_env_switch("ZOD_AGA_DBUF", 1);
 
 		/* -H fast: hardware scrolling into the shown bitmap */
 		if(zod_aga_hw_option == 2) dbuf_on = 0;
@@ -336,13 +327,10 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 	/* chip RAM written a longword at a time (docs/research-aga-speed.md):
 	 * the CPU gets as many chip accesses a second whatever their width, so
-	 * a longword moves twice the bytes; ZOD_AGA_C2P32=aus keeps the words */
+	 * a longword moves twice the bytes; ZOD_AGA_C2P32=off keeps the words */
 	if(c2p32_on < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_AGA_C2P32", buf, sizeof(buf));
-
-		c2p32_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+		c2p32_on = zod_env_switch("ZOD_AGA_C2P32", 1);
 	}
 
 	/* Margins as wide as the chip RAM allows (measured on voltago, the
@@ -508,18 +496,12 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	 * RAM write saved (the RTG path's flip sums, the same sum) */
 	if(sums_on < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_AGA_SUMS", buf, sizeof(buf));
-
-		sums_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+		sums_on = zod_env_switch("ZOD_AGA_SUMS", 1);
 	}
 
 	if(dbuf_on < 0)
 	{
-		char buf[16];
-		const char *e = zod_env("ZOD_AGA_DBUF", buf, sizeof(buf));
-
-		dbuf_on = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' || (e[0] == 'o' && e[1] == 'f')));
+		dbuf_on = zod_env_switch("ZOD_AGA_DBUF", 1);
 
 		/* -H fast: hardware scrolling into the shown bitmap */
 		if(zod_aga_hw_option == 2) dbuf_on = 0;
@@ -665,7 +647,7 @@ static inline void c2p_word_out(const UBYTE *row, UBYTE *const *pl, long off, in
 /* rows of 16-pixel groups g0..g1 from the source rows into the planes:
  * groups in pairs that start on an even group as one longword of each
  * plane (the plane rows are 64-bit aligned), a group alone at either end
- * as words; ZOD_AGA_C2P32=aus writes words only */
+ * as words; ZOD_AGA_C2P32=off writes words only */
 static void c2p_rows(const UBYTE *src, int spitch, UBYTE *const *pl, long bpr,
                      int prow, int rows, int g0, int g1)
 {

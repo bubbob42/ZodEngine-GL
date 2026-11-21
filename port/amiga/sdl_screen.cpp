@@ -76,7 +76,7 @@ static int breit_an = 0;
 /* The flip's block sums (see block_sums before SDL_Flip) */
 static int sums_mode = 0;              /* 0 off, 1 skip unchanged blocks */
 static int sums_auto = 0;              /* measure_gap: a byte into the screen is dear */
-static int sums_check = 0;             /* ZOD_FLIP_SUMS=pruefen: compare the screen */
+static int sums_check = 0;             /* ZOD_FLIP_SUMS=check: compare the screen */
 static ULONG *sums = 0;                /* two per block of the dirty grid */
 static unsigned char *sums_valid = 0;  /* per block: its sums are the screen's */
 static int sums_w = 0, sums_h = 0;     /* the grid it was made for */
@@ -660,19 +660,18 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	{
 		char wahl[16];
 
+		/* ZOD_ZEIGER=picture (old: bild): the pointer into the compose surface */
 		if(GetVar((CONST_STRPTR)"ZOD_ZEIGER", (STRPTR)wahl, sizeof(wahl), 0) > 0)
-			zeiger_weg = !(wahl[0] == 'b' || wahl[0] == 'B');
+			zeiger_weg = !(wahl[0] == 'b' || wahl[0] == 'B' || wahl[0] == 'p' || wahl[0] == 'P');
 
 		ZLOG("Zeiger: %s\n",
 		     zeiger_weg ? "spaet in den Schirm (an der Lage von jetzt)"
-		                : "in die Zeichenflaeche (ZOD_ZEIGER bild)");
+		                : "in die Zeichenflaeche (ZOD_ZEIGER=picture)");
 
-		if(GetVar((CONST_STRPTR)"ZOD_BREIT", (STRPTR)wahl, sizeof(wahl), 0) > 0)
-			if(wahl[0] == 'e' || wahl[0] == 'E' || wahl[0] == '1')
-				breit_an = 1;
+		if(zod_env_switch("ZOD_BREIT", 0)) breit_an = 1;
 
 		ZLOG("Ausgabe: %s\n",
-		     breit_an ? "ganze Blockzeilen (ZOD_BREIT=ein)"
+		     breit_an ? "ganze Blockzeilen (ZOD_BREIT=on)"
 		              : "Laeufe je Blockzeile (Vorgabe)");
 
 		/* the gap from this machine's own prices (ZOD_LUECKE fixes it) */
@@ -680,22 +679,23 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 		if(!aga_aktiv) measure_gap(compose);
 
 		/* the block sums: on where a byte into the screen is dear;
-		 * ZOD_FLIP_SUMS=ein / aus / pruefen. A new screen: record all. */
+		 * ZOD_FLIP_SUMS=on / off / check (old: ein / aus / pruefen). A new
+		 * screen: record all. */
 		sums_mode = sums_auto;
 		sums_fresh = 1;
 
 		if(GetVar((CONST_STRPTR)"ZOD_FLIP_SUMS", (STRPTR)wahl, sizeof(wahl), 0) > 0)
 		{
-			if(wahl[0] == 'e' || wahl[0] == 'E' || wahl[0] == '1') sums_mode = 1;
-			else if(wahl[0] == 'a' || wahl[0] == 'A' || wahl[0] == '0') sums_mode = 0;
-			else if(wahl[0] == 'p' || wahl[0] == 'P') { sums_mode = 1; sums_check = 1; }
+			if(wahl[0] == 'c' || wahl[0] == 'C' || wahl[0] == 'p' || wahl[0] == 'P')
+				{ sums_mode = 1; sums_check = 1; }
+			else
+				sums_mode = zod_switch_value(wahl, sums_mode);
 		}
 
 		ZLOG("Output: flip block sums %s\n",
 		     sums_mode ? "on (unchanged blocks stay off the bus)" : "off");
 
-		if(GetVar((CONST_STRPTR)"ZOD_COPYBENCH", (STRPTR)wahl, sizeof(wahl), 0) > 0
-		   && (wahl[0] == '1' || wahl[0] == 'j' || wahl[0] == 'J'))
+		if(zod_env_switch("ZOD_COPYBENCH", 0))
 			if(!aga_aktiv) copy_bench(compose);
 
 		char wunsch[160];
@@ -1189,12 +1189,9 @@ static int gl_oeffnen(int w, int h)
 	 * window has a blank one already */
 	if(!zod_present_active()) mglSetPointer();
 
-	/* ZOD_GL_SYNC=aus: no wait for the beam (benchmarks); default on */
+	/* ZOD_GL_SYNC=off: no wait for the beam (benchmarks); default on */
 	{
-		const char *e = zod_env("ZOD_GL_SYNC", buf, sizeof(buf));
-
-		gl_sync = !(e && (e[0] == 'a' || e[0] == 'A' || e[0] == '0' ||
-		                  (e[0] == 'o' && e[1] == 'f')));
+		gl_sync = zod_env_switch("ZOD_GL_SYNC", 1);
 
 		/* -Y now: no wait; blank and pan: wait (pan ignores it anyway) */
 		if(zod_display_sync[0]) gl_sync = zod_display_sync[0] != 'n';
@@ -1318,7 +1315,8 @@ static void gl_bild_zeigen(void)
 		{
 			char b[8];
 
-			plog = zod_env("ZOD_PRESENTLOG", b, sizeof(b)) ? 1 : 0;
+			(void)b;
+			plog = zod_env_switch("ZOD_PRESENTLOG", 0);
 		}
 
 		if(plog)
@@ -1639,7 +1637,7 @@ static void zeiger_entfernen(SDL_Surface *flaeche)
  * skipped wrongly.
  *
  * On by itself where measure_gap finds a byte into the screen dear (>= 20
- * ns); ZOD_FLIP_SUMS=ein / aus overrides, =pruefen reads the whole screen
+ * ns); ZOD_FLIP_SUMS=on / aus overrides, =pruefen reads the whole screen
  * back after every flip and counts the bytes that differ from the compose
  * surface (a test; slow on real hardware). */
 static void block_sum(const unsigned char *p, long pitch, int rows, int bw,
@@ -2022,7 +2020,7 @@ int SDL_Flip(SDL_Surface *screen)
 		 *
 		 * Bewertet ergibt das: Laeufe mit Luecke 8 rund 1981 us, ganze
 		 * Blockzeilen 2423, immer ganzes Bild 2683. Deshalb Laeufe.
-		 * `SetEnv ZOD_BREIT ein` schaltet auf ganze Blockzeilen um -- gebaut,
+		 * `SetEnv ZOD_BREIT on` schaltet auf ganze Blockzeilen um -- gebaut,
 		 * gemessen, verworfen, aber als Gegenprobe behalten.
 		 *
 		 * Kein memcpy: siehe fastcopy.h -- ein Bibliotheksaufruf je Zeile,
