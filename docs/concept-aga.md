@@ -245,7 +245,14 @@ voltago with them (03:37-03:45, 1975 KB free, same tour): without 5.5 fps
 (every re-anchor rewrites both); one buffer is +40 %. So the eye test
 decides between "fast" (+40 % here, +110 % on the PiStorm) and its look.
 
-How it is chosen (21.11. ~02:35, still off by default): the game's
+**Default since the user's word (21.11. ~06:50, "softscrolling becomes
+default"): ON with two buffers** -- -H off (or ZOD_AGA_HWSCROLL=aus)
+switches it off, -H fast takes one buffer; ZodLaunch's "AGA scrolling"
+starts at "On (two buffers)" and always passes its -H. Two buffers as the
+default because they never show a half-drawn frame; "fast" (the bigger
+gain, +40 % on voltago) waits for the user's eye.
+
+How it is chosen (21.11. ~02:35): the game's
 -H off|on|fast (on = two buffers, fast = one buffer; without -H the
 environment decides: ZOD_AGA_HWSCROLL, ZOD_AGA_DBUF, and
 ZOD_AGA_HWSCROLL=<x>x<y> for other margins); ZodLaunch's "AGA scrolling"

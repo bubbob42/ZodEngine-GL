@@ -210,9 +210,9 @@ static const char *aga_namen[] =
     "Multiscan Productivity (640x480, 31 kHz)", NULL
 };
 static const char *aga_woerter[] = { "pal", "dblpal", "prod" };
-/* AGA hardware scrolling (docs/concept-aga.md, milestone 4): off by
- * default until the user's eye test; on = two buffers, fast = one buffer.
- * Saved as a word, passed as the game's -H (nothing when off). */
+/* AGA hardware scrolling (docs/concept-aga.md, milestone 4): on (two
+ * buffers) by default since the user's word of 21.11.; fast = one buffer,
+ * off = the whole view redrawn. Saved as a word, passed as the game's -H. */
 static const char *agascroll_namen[] =
 {
     "Off", "On (two buffers)", "Fast (one buffer)", NULL
@@ -432,6 +432,7 @@ static void cfg_vorgaben(void)
     cfg.smooth      = TRUE;              /* even steps (the eye test)      */
     cfg.ton         = TRUE;
     cfg.musik       = FALSE;             /* Musik ist nicht mitgeliefert  */
+    cfg.aga_scroll  = 1;                 /* AGA: soft scrolling, two buffers */
     cfg.musikweg    = 0;                 /* AHI                           */
     strcpy(cfg.midi_cluster, "out.0");   /* camd's serial port            */
     cfg.videos      = TRUE;              /* wirkt nur, wenn cuts/ da ist  */
@@ -788,11 +789,11 @@ static void befehlszeile_bauen(char *aus, size_t platz)
                  aga_woerter[cfg.aga_modus >= 0 && cfg.aga_modus < 3 ? cfg.aga_modus : 0]);
         strncat(aus, teil, platz - strlen(aus) - 1);
 
-        if(cfg.aga_scroll > 0 && cfg.aga_scroll < 3)
-        {
-            snprintf(teil, sizeof(teil), "-H %s ", agascroll_woerter[cfg.aga_scroll]);
-            strncat(aus, teil, platz - strlen(aus) - 1);
-        }
+        /* the game's default is on (two buffers); passed either way, so
+         * the start line says what was chosen */
+        snprintf(teil, sizeof(teil), "-H %s ",
+                 agascroll_woerter[cfg.aga_scroll >= 0 && cfg.aga_scroll < 3 ? cfg.aga_scroll : 1]);
+        strncat(aus, teil, platz - strlen(aus) - 1);
     }
 
     if(cfg.extra[0])

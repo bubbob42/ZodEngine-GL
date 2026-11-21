@@ -1174,6 +1174,12 @@ merged as night-merge and then into gl (21.11. ~00:50, the user's word).
 - **AGA hardware scrolling** (branch aga-hwscroll, ZOD_AGA_HWSCROLL, off):
   see docs/concept-aga.md, milestone 4 -- FS-UAE 0 pixels differ; the
   PiStorm's A1200 tour 7.8 -> 10.9 fps (two buffers) / 16.6 (one).
+- **AGA soft scrolling ON by default** (the user, 21.11. ~06:50: "merge
+  the changes in, softscrolling becomes default"): two buffers, margins
+  from the free chip RAM; -H off|on|fast, ZodLaunch "AGA scrolling".
+  FS-UAE AgaCheck (the whole-view path kept checked with
+  ZOD_AGA_HWSCROLL=aus, the fallback with the default), AgaHwScroll,
+  GLSmoke and the launcher test pass. night2-merge merged into gl.
 - **AGA without RTG at the whole 640x512** (branch aga-fb512): the
   automatic fallback now runs the game at 640x512 like -C pal (the user's
   decision 7); FS-UAE AgaCheck 0 differ, GLSmoke and SwSums unchanged.

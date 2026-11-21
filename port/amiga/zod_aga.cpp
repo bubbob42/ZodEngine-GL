@@ -73,8 +73,9 @@ static unsigned long st_stale = 0, st_safe_waits = 0, st_change_failed = 0;
 static unsigned long st_wait_ticks = 0;    /* waiting for a safe buffer */
 static unsigned long st_check_frames = 0, st_check_differ = 0;
 
-/* Hardware scrolling (milestone 4, docs/concept-aga.md; ZOD_AGA_HWSCROLL,
- * off by default). The screen's bitmap is larger than the display and
+/* Hardware scrolling (milestone 4, docs/concept-aga.md; ON by default since
+ * the user's word of 21.11., two buffers; -H off or ZOD_AGA_HWSCROLL=aus
+ * switch it off). The screen's bitmap is larger than the display and
  * anchored to the map: a map pixel keeps its place in the bitmap while the
  * view moves over it, and the display is moved with the ViewPort's RasInfo
  * offsets and ScrollVPort (system calls only, no copper list of our own).
@@ -214,7 +215,9 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 	{
 		char buf[16];
 		const char *e = zod_env("ZOD_AGA_HWSCROLL", buf, sizeof(buf));
-		hw_on = zod_aga_hw_option >= 0 ? (zod_aga_hw_option > 0) : env_on("ZOD_AGA_HWSCROLL");
+		/* -H decides; else ZOD_AGA_HWSCROLL (aus/off/0 = off); else on */
+		hw_on = zod_aga_hw_option >= 0 ? (zod_aga_hw_option > 0) :
+		        (!e || !*e) ? 1 : env_on("ZOD_AGA_HWSCROLL");
 
 		/* "<x>x<y>": the margins (x rounded up to 64 px: AGA's 64-bit fetch) */
 		if(hw_on && e && e[0] >= '0' && e[0] <= '9')

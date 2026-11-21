@@ -523,21 +523,21 @@ int main(void)
             { printf("FEHLER -C without AGA: '%s'\n", z); fehler++; }
         }
 
-        /* AGA hardware scrolling: off by default (no -H), on/fast as -H,
-         * survives saving, never without AGA */
+        /* AGA hardware scrolling: on (two buffers) by default, every choice
+         * as -H off|on|fast, survives saving, never without AGA */
         {
-            static const char *const wort[] = { 0, "-H on ", "-H fast " };
+            static const char *const wort[] = { "-H off ", "-H on ", "-H fast " };
             int k;
 
             cfg_vorgaben();
-            if(cfg.aga_scroll != 0)
-            { printf("FEHLER AGA scrolling not off by default\n"); fehler++; }
+            if(cfg.aga_scroll != 1)
+            { printf("FEHLER AGA scrolling not on by default\n"); fehler++; }
             cfg.renderer = RENDERER_AGA;
             befehlszeile_bauen(z, sizeof(z));
-            if(strstr(z, "-H "))
-            { printf("FEHLER -H while off: '%s'\n", z); fehler++; }
+            if(!strstr(z, "-H on "))
+            { printf("FEHLER default without -H on: '%s'\n", z); fehler++; }
 
-            for(k = 1; k < 3; k++)
+            for(k = 0; k < 3; k++)
             {
                 cfg_vorgaben();
                 cfg.renderer = RENDERER_AGA;
