@@ -22,6 +22,22 @@ void zod_aga_flip(SDL_Surface *compose, struct Screen *scr, int dy);
 /* before CloseScreen: the screen's own bitmap back, the buffers freed */
 void zod_aga_close(struct Screen *scr);
 
+/* The bottom panel on a screen of its own (soft scrolling; ZOD_AGA_SPLIT):
+ * its window shares the main window's message port (open after the main
+ * window, close before it); the pointer, the palette and the mouse go to
+ * both. zod_aga_split_row: the picture's row where the panel begins, 0
+ * without the split; zod_aga_mouse: the pointer on the picture from the
+ * map screen; zod_aga_raw_y: a picture row as the map screen's row. */
+#include <intuition/intuition.h>
+void zod_aga_panel_window_open(struct Window *main, UWORD *pointer);
+void zod_aga_panel_window_close(void);
+struct Window *zod_aga_panel_window(void);
+void zod_aga_panel_pointer(UWORD *pointer, int on);
+void zod_aga_panel_palette(ULONG *table);
+int  zod_aga_split_row(void);
+void zod_aga_mouse(struct Screen *map, int *x, int *y);
+int  zod_aga_raw_y(int y);
+
 /* after CloseScreen: frees the large bitmap of hardware scrolling, which
  * the screen used and does not free itself */
 void zod_aga_closed(void);

@@ -285,6 +285,7 @@ static void close_all(void)
 
 	if(window_ptr)
 	{
+		if(aga_aktiv) zod_aga_panel_window_close();   /* it shares this window's port */
 		ClearPointer(window_ptr);
 		CloseWindow(window_ptr);
 		window_ptr = 0;
@@ -418,6 +419,30 @@ static void load_palette_now(void)
 	table[1 + 256 * 3] = 0;
 
 	LoadRGB32(&screen_ptr->ViewPort, table);
+	if(aga_aktiv) zod_aga_panel_palette(table);   /* the bottom panel's own screen */
+}
+
+/* The pointer on the picture: the screen's mouse -- or, with the AGA bottom
+ * panel on a screen of its own (zod_aga.cpp), mapped across both screens.
+ * Every reader of the live position goes through here, so the warp's
+ * comparisons stay in one coordinate system. */
+static void maus_roh(int *x, int *y)
+{
+	if(aga_aktiv && zod_aga_split_row())
+		zod_aga_mouse(screen_ptr, x, y);
+	else
+	{
+		*x = screen_ptr->MouseX;
+		*y = screen_ptr->MouseY;
+	}
+}
+
+/* the picture's height (taller than the map screen with the panel split) */
+static int bild_hoehe(void)
+{
+	if(aga_aktiv && zod_aga_split_row() && compose) return compose->h;
+
+	return screen_ptr->Height;
 }
 
 void zod_sdl_palette_changed(void)
@@ -633,6 +658,9 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
 	blank_pointer = (UWORD*)AllocMem(6 * sizeof(UWORD), MEMF_CHIP | MEMF_CLEAR);
 
 	if(blank_pointer) SetPointer(window_ptr, blank_pointer, 1, 16, 0, 0);
+
+	/* the AGA bottom panel's own screen gets a window on the same port */
+	if(aga_aktiv) zod_aga_panel_window_open(window_ptr, blank_pointer);
 	}
 
 	/* Die Flaeche, in die die Engine zeichnet: immer 8 Bit, wenn eine
@@ -1523,8 +1551,12 @@ static void zeiger_einsetzen(SDL_Surface *flaeche)
 	/* Die LIVE-Lage, nicht die des Bildaufbaus -- das ist der ganze Punkt.
 	 * Derselbe Versatz wie bei der Bewegungsmeldung, sonst zeigt der Zeiger
 	 * waehrend eines Warps woanders hin als die Engine denkt. */
-	int px = screen_ptr->MouseX + warp_dx - zeig_hot_x;
-	int py = screen_ptr->MouseY + warp_dy - zeig_hot_y;
+	int mx, my;
+
+	maus_roh(&mx, &my);
+
+	int px = mx + warp_dx - zeig_hot_x;
+	int py = my + warp_dy - zeig_hot_y;
 
 	int x0 = px, y0 = py, x1 = px + bw, y1 = py + bh;
 
@@ -2409,6 +2441,8 @@ extern "C" void zod_schirm_zeiger_amiga(int an)
 
 	if(an) ClearPointer(window_ptr);
 	else if(blank_pointer) SetPointer(window_ptr, blank_pointer, 1, 16, 0, 0);
+
+	if(aga_aktiv) zod_aga_panel_pointer(blank_pointer, an);
 }
 
 /* Nach einer Videosequenz: Spielschirm zurueck nach vorn, Eingabe leeren.
@@ -2468,8 +2502,9 @@ int SDL_PollEvent(SDL_Event *event)
 	 * Nachricht zu erzeugen. */
 	if(screen_ptr && event)
 	{
-		const int rx = screen_ptr->MouseX;
-		const int ry = screen_ptr->MouseY;
+		int rx, ry;
+
+		maus_roh(&rx, &ry);
 		int nx, ny;
 
 		/* Ist ein Warp unterwegs, ist erst hier zu sehen, ob er angekommen
@@ -2516,10 +2551,19 @@ int SDL_PollEvent(SDL_Event *event)
 		if(nx < 0) nx = 0;
 		if(ny < 0) ny = 0;
 		if(nx > screen_ptr->Width  - 1) nx = screen_ptr->Width  - 1;
-		if(ny > screen_ptr->Height - 1) ny = screen_ptr->Height - 1;
+		if(ny > bild_hoehe() - 1) ny = bild_hoehe() - 1;
 
 		if(nx != mouse_x || ny != mouse_y)
 		{
+			/* ZOD_MOUSELOG: the pointer as the game gets it (checks the
+			 * mapping across the AGA bottom panel's own screen) */
+			{
+				static int mlog = -1;
+
+				if(mlog < 0) mlog = zod_env_switch("ZOD_MOUSELOG", 0);
+				if(mlog) ZLOG("Mouse: screen %d,%d -> picture %d,%d\n", rx, ry, nx, ny);
+			}
+
 			memset(event, 0, sizeof(*event));
 			event->type = SDL_MOUSEMOTION;
 			event->motion.type = SDL_MOUSEMOTION;
@@ -2566,6 +2610,15 @@ int SDL_PollEvent(SDL_Event *event)
 		int klick_x = im->MouseX;
 		int klick_y = im->MouseY;
 
+		/* a click on the AGA bottom panel's own screen: its window's rows
+		 * start at the panel's row of the picture */
+		if(aga_aktiv && im->IDCMPWindow && im->IDCMPWindow == zod_aga_panel_window())
+			klick_y += zod_aga_split_row();
+
+		if(im->Class == IDCMP_MOUSEBUTTONS && zod_env_switch("ZOD_MOUSELOG", 0))
+			ZLOG("Mouse: button %u at %d,%d (window %s)\n", (unsigned)im->Code, klick_x, klick_y,
+			     (aga_aktiv && im->IDCMPWindow == zod_aga_panel_window()) ? "panel" : "main");
+
 		ReplyMsg((struct Message*)im);
 
 		/* Denselben Versatz anwenden wie die Bewegungsmeldung, sonst zeigen
@@ -2579,7 +2632,7 @@ int SDL_PollEvent(SDL_Event *event)
 		if(screen_ptr)
 		{
 			if(klick_x > screen_ptr->Width  - 1) klick_x = screen_ptr->Width  - 1;
-			if(klick_y > screen_ptr->Height - 1) klick_y = screen_ptr->Height - 1;
+			if(klick_y > bild_hoehe() - 1) klick_y = bild_hoehe() - 1;
 		}
 
 		if(!event) continue;
@@ -2714,13 +2767,12 @@ void SDL_WarpMouse(Uint16 x, Uint16 y)
 {
 	static int gemeldet = 0;
 
-	int ok = zeiger_setzen((int)x, (int)y);
+	int ok = zeiger_setzen((int)x, aga_aktiv ? zod_aga_raw_y((int)y) : (int)y);
 	int px = 0, py = 0;
 
 	if(screen_ptr)
 	{
-		px = screen_ptr->MouseX;
-		py = screen_ptr->MouseY;
+		maus_roh(&px, &py);
 	}
 
 	mouse_x = x;

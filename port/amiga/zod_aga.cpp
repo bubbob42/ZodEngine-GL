@@ -28,6 +28,8 @@
 #include <graphics/displayinfo.h>
 #include <graphics/rastport.h>
 #include <graphics/view.h>
+#include <graphics/videocontrol.h>
+#include <intuition/intuition.h>
 #include <intuition/screens.h>
 
 #include <exec/memory.h>
@@ -106,6 +108,25 @@ static int hw_shown_rx = -1, hw_shown_ry = -1;      /* what the ViewPort shows *
  * height (voltago, pal400: 528 rows instead of 400). [0] the screen's,
  * freed after CloseScreen (zod_aga_closed); [1] the second buffer's. */
 static struct BitMap *hw_bm[NBUF];
+
+/* The bottom panel as a screen of its own (the user, 21.11.: "make only
+ * the existing 36-row bottom panel a separate, unmoving screen"; ZOD_AGA_
+ * SPLIT, default on with soft scrolling). It stands still on the display
+ * anyway; in the scrolled bitmap it moved every frame and was ~16..20 % of
+ * the chip writes (docs/research-aga-speed.md 3.10). Now the map screen
+ * shows the picture's rows above it, and a 640 x 36 screen below -- a
+ * child of the map screen (SA_Parent), both exclusive, its colours
+ * inherited (VC_NoColorPaletteLoad) and loaded the same anyway -- holds the
+ * panel, written only where its pixels change. Between the two the
+ * display needs a few blank rows (the copper switching viewports). */
+enum { PANEL_H = 36 };
+static int split_on = -1;
+static int split_b = 0;             /* the picture's row where the panel begins (0: no split) */
+static int split_off = 0;           /* the panel screen's top, in rows below the map screen's */
+static struct Screen *pnl_scr = 0;
+static struct Window *pnl_win = 0;
+static UBYTE *pnl_shadow = 0;       /* the panel's planes, chunky, 640 x PANEL_H */
+static unsigned long st_pnl_groups = 0, st_pnl_frames = 0;
 static int view_set = 0, view_sx = 0, view_sy = 0;
 static unsigned long st_hw_anchors = 0, st_hw_scrolls = 0, st_hw_moved = 0;
 
@@ -367,6 +388,11 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		c2p32_on = zod_env_switch("ZOD_AGA_C2P32", 1);
 	}
 
+	/* the bottom panel on a screen of its own: soft scrolling, a picture
+	 * that fills the mode (pal, pal400, dblpal at 640x512) */
+	if(split_on < 0) split_on = zod_env_switch("ZOD_AGA_SPLIT", 1);
+	split_b = (hw_on && split_on && h == sh && h > PANEL_H * 4) ? h - PANEL_H : 0;
+
 	/* Margins as wide as the chip RAM allows (measured on voltago, the
 	 * A4000D's real AGA: one buffer 6.8 fps at 192 px, 7.8 at 448; two
 	 * buffers 5.3 at 192, 6.3 at 384 -- at a few frames a second the view
@@ -386,7 +412,8 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		for(i = 0; i < sizeof(steps) / sizeof(steps[0]) && !chosen; i++)
 		{
 			/* 8 planes of (w / 8) x h bytes each, every plane one block */
-			const unsigned long bytes = (unsigned long)(sw + 2 * steps[i]) * (sh + 2 * hw_my);
+			const unsigned long bytes = (unsigned long)(sw + 2 * steps[i]) *
+			                            ((split_b ? split_b : sh) + 2 * hw_my);
 
 			if(avail > reserve && nb * bytes <= avail - reserve && largest >= bytes / 8)
 			{
@@ -410,9 +437,9 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		int i;
 
 		hw_dw = sw;
-		hw_dh = sh;
+		hw_dh = split_b ? split_b : sh;     /* the map screen's rows */
 		hw_bw = sw + 2 * hw_mx;
-		hw_bh = sh + 2 * hw_my;
+		hw_bh = hw_dh + 2 * hw_my;
 		hw = 1;
 
 		for(i = 0; i < NBUF; i++)
@@ -482,18 +509,19 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 		 * clip the same rows -- with hardware scrolling the bitmap is larger
 		 * than the window, so the clip is what sizes it) */
 		const int top = (mi == 3) ? (512 - sh) / 2 : 0;
-		struct Rectangle dclip = { 0, (WORD)top, (WORD)(sw - 1), (WORD)(top + sh - 1) };
+		const int map_h = (hw && split_b) ? split_b : sh;
+		struct Rectangle dclip = { 0, (WORD)top, (WORD)(sw - 1), (WORD)(top + map_h - 1) };
 		struct TagItem sa[] = {
 			{ SA_DisplayID,   id },
 			{ SA_Width,       (ULONG)sw },
-			{ SA_Height,      (ULONG)sh },
-			{ top ? SA_DClip : TAG_IGNORE, (ULONG)&dclip },
+			{ SA_Height,      (ULONG)map_h },
+			{ (top || map_h != sh) ? SA_DClip : TAG_IGNORE, (ULONG)&dclip },
 			/* hardware scrolling: our larger bitmap behind a screen of the
 			 * picture's size (the offsets move the picture over it) */
 			{ hw ? SA_BitMap : TAG_IGNORE, (ULONG)hw_bm[0] },
 			{ top ? SA_Top : TAG_IGNORE, (ULONG)top },
 			/* nothing else on the display above or below a shorter picture */
-			{ top ? SA_Exclusive : TAG_IGNORE, TRUE },
+			{ (top || map_h != sh) ? SA_Exclusive : TAG_IGNORE, TRUE },
 			{ SA_Depth,       8 },
 			{ SA_Type,        CUSTOMSCREEN },
 			{ SA_Quiet,       TRUE },
@@ -525,6 +553,10 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 			hw_bm[0] = 0;
 
 			sa[4].ti_Tag = TAG_IGNORE;            /* no SA_BitMap */
+			sa[2].ti_Data = (ULONG)sh;            /* nor the panel screen */
+			dclip.MaxY = (WORD)(top + sh - 1);
+			if(!top) { sa[3].ti_Tag = TAG_IGNORE; sa[6].ti_Tag = TAG_IGNORE; }
+			split_b = 0;
 			err = 0;
 			scr = OpenScreenTagList(0, sa);
 		}
@@ -539,6 +571,87 @@ struct Screen *zod_aga_open(int w, int h, int *dy)
 
 	/* (the large bitmap starts as the shadow does: colour 0 everywhere --
 	 * BMF_CLEAR) */
+
+	if(!hw) split_b = 0;
+
+	/* the bottom panel's own screen, below the map screen */
+	if(split_b)
+	{
+		const int top = (mi == 3) ? (512 - sh) / 2 : 0;
+		char buf[16];
+		const char *e = zod_env("ZOD_AGA_GAP", buf, sizeof(buf));
+		int gap = 6;    /* laced rows: what Intuition keeps between two viewports
+		                 * here (FS-UAE: at 4 the map screen lost 2 rows) */
+		ULONG perr = 0;
+
+		if(e && e[0] >= '0' && e[0] <= '9') gap = (int)strtol(e, 0, 10);
+
+		split_off = split_b + gap;
+
+		{
+			struct TagItem pa[] = {
+				{ SA_DisplayID,   id },
+				{ SA_Width,       (ULONG)sw },
+				{ SA_Height,      (ULONG)PANEL_H },
+				{ SA_Top,         (ULONG)(top + split_off) },
+				{ SA_Depth,       8 },
+				{ SA_Type,        CUSTOMSCREEN },
+				{ SA_Parent,      (ULONG)scr },
+				{ SA_Exclusive,   TRUE },
+				{ SA_Quiet,       TRUE },
+				{ SA_ShowTitle,   FALSE },
+				{ SA_Draggable,   FALSE },
+				{ SA_AutoScroll,  FALSE },
+				{ SA_Interleaved, FALSE },
+				{ SA_SharePens,   TRUE },
+				{ SA_ErrorCode,   (ULONG)&perr },
+				{ TAG_DONE, 0 }
+			};
+
+			pnl_scr = OpenScreenTagList(0, pa);
+		}
+
+		pnl_shadow = pnl_scr ? (UBYTE *)calloc((size_t)sw * PANEL_H, 1) : 0;
+
+		if(!pnl_scr || !pnl_shadow)
+		{
+			ZLOG("AGA: no screen for the bottom panel (error %ld) -- the panel stays in the "
+			     "scrolled picture\n", (long)perr);
+			if(pnl_scr) { CloseScreen(pnl_scr); pnl_scr = 0; }
+			free(pnl_shadow);
+			pnl_shadow = 0;
+			split_b = 0;
+			/* the map screen is shorter than the picture now: one more try
+			 * is not worth it -- without the panel's rows the game still
+			 * runs, the log says why */
+		}
+		else
+		{
+			SetRast(&pnl_scr->RastPort, 0);
+
+			/* the map screen's colours, without reloading them between the
+			 * two viewports (a smaller gap); they are loaded the same too */
+			VideoControlTags(pnl_scr->ViewPort.ColorMap, VC_NoColorPaletteLoad, TRUE, TAG_DONE);
+			MakeScreen(pnl_scr);
+			RethinkDisplay();
+
+			/* Intuition clips the screen behind at the one in front: if the
+			 * map screen lost rows, the panel goes that much lower */
+			if(scr->ViewPort.DHeight < split_b)
+			{
+				const int lost = split_b - scr->ViewPort.DHeight;
+
+				/* FORCEDRAG: the screens are not draggable (SA_Draggable) */
+				ScreenPosition(pnl_scr, SPOS_RELATIVE | SPOS_FORCEDRAG, 0, lost, 0, 0);
+				split_off = (int)(pnl_scr->TopEdge - scr->TopEdge);
+			}
+
+			ZLOG("AGA: the bottom panel on a screen of its own: rows %d..%d of the picture at "
+			     "row %d of the display (%d blank rows above it); the map screen shows %d rows\n",
+			     split_b, sh - 1, (int)pnl_scr->TopEdge, split_off - split_b,
+			     (int)scr->ViewPort.DHeight);
+		}
+	}
 
 	*dy = (sh - h) / 2;
 
@@ -1007,6 +1120,214 @@ static unsigned long check_hw(const SDL_Surface *cs, UBYTE *const *pl, int bpr, 
 	return differ;
 }
 
+/* the bottom panel's rows into its own screen: compared into its shadow,
+ * only differing groups (longword pairs) converted -- it never moves */
+static unsigned long panel_out(const SDL_Surface *cs)
+{
+	struct BitMap *bm = pnl_scr->RastPort.BitMap;
+	const long bpr = bm->BytesPerRow;
+	const int ng = hw_dw / 16;
+	UBYTE *pl[8];
+	unsigned long bytes = 0;
+	int p, r;
+
+	for(p = 0; p < 8; p++) pl[p] = (UBYTE *)bm->Planes[p];
+
+	for(r = 0; r < PANEL_H; r++)
+	{
+		const int y = split_b + r;
+		const UBYTE *s = (y < cs->h) ? (const UBYTE *)cs->pixels + (long)y * cs->pitch : hw_zero;
+		UBYTE *const srow = pnl_shadow + (long)r * hw_dw;
+		int g, run = -1;
+
+		for(g = 0; g <= ng; g++)
+		{
+			const int differ = (g < ng) ? group_take(s + g * 16, srow + g * 16) : 0;
+
+			if(differ)
+			{
+				if(run < 0) run = g;
+			}
+			else if(run >= 0)
+			{
+				int ga = run, gb = g - 1;
+
+				if(c2p32_on) { ga &= ~1; gb |= 1; }   /* the shadow holds the partner */
+
+				c2p_rows(srow, hw_dw, pl, bpr, r, 1, ga, gb);
+				st_pnl_groups += (unsigned long)(gb - ga + 1);
+				bytes += 16UL * (gb - ga + 1);
+				run = -1;
+			}
+		}
+	}
+
+	st_pnl_frames++;
+	return bytes;
+}
+
+/* ZOD_AGA_CHECK for the panel screen: its shadow against the picture's
+ * panel rows, its planes against its shadow */
+static unsigned long check_panel(const SDL_Surface *cs)
+{
+	struct BitMap *bm = pnl_scr->RastPort.BitMap;
+	const long bpr = bm->BytesPerRow;
+	unsigned long differ = 0;
+	int r, g, i, p;
+
+	for(r = 0; r < PANEL_H; r++)
+	{
+		const int y = split_b + r;
+		const UBYTE *s = (y < cs->h) ? (const UBYTE *)cs->pixels + (long)y * cs->pitch : hw_zero;
+		const UBYTE *srow = pnl_shadow + (long)r * hw_dw;
+
+		for(i = 0; i < hw_dw; i++)
+			if(srow[i] != s[i]) differ++;
+
+		for(g = 0; g < hw_dw / 16; g++)
+		{
+			UWORD wd[8];
+			ULONG a, b, c, d;
+			UBYTE px[16];
+
+			for(p = 0; p < 8; p++) wd[p] = *(const UWORD *)((UBYTE *)bm->Planes[p] + (long)r * bpr + g * 2);
+
+			a = ((ULONG)(wd[7] >> 8) << 24) | ((ULONG)(wd[6] >> 8) << 16) |
+			    ((ULONG)(wd[5] >> 8) << 8) | (wd[4] >> 8);
+			b = ((ULONG)(wd[3] >> 8) << 24) | ((ULONG)(wd[2] >> 8) << 16) |
+			    ((ULONG)(wd[1] >> 8) << 8) | (wd[0] >> 8);
+			c = ((ULONG)(wd[7] & 0xFF) << 24) | ((ULONG)(wd[6] & 0xFF) << 16) |
+			    ((ULONG)(wd[5] & 0xFF) << 8) | (wd[4] & 0xFF);
+			d = ((ULONG)(wd[3] & 0xFF) << 24) | ((ULONG)(wd[2] & 0xFF) << 16) |
+			    ((ULONG)(wd[1] & 0xFF) << 8) | (wd[0] & 0xFF);
+			transpose8(a, b);
+			transpose8(c, d);
+
+			for(i = 0; i < 4; i++)
+			{
+				px[i]      = (UBYTE)(a >> (24 - 8 * i));
+				px[4 + i]  = (UBYTE)(b >> (24 - 8 * i));
+				px[8 + i]  = (UBYTE)(c >> (24 - 8 * i));
+				px[12 + i] = (UBYTE)(d >> (24 - 8 * i));
+			}
+
+			for(i = 0; i < 16; i++)
+				if(px[i] != srow[g * 16 + i]) differ++;
+		}
+	}
+
+	return differ;
+}
+
+/* the panel screen's window: on the main window's message port, so its
+ * clicks and keys arrive where the game reads them */
+void zod_aga_panel_window_open(struct Window *main, UWORD *pointer)
+{
+	if(!pnl_scr || pnl_win || !main) return;
+
+	{
+		struct TagItem wa[] = {
+			{ WA_CustomScreen, (ULONG)pnl_scr },
+			{ WA_Left, 0 }, { WA_Top, 0 },
+			{ WA_Width, (ULONG)pnl_scr->Width }, { WA_Height, (ULONG)PANEL_H },
+			{ WA_Flags, WFLG_BACKDROP | WFLG_BORDERLESS | WFLG_RMBTRAP |
+			            WFLG_REPORTMOUSE | WFLG_NOCAREREFRESH },
+			{ WA_IDCMP, 0 },
+			{ TAG_DONE, 0 }
+		};
+
+		pnl_win = OpenWindowTagList(0, wa);
+	}
+
+	if(!pnl_win)
+	{
+		ZLOG("AGA: no window on the panel screen -- clicks on the panel do not reach the game\n");
+		return;
+	}
+
+	pnl_win->UserPort = main->UserPort;
+	ModifyIDCMP(pnl_win, main->IDCMPFlags);
+	if(pointer) SetPointer(pnl_win, pointer, 1, 16, 0, 0);
+}
+
+/* before the main window closes (the port is its): the panel window's
+ * messages taken off the shared port, then the window closed */
+void zod_aga_panel_window_close(void)
+{
+	if(!pnl_win) return;
+
+	Forbid();
+
+	if(pnl_win->UserPort)
+	{
+		struct Node *n = pnl_win->UserPort->mp_MsgList.lh_Head, *next;
+
+		while((next = n->ln_Succ))
+		{
+			if(((struct IntuiMessage *)n)->IDCMPWindow == pnl_win)
+			{
+				Remove(n);
+				ReplyMsg((struct Message *)n);
+			}
+
+			n = next;
+		}
+	}
+
+	pnl_win->UserPort = 0;
+	ModifyIDCMP(pnl_win, 0);
+	Permit();
+
+	ClearPointer(pnl_win);
+	CloseWindow(pnl_win);
+	pnl_win = 0;
+}
+
+struct Window *zod_aga_panel_window(void) { return pnl_win; }
+
+void zod_aga_panel_pointer(UWORD *pointer, int on)
+{
+	if(!pnl_win) return;
+
+	if(on) ClearPointer(pnl_win);
+	else if(pointer) SetPointer(pnl_win, pointer, 1, 16, 0, 0);
+}
+
+void zod_aga_panel_palette(ULONG *table)
+{
+	if(pnl_scr) LoadRGB32(&pnl_scr->ViewPort, table);
+}
+
+int zod_aga_split_row(void) { return pnl_scr ? split_b : 0; }
+
+/* the pointer on the picture: the map screen's mouse below its rows is on
+ * the panel screen (or in the blank rows between: the map's last row) */
+void zod_aga_mouse(struct Screen *map, int *x, int *y)
+{
+	*x = map->MouseX;
+	*y = map->MouseY;
+
+	if(!pnl_scr || *y < split_b) return;
+
+	if(pnl_scr->MouseY >= 0 && pnl_scr->MouseY < PANEL_H)
+	{
+		*x = pnl_scr->MouseX;
+		*y = split_b + pnl_scr->MouseY;
+	}
+	else if(*y >= split_off)
+		*y = (*y - split_off < PANEL_H) ? split_b + (*y - split_off) : split_b + PANEL_H - 1;
+	else
+		*y = split_b - 1;
+}
+
+/* a picture row as the map screen's mouse row (for warping the pointer) */
+int zod_aga_raw_y(int y)
+{
+	if(!pnl_scr || y < split_b) return y;
+
+	return y - split_b + split_off;
+}
+
 /* the frame with hardware scrolling: the window placed, the picture
  * compared into the buffer's shadow there, the groups that differ through
  * c2p, the buffer shown at the window's place */
@@ -1090,6 +1411,8 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		}
 	}
 
+	if(pnl_scr) bytes += panel_out(cs);
+
 	zod_dirty_bytes += bytes;
 	zod_dirty_frames++;
 	zod_dirty_sweep();
@@ -1100,6 +1423,7 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	if(check_on > 0)
 	{
 		st_check_differ += check_hw(cs, pl, bpr, dy, sh);
+		if(pnl_scr) st_check_differ += check_panel(cs);
 		st_check_frames++;
 	}
 
@@ -1293,6 +1617,13 @@ void zod_aga_close(struct Screen *scr)
 {
 	int i;
 
+	zod_aga_panel_window_close();     /* normally closed already, before the main window */
+
+	if(pnl_scr) { CloseScreen(pnl_scr); pnl_scr = 0; }
+	free(pnl_shadow);
+	pnl_shadow = 0;
+	split_b = 0;
+
 	buffers_free(scr);
 
 	for(i = 0; i < NBUF; i++)
@@ -1347,6 +1678,10 @@ void zod_aga_report(void)
 		colors_line("side panel", col_hist[COL_SIDE]);
 		colors_line("bottom panel", col_hist[COL_BOTTOM]);
 	}
+
+	if(st_pnl_frames)
+		ZLOG("AGA bottom panel screen: %lu frames, %lu groups a frame written\n",
+		     st_pnl_frames, st_pnl_groups / st_pnl_frames);
 
 	if(st_hw_scrolls)
 		ZLOG("AGA hardware scrolling: %lu frames, the window moved in %lu, anchored again %lu times "

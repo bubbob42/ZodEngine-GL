@@ -15,6 +15,9 @@
 ;     scrolling ("did not fit") and still show every frame right, 15 s.
 ; (6) -C pal400 (640x400 centred), orig04 tour, the default (two buffers),
 ;     20 s.
+; (7) the bottom panel kept in the scrolled picture (ZOD_AGA_SPLIT off), orig04
+;     tour, 15 s -- every other soft-scrolling run has it on its own screen
+;     (the default), its rows read back from there.
 ; Without given margins (1, 2, 4, 6) they come from the free chip RAM.
 ; LIMIT 1200
 ; MACHINE aga
@@ -55,6 +58,12 @@ Echo "=== -C pal400 (640x400 centred), orig04 tour, the default ===" >>DEV:Test/
 Run >NIL: Execute DEV:Test/RunZod hw4 20 -o -C pal400 -m Data/Campaing/Z_original/p02_bb_orig04.map
 Execute DEV:Test/WaitDone DEV:Test/zod-hw4.done
 Type DEV:Test/zod-hw4.log >>DEV:Test/auto.log
+SetEnv ZOD_AGA_SPLIT off
+Echo "=== the bottom panel in the scrolled picture (ZOD_AGA_SPLIT off), orig04 tour ===" >>DEV:Test/auto.log
+Run >NIL: Execute DEV:Test/RunZod hwn 15 -o -C pal -m Data/Campaing/Z_original/p02_bb_orig04.map
+Execute DEV:Test/WaitDone DEV:Test/zod-hwn.done
+Type DEV:Test/zod-hwn.log >>DEV:Test/auto.log
+UnSetEnv ZOD_AGA_SPLIT
 UnSetEnv ZOD_TOUR
 UnSetEnv ZOD_AGA_CHECK
 Echo "=== done ===" >>DEV:Test/auto.log
