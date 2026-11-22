@@ -1164,7 +1164,7 @@ int main(int argc, char **argv)
 
     app = ApplicationObject,
         MUIA_Application_Title,       (ULONG)"ZodLaunch",
-        MUIA_Application_Version,     (ULONG)"$VER: ZodLaunch 1.2 (24.09.2026)",
+        MUIA_Application_Version,     (ULONG)"$VER: ZodLaunch 2.0 (22.11.2026)",
         MUIA_Application_Copyright,   (ULONG)"GPLv3",
         MUIA_Application_Author,      (ULONG)"Zod Engine port",
         MUIA_Application_Description, (ULONG)"Launcher for the Zod Engine",

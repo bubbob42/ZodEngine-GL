@@ -1279,15 +1279,18 @@ with a BLACK floor: the new map's texture still found no room.
 - **Still without eviction:** over a long session the other textures keep
   growing; 2.9 MB of room was left after three maps at 1280x720.
 
-## 5l. Release v1.1-gl.1, 22.11. evening
+## 5l. Release 2.0, 22.11. evening
 
 On the user's word ("yes, also build a release in github and tag it"):
 round-end (with aga-split and aga-seam) fast-forwarded into gl, gl pushed
-to the private origin (51a6d79..6d35ae0), tag v1.1-gl.1 on 6d35ae0, GitHub
-release on bubbob42/ZodEngine-GL with ZodEngine-GL_v1.1-gl.1.lha (zod_040,
+to the private origin (51a6d79..6d35ae0), GitHub release on
+bubbob42/ZodEngine-GL with the archive (zod_040,
 zod_060, ZodLaunch, README_GL.txt; programs only, an update over cego's
 v1.1, no game data; packed by Amiga LhA under vamos, protection bits
-rwed / rw-d checked). The programs are byte-identical to build/amiga-uc1,
+rwed / rw-d checked). First published as v1.1-gl.1; the user: "v1.1 is a
+bit underwhelming number since we did so many changes. Make it 2.0" -- the
+release moved to tag v2.0 (asset ZodEngine_v2.0.lha, ZodLaunch's $VER 2.0
+(22.11.2026), the games unchanged), the tag v1.1-gl.1 deleted. The programs are byte-identical to build/amiga-uc1,
 the build checked on Hamiller; ZodLaunch from the Docker toolchain (the
 gcc 6.5 one has no MUI headers). FS-UAE on the release build: SwSums,
 NoGL, GLSmoke, GLTour, LoadBar, HudKeep, LoadBarPresents, RoundEnd720,
