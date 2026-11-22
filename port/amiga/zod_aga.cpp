@@ -47,6 +47,8 @@ extern struct GfxBase *GfxBase;
 
 extern "C" int  zod_dirty_out_runs(int blockzeile, short *x0, short *x1, int max);
 extern "C" int  zod_dirty_out_count(int *total);
+extern "C" int  zod_dirty_out_row(int by, unsigned char *dst, int n);
+extern "C" int  zod_dirty_grid_h(void);
 extern "C" int  zod_dirty_block_shift(void);
 extern "C" void zod_dirty_sweep(void);
 extern "C" void zod_dirty_clear(void);
@@ -164,6 +166,30 @@ static UBYTE *measure_pl[8];
 static long measure_plsize = 0;
 static unsigned long st_marked = 0, st_marked_still = 0, st_still_frames = 0;
 static unsigned long st_grid_blocks = 0;
+
+/* ZOD_AGA_MARKS (default on; docs/concept-asm-speed.md, option A1): the
+ * hardware-scrolling frame compares the whole window with the buffer's
+ * shadow, ~1.5 us a 16-pixel group on voltago, even where nothing changed.
+ * Between two frames the picture can only differ in the 16x16 blocks the
+ * engine marked (the dirty grid the RTG flip relies on too). So when the
+ * window stands where it stood when this buffer was drawn last (same place,
+ * same anchor, same picture), and that was at most MARK_HIST frames ago,
+ * only the groups under the blocks marked in the frames since then are
+ * compared; the rest equal the shadow already. Anything else (a moved or
+ * re-anchored window, a buffer not drawn for longer, a first frame) takes
+ * the whole compare as before. The gap's dressed side column is always
+ * compared (it is rebuilt each frame from the picture). */
+enum { MARK_HIST = 4, MARK_GW = 128, MARK_GH = 96, MARK_GROUPS = 160 };
+static int marks_on = -1;
+static unsigned char mark_hist[MARK_HIST][MARK_GH][MARK_GW];
+static int mark_gw = 0, mark_gh = 0;
+static unsigned char need_g[MARK_GH][MARK_GROUPS];
+static unsigned char need_row[MARK_GH];
+static unsigned long hw_frame_no = 0;
+static int drawn_valid[NBUF];
+static unsigned long drawn_frame[NBUF], drawn_anchor[NBUF];
+static int drawn_rx[NBUF], drawn_ry[NBUF], drawn_dy[NBUF], drawn_w[NBUF], drawn_h[NBUF];
+static unsigned long st_marks_frames = 0, st_cmp_groups = 0;
 
 /* The gap's edges (the user, 21.11.: look B2 "but the sidebar should get a
  * bevel at its lower edge, too"; docs/concept-aga.md). The gap between the
@@ -1678,7 +1704,7 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	UBYTE *const sh = hw_shadow[b];
 	unsigned long t0, bytes = 0;
 	long bpr;
-	int p, yd, moved;
+	int p, yd, moved, use_marks;
 
 	if(dbuf && !safe_ok)
 	{
@@ -1757,6 +1783,73 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 	if(measure_mode == 2)
 		for(p = 0; p < 8; p++) pl[p] = measure_pl[p];
 
+	/* ZOD_AGA_MARKS: this frame's marks into the history, then may this
+	 * buffer compare the marked blocks only? */
+	if(marks_on < 0) marks_on = zod_env_switch("ZOD_AGA_MARKS", 1);
+	use_marks = 0;
+	hw_frame_no++;
+	{
+		const int slot = (int)(hw_frame_no % MARK_HIST);
+		int total = 0, gh, gw, by;
+
+		(void)zod_dirty_out_count(&total);
+		gh = zod_dirty_grid_h();
+		gw = gh > 0 ? total / gh : 0;
+
+		if(gh != mark_gh || gw != mark_gw)
+		{
+			/* a new grid: no history to go by */
+			mark_gh = gh;
+			mark_gw = gw;
+			for(by = 0; by < NBUF; by++) drawn_valid[by] = 0;
+		}
+
+		if(gh > 0 && gh <= MARK_GH && gw > 0 && gw <= MARK_GW)
+		{
+			for(by = 0; by < gh; by++) zod_dirty_out_row(by, mark_hist[slot][by], MARK_GW);
+
+			if(marks_on > 0 && !measure_mode && drawn_valid[b] &&
+			   hw_frame_no - drawn_frame[b] >= 1 &&
+			   hw_frame_no - drawn_frame[b] <= MARK_HIST &&
+			   drawn_rx[b] == hw_rx && drawn_ry[b] == hw_ry && drawn_anchor[b] == st_hw_anchors &&
+			   drawn_dy[b] == dy && drawn_w[b] == w && drawn_h[b] == h &&
+			   ((hw_rx + w - 1) >> 4) < MARK_GROUPS)
+			{
+				unsigned long f;
+
+				use_marks = 1;
+				memset(need_row, 0, sizeof(need_row));
+				memset(need_g, 0, sizeof(need_g));
+
+				/* every frame since this buffer was drawn: its marks */
+				for(f = drawn_frame[b] + 1; f <= hw_frame_no; f++)
+				{
+					const int fs = (int)(f % MARK_HIST);
+
+					for(by = 0; by < gh; by++)
+					{
+						const unsigned char *const m = mark_hist[fs][by];
+						int bx;
+
+						for(bx = 0; bx < gw; bx++)
+						{
+							int ga, gb, gg;
+
+							if(!m[bx]) continue;
+
+							/* the block's columns in the bitmap, as groups */
+							ga = (hw_rx + bx * 16) >> 4;
+							gb = (hw_rx + bx * 16 + 15) >> 4;
+							for(gg = ga; gg <= gb && gg < MARK_GROUPS; gg++) need_g[by][gg] = 1;
+							need_row[by] = 1;
+						}
+					}
+				}
+				st_marks_frames++;
+			}
+		}
+	}
+
 	for(yd = 0; yd < hw_dh; yd++)
 	{
 		const int y = yd - dy;
@@ -1771,15 +1864,24 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		 * columns left of the side column: a group reaching into the side
 		 * column lies wholly in it */
 		const int gs = ds ? (x0 + dress_x) >> 4 : g1 + 1;
+		/* ZOD_AGA_MARKS: the row's marks (rows beside the picture are
+		 * colour 0 and stay so while the window stands) */
+		const unsigned char *const need = (use_marks && y >= 0 && y < h) ? need_g[y >> 4] : 0;
 		int g, run = -1;
+
+		if(use_marks && !ds && (!need || !need_row[y >> 4])) continue;
 
 		for(g = g0; g <= g1 + 1; g++)
 		{
 			int differ = 0;
+			/* not marked since this buffer was drawn: equals the shadow */
+			const int unmarked = use_marks && g < gs && (!need || !need[g]);
 
-			if(g <= g1)
+			if(g <= g1 && !unmarked)
 			{
 				const int bx = g * 16;
+
+				st_cmp_groups++;
 				const UBYTE *const from = (g < gs) ? s : ds;
 				const int fx = (g < gs) ? x0 : x0 + dress_x - 16;   /* from's column 0 */
 
@@ -1816,6 +1918,16 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 			}
 		}
 	}
+
+	/* this buffer's shadow holds the picture now, at this place */
+	drawn_valid[b] = 1;
+	drawn_frame[b] = hw_frame_no;
+	drawn_rx[b] = hw_rx;
+	drawn_ry[b] = hw_ry;
+	drawn_anchor[b] = st_hw_anchors;
+	drawn_dy[b] = dy;
+	drawn_w[b] = w;
+	drawn_h[b] = h;
 
 	if(pnl_scr) bytes += panel_out(cs);
 
@@ -2155,6 +2267,11 @@ void zod_aga_report(void)
 	if(st_hw_scrolls)
 		ZLOG("AGA hardware scrolling: %lu frames, the window moved in %lu, anchored again %lu times "
 		     "(%dx%d bitmap)\n", st_hw_scrolls, st_hw_moved, st_hw_anchors, hw_bw, hw_bh);
+
+	if(st_hw_scrolls)
+		ZLOG("AGA compare of the marked blocks only (ZOD_AGA_MARKS %s): in %lu of %lu frames; "
+		     "%lu groups compared a frame\n", marks_on > 0 ? "on" : "off",
+		     st_marks_frames, st_hw_scrolls, st_cmp_groups / st_hw_scrolls);
 
 	if(st_hw_scrolls && st_grid_blocks)
 		ZLOG("AGA marked blocks (the dirty grid, what a compare of the marked blocks only would "

@@ -612,6 +612,20 @@ extern "C" int zod_dirty_out_count(int *total)
 	return n;
 }
 
+/* block row by of the output marks into dst (one byte a block, 0 or 1),
+ * at most n blocks; returns the grid's width (0: no such row). For the AGA
+ * path's compare of the marked blocks only (ZOD_AGA_MARKS). */
+extern "C" int zod_dirty_out_row(int by, unsigned char *dst, int n)
+{
+	if(by < 0 || by >= grid_h) return 0;
+
+	grids_due_apply();
+
+	for(int bx = 0; bx < grid_w && bx < n; bx++) dst[bx] = out_grid[by][bx] ? 1 : 0;
+
+	return grid_w;
+}
+
 extern "C" int zod_dirty_block_shift(void) { return ZOD_BLOCK_SHIFT; }
 extern "C" int zod_dirty_grid_h(void)      { return grid_h; }
 
