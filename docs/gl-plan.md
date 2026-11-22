@@ -1279,6 +1279,26 @@ with a BLACK floor: the new map's texture still found no room.
 - **Still without eviction:** over a long session the other textures keep
   growing; 2.9 MB of room was left after three maps at 1280x720.
 
+## 5l. Release v1.1-gl.1, 22.11. evening
+
+On the user's word ("yes, also build a release in github and tag it"):
+round-end (with aga-split and aga-seam) fast-forwarded into gl, gl pushed
+to the private origin (51a6d79..6d35ae0), tag v1.1-gl.1 on 6d35ae0, GitHub
+release on bubbob42/ZodEngine-GL with ZodEngine-GL_v1.1-gl.1.lha (zod_040,
+zod_060, ZodLaunch, README_GL.txt; programs only, an update over cego's
+v1.1, no game data; packed by Amiga LhA under vamos, protection bits
+rwed / rw-d checked). The programs are byte-identical to build/amiga-uc1,
+the build checked on Hamiller; ZodLaunch from the Docker toolchain (the
+gcc 6.5 one has no MUI headers). FS-UAE on the release build: SwSums,
+NoGL, GLSmoke, GLTour, LoadBar, HudKeep, LoadBarPresents, RoundEnd720,
+AgaCheck, AgaHwScroll, MidiCamd -- all pass (0 pixels / bytes differ, 0
+refused, 0 black, 0 MIDI events dropped, GL error 0).
+
+Hamiller since this evening: RadeonGL 0.18 installed (MiniGL); its upload
+cache gives way to textures by itself, Zod's 1 MB hold stays (harmless).
+ZodLaunch.cfg there: General MIDI on prisma.out.0 (the user's choice: no
+PrismaControl route in between).
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.
