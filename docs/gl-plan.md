@@ -1269,6 +1269,12 @@ with a BLACK floor: the new map's texture still found no room.
   14843 frames, the heap at its 16.0 MB peak; after 0 refusals, 0 black
   frames, peak 13.1 MB. GLSmoke, GLCheck, HudKeep, LoadBarPresents,
   RefDiffCheck unchanged.
+- **On Hamiller, 22.11. evening** (`tools/hw/zod_roundend.py hr720`): the
+  installed zod_060 at 1280x720 on the Radeon, RadeonGL 0.16, bot against
+  bot, three round ends, four maps (orig01, orig02, orig01, orig02), each
+  sent as one texture in 0.7..0.8 s; textures refused 0, the map drawn
+  black 0 frames, the earlier maps' textures deleted 3, heap peak 13.1 MB
+  of 16, the upload cache fixed at 1 MB; 19.1 fps over the 110 s.
 - **Still without eviction:** over a long session the other textures keep
   growing; 2.9 MB of room was left after three maps at 1280x720.
 
