@@ -60,6 +60,73 @@ movep, 64-bit mul/div, and fint/fintrz on the 040):
 - No 64-bit multiply or divide in either build. The movep hits are data in
   the code section, not instructions.
 
+## Step 0: measured (voltago, 23.11. ~00:15-00:45)
+
+The user's answers (23.11. ~00:05): measure first, then build what the
+numbers support, a branch per milestone, no push; voltago and the PiStorm's
+A1200; vasm 68020+ with a C fallback; ask MiniGL about D2.
+
+Branch `asm-m0` (975bfb9): ZOD_AGA_MEASURE=compare (the compare pass alone,
+nothing converted or written) and =fastram (converted into fast RAM instead
+of the planes), and the dirty grid's marked blocks counted per frame.
+voltago (A4000D 68060), software drawing, AGA -C pal (640x512, the bottom
+panel on its own screen), two buffers, orig01, 30 s each, build/m0:
+
+| run | fps | AGA work a frame | groups a frame |
+|---|---|---|---|
+| tour, normal (twice) | 10.1 / 10.2 | 61.3 / 60.7 ms | 8,528 |
+| tour, compare only | 18.5 | 25.0 ms | -- |
+| tour, into fast RAM | 12.7 | 42.3 ms | -- |
+| still, normal (twice) | 23.8 / 23.3 | 23.2 / 23.6 ms | -- |
+| still, compare only | 27.2 | 20.9 ms | -- |
+| still, into fast RAM | 25.7 | 22.2 ms | -- |
+
+- **Tour:** the compare pass ~25 ms, the c2p arithmetic and its fast RAM
+  stores ~17 ms, the chip bus ~19 ms more. The compare reads ~655 KB a
+  frame (picture and shadow) and looks memory-bound (~30 MB/s); the c2p
+  arithmetic (~13 ms after the ~4 ms of fast RAM stores, ~1.5 us a group)
+  is the part assembler shortens and can hide behind the chip writes (A2).
+- **Still view:** the compare pass is ~21 of the ~23 ms. The dirty grid
+  marks 24..28 % of the blocks in a still view (FS-UAE 26 %, voltago's tour
+  24 % in its still frames) and 92..97 % while scrolling: A1 hits the still
+  view, A2 the tour.
+
+Software on voltago's ZZ9000 (Zorro III), the same binary without -C:
+
+| run | fps | drawing | flip to the card |
+|---|---|---|---|
+| still | 63.0 | 8.3 ms (map 3.1, objects 1.5) | 3.7 ms |
+| tour | 16.2 | 20.4 ms (map 9.9, objects 6.2) | 35.0 ms (484 of 518 frames copied whole) |
+
+The keyed blits are ~25,000 pixels a frame in both (48 / 13 million in the
+runs): option B can save ~1..2 ms a frame, worth doing after A. The tour's
+35 ms flip is the whole frame over Zorro III every frame: the pending
+ZOD_RTGSCROLL A/B (scrolling on the card, "waits for a Zorro RTG card")
+can be done on voltago's ZZ9000.
+
+## A1 built and measured (branch `asm-a1`, 13e6449)
+
+ZOD_AGA_MARKS (default on): when the window stands where it stood when this
+buffer was drawn last (same place, anchor and picture, at most 4 frames
+ago), only the groups under the blocks marked since then are compared; else
+the whole window as before. The dressed side column is always compared.
+FS-UAE AgaHwScroll: every frame read back, 0 pixels differ in all eight
+runs; the still run compared 6,085 instead of 20,480 groups a frame.
+
+voltago, the same binary (build/a1), ZOD_AGA_MARKS off / on / on / off,
+orig01 still view, then the tour, 30 s each (23.11. ~00:50-01:05):
+
+| run | off | on | on | off |
+|---|---|---|---|---|
+| still: fps | 23.2 | **29.6** | **30.4** | 22.1 |
+| still: AGA work a frame | 26.2 ms | **15.6 ms** | **15.7 ms** | 27.0 ms |
+| still: groups compared a frame | 19,040 | 5,370 | 5,295 | 19,040 |
+| tour: fps | 9.7 | 9.7 | | |
+
+**+31 % in the still view** (most of real play), the tour unchanged (the
+marks are used in 32 of 326 tour frames: the view stands only between
+moves). The picture is the same by construction and by the read-back check.
+
 ## The options
 
 ### A. AGA: compare less, and compare, convert and write in one assembler pass -- RECOMMENDED
@@ -158,6 +225,14 @@ glBegin, four glTexCoord/glVertex pairs, glEnd for every sprite.
   slower, which is a reason for care.
 - No assembler: the time is spread over calls and cache misses, not one
   loop.
+- **MiniGL's answer (23.11. ~00:20):** unlocked glDrawArrays runs the same
+  per-vertex emit inside the library; it saves only the external calls
+  (bounded by the 6.4 % dispatch and part of the 5.5 % hook share). Only
+  with a size-3 GL_FLOAT vertex array (size 2 takes a slower FPU path), no
+  colour array (glColor4ub between draws, a draw per colour run), no
+  glLockArraysEXT (ignored by DrawArrays; the locked path hashes for
+  nothing here), one texture unit. A few per cent of the drawing time at
+  best; to be measured behind a switch on Hamiller.
 
 ### E. Load time: the map texture's conversion
 
