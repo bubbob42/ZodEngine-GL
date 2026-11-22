@@ -46,6 +46,7 @@
 extern struct GfxBase *GfxBase;
 
 extern "C" int  zod_dirty_out_runs(int blockzeile, short *x0, short *x1, int max);
+extern "C" int  zod_dirty_out_count(int *total);
 extern "C" int  zod_dirty_block_shift(void);
 extern "C" void zod_dirty_sweep(void);
 extern "C" void zod_dirty_clear(void);
@@ -147,6 +148,22 @@ static UBYTE *pnl_shadow = 0;       /* the panel's planes, chunky, 640 x PANEL_H
 static unsigned long st_pnl_groups = 0, st_pnl_frames = 0;
 static int view_set = 0, view_sx = 0, view_sy = 0;
 static unsigned long st_hw_anchors = 0, st_hw_scrolls = 0, st_hw_moved = 0;
+
+/* ZOD_AGA_MEASURE (a measuring aid, docs/concept-asm-speed.md step 0; the
+ * picture on the screen is WRONG while it is set): where the hardware-
+ * scrolling frame's AGA work goes, by leaving parts out --
+ *   compare  the picture compared into the shadow as always, but no group
+ *            converted or written (the compare pass alone)
+ *   fastram  the groups converted as always, but written into fast RAM
+ *            buffers instead of the planes (no chip bus)
+ * Unset: normal. The marked blocks (the dirty grid) are counted in every
+ * hardware-scrolling frame: what a compare of the marked blocks only would
+ * have to look at. */
+static int measure_mode = -1;        /* 0 off, 1 compare, 2 fastram */
+static UBYTE *measure_pl[8];
+static long measure_plsize = 0;
+static unsigned long st_marked = 0, st_marked_still = 0, st_still_frames = 0;
+static unsigned long st_grid_blocks = 0;
 
 /* The gap's edges (the user, 21.11.: look B2 "but the sidebar should get a
  * bevel at its lower edge, too"; docs/concept-aga.md). The gap between the
@@ -1683,11 +1700,62 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		st_dress_frames++;
 	}
 
-	hw_place();
+	{
+		const int rx_was = hw_rx, ry_was = hw_ry;
+		const unsigned long anchors_was = st_hw_anchors;
+		int marked, total;
+
+		hw_place();
+
+		/* the dirty grid's marks this frame: what a compare of the marked
+		 * blocks only would look at (still = the window did not move) */
+		marked = zod_dirty_out_count(&total);
+		st_marked += (unsigned long)marked;
+		st_grid_blocks = (unsigned long)total;
+		if(hw_rx == rx_was && hw_ry == ry_was && st_hw_anchors == anchors_was)
+		{
+			st_marked_still += (unsigned long)marked;
+			st_still_frames++;
+		}
+	}
 
 	bm = dbuf ? sbuf[b]->sb_BitMap : scr->RastPort.BitMap;
 	bpr = bm->BytesPerRow;
 	for(p = 0; p < 8; p++) pl[p] = (UBYTE *)bm->Planes[p];
+
+	if(measure_mode < 0)
+	{
+		char mb[16];
+		const char *e = zod_env("ZOD_AGA_MEASURE", mb, sizeof(mb));
+
+		measure_mode = 0;
+		if(e && !strcmp(e, "compare")) measure_mode = 1;
+		else if(e && !strcmp(e, "fastram")) measure_mode = 2;
+
+		if(measure_mode == 2)
+		{
+			measure_plsize = bpr * (long)hw_bh;
+			for(p = 0; p < 8; p++)
+			{
+				measure_pl[p] = (UBYTE *)AllocVec((ULONG)measure_plsize, MEMF_FAST | MEMF_CLEAR);
+				if(!measure_pl[p])
+				{
+					ZLOG("AGA: ZOD_AGA_MEASURE=fastram -- no fast RAM for the planes, measuring nothing\n");
+					measure_mode = 0;
+					break;
+				}
+			}
+		}
+
+		if(measure_mode)
+			ZLOG("AGA: ZOD_AGA_MEASURE=%s -- a measuring aid: %s; the picture on the screen is wrong\n",
+			     measure_mode == 1 ? "compare" : "fastram",
+			     measure_mode == 1 ? "the compare pass alone, no group converted or written"
+			                       : "the groups converted into fast RAM, not the planes");
+	}
+
+	if(measure_mode == 2)
+		for(p = 0; p < 8; p++) pl[p] = measure_pl[p];
 
 	for(yd = 0; yd < hw_dh; yd++)
 	{
@@ -1739,7 +1807,8 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 				 * row is a multiple of 64 pixels: the partner exists) */
 				if(c2p32_on) { ga &= ~1; gb |= 1; }
 
-				c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
+				if(measure_mode != 1)
+					c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
 				regions_count((int)brow, ga, gb);
 				st_groups += (unsigned long)(gb - ga + 1);
 				bytes += 16UL * (gb - ga + 1);
@@ -1757,7 +1826,7 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 
 	st_ticks += zod_fineclock_ticks() - t0;
 
-	if(check_on > 0)
+	if(check_on > 0 && !measure_mode)
 	{
 		st_check_differ += check_hw(cs, pl, bpr, dy, sh);
 		if(pnl_scr) st_check_differ += check_panel(cs);
@@ -2024,6 +2093,12 @@ void zod_aga_close(struct Screen *scr)
 	free(hw_zero);
 	hw_zero = 0;
 	hw = 0;
+
+	for(i = 0; i < 8; i++)
+	{
+		if(measure_pl[i]) FreeVec(measure_pl[i]);
+		measure_pl[i] = 0;
+	}
 }
 
 void zod_aga_report(void)
@@ -2080,4 +2155,15 @@ void zod_aga_report(void)
 	if(st_hw_scrolls)
 		ZLOG("AGA hardware scrolling: %lu frames, the window moved in %lu, anchored again %lu times "
 		     "(%dx%d bitmap)\n", st_hw_scrolls, st_hw_moved, st_hw_anchors, hw_bw, hw_bh);
+
+	if(st_hw_scrolls && st_grid_blocks)
+		ZLOG("AGA marked blocks (the dirty grid, what a compare of the marked blocks only would "
+		     "look at): %lu of %lu a frame (%lu %%); in the %lu frames the window stood still "
+		     "%lu a frame (%lu %%)%s\n",
+		     st_marked / st_hw_scrolls, st_grid_blocks,
+		     st_marked * 100UL / (st_hw_scrolls * st_grid_blocks),
+		     st_still_frames, st_still_frames ? st_marked_still / st_still_frames : 0UL,
+		     st_still_frames ? st_marked_still * 100UL / (st_still_frames * st_grid_blocks) : 0UL,
+		     measure_mode == 1 ? "; ZOD_AGA_MEASURE=compare (no group converted or written)" :
+		     measure_mode == 2 ? "; ZOD_AGA_MEASURE=fastram (the groups converted into fast RAM)" : "");
 }
