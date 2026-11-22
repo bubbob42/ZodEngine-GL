@@ -1274,7 +1274,8 @@ with a BLACK floor: the new map's texture still found no room.
   bot, three round ends, four maps (orig01, orig02, orig01, orig02), each
   sent as one texture in 0.7..0.8 s; textures refused 0, the map drawn
   black 0 frames, the earlier maps' textures deleted 3, heap peak 13.1 MB
-  of 16, the upload cache fixed at 1 MB; 19.1 fps over the 110 s.
+  of 16, the upload cache fixed at 1 MB; 19.1 fps over the 110 s. The
+  user watched the run: "map loading worked fine, no black screen tiles".
 - **Still without eviction:** over a long session the other textures keep
   growing; 2.9 MB of room was left after three maps at 1280x720.
 
