@@ -1,7 +1,7 @@
 ZOD ENGINE -- AMIGA PORT
 ========================
 
-$VER: ZodEngine README 1.0 (24.9.2026)
+$VER: ZodEngine README 2.0 (22.11.2026)
 Author: Cem "Cego" Göktas @ 2026
 Code: Claude Code 
 
@@ -15,7 +15,8 @@ units in the factories you capture.
 
 The ZOD ENGINE is an open source re-implementation of that game, written by
 Nighsoft and released under the GPLv3.
-THIS is a port of the Zod Engine to AmigaOS 3.2, running on RTG (Picasso96).
+THIS is a port of the Zod Engine to AmigaOS 3.2, running on RTG (Picasso96),
+on a 3D card through minigl.library, or on an AGA screen.
 
 
 No game data is included. The graphics, sounds and music belong to the Bitmap
@@ -54,14 +55,17 @@ REQUIREMENTS
 
    AmigaOS         3.2 (3.1 should work, it is not tested)
    CPU             68040, 68060 or 68080 (Vampire/Apollo) with FPU
-   Graphics        RTG with Picasso96. AGA is NOT supported yet.
+   Graphics        RTG with Picasso96, or AGA (a native screen). With
+                   minigl.library (RadeonGL 0.16 or newer on a Radeon
+                   9200, or PiStorm3D) the game draws through the 3D card.
    Memory          Fast RAM. 32 MB is comfortable; the engine holds all
                    6951 images in memory at once.
    MUI             3.8 or newer, for ZodLaunch. The game itself does not
                    need it.
    Sound           optional: AHI for a sound card or SAGA, or plain Paula
-                   through audio.device. Without either the game runs
-                   silently.
+                   through audio.device. Music also as General MIDI or
+                   MT-32 through camd.library. Without any of them the
+                   game runs silently.
    Disk            about 25 MB, or about 355 MB with the cutscenes
    And             your own original CD of "Z" (Bitmap Brothers, 1996)
 
@@ -117,7 +121,12 @@ OTHER SETTINGS:
    Scaling        caps the DRAWN size of explosion debris, 1.0 to 6.0.
                   Graphics only: flight path, flight time and impact moment
                   are unchanged. Lower values help on 68040 and 68060.
-   Music output   AHI or Paula supported. CAMD/MHI support is planned.
+   Renderer       Software (RTG), MiniGL (the 3D card) or AGA. MiniGL
+                  falls back to software when minigl.library is missing.
+   Display        sync (pan, blank, now) and even steps (smooth
+                  scrolling, on by default)
+   Music output   AHI, Paula, General MIDI (camd) or MT-32 (camd). For
+                  MIDI, the camd cluster: out.0 is the serial port.
    
    Cutscenes      turns the videos playback off
 
@@ -135,13 +144,6 @@ IN THE FUTURE
    *  NETWORK MULTIPLAYER. The port keeps the wire format of PC Zod
       (little endian, x86 layout), so an Amiga and a PC should be able to
       play together.
-
-   *  AGA SUPPORT. Everything the engine draws already goes through one
-      shared 256 colour palette, which is the hard part. What is missing is
-      an AGA screen and the copy path to it. The video player already
-      supports AGA.
-
-   *  FURTHER OPTIMISATION. 68040 and 68060 builds are quick and dirty.
 
    *  MAP EDITOR. It is part of the source but has not been ported yet.
 
