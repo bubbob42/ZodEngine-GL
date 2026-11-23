@@ -480,3 +480,12 @@ One change at a time; a change measured worse is reverted.
 4. **D2 (vertex arrays):** recommended to ask the MiniGL session first
    whether RadeonGL's glDrawArrays path is cheaper per quad than immediate
    mode for ~140 small textured quads a frame.
+
+## The full FS-UAE set on `asm-a5` (23.11. ~04:00-04:40)
+
+SwSums, NoGL, GLSmoke, GLTour, LoadBar, HudKeep, LoadBarPresents,
+RoundEnd720, AgaCheck, AgaHwScroll, MidiCamd on build/a5 (040): all pass --
+the flip sums check 0 bytes differ, the AGA planes read back 0 pixels differ
+(4,852 frames, the conversion in assembler after its self-test), NoGL falls
+back to software, RoundEnd720 0 refused and 0 black, MidiCamd 0 events
+dropped, no GL error in any log.
