@@ -450,11 +450,24 @@ glBegin, four glTexCoord/glVertex pairs, glEnd for every sprite.
   1920 / 1130 (~16 quads), objects after 1479 / 900, GUI 352 / 187, fps
   counter 418 / 241; objects (59 quads) even at 3767 / 3740; only the map
   effects (36 quads in long runs) gain, 2571 / 2817. ~11.8 glDrawArrays a
-  frame against ~8.9 batches: a call costs a few hundred us of fixed work,
-  far more than the per-vertex calls it saves. FS-UAE pointed the same way
-  (drawing 1097 / 859 us). A mixed mode (arrays only for long runs) would
-  win at most the map effects' 0.25 ms: not worth it. The numbers went to
-  the MiniGL session.
+  frame against ~8.9 batches. FS-UAE pointed the same way (drawing 1097 /
+  859 us). A mixed mode (arrays only for long runs) would win at most the
+  map effects' 0.25 ms: not worth it.
+- **Why (FS-UAE profiles, `tests/auto/ProfArrays`, mapped by the MiniGL
+  session with a byte-identical 0.16 build's function list):** the cost is
+  in RadeonGL and it is per VERTEX, not per call (the section split above
+  had suggested per call). Immediate mode: Hook_GLVertex4f 10.0 % (the
+  inlined fast vertex write) + Hook_GLTexCoord2f 1.2 % = 11.2 % of the
+  running samples. Arrays: Emit 5.0 + Elem 4.5 + FetchAttribs 4.3 +
+  ArrayVertex 3.5 + Core_VertexBits 1.1 + Core_DrawArrays 0.7 + Core_Begin
+  0.5 = 19.6 %, ~1.75x: the unlocked array loop fetches each vertex through
+  four or five internal calls (Elem per attribute recomputes a stride 0
+  through a type switch) and sends it down the general Emit, not the
+  hook's inline fast path. Zod's own side is cheaper with arrays (vertex()
+  6.5 % against 8.0 %). The immediate hooks are the library's leanest path;
+  immediate mode is right for Zod with RadeonGL 0.16..0.18. MiniGL noted a
+  possible fast path for this array layout; if it lands, D2 is worth one
+  re-measure.
 
 ### E. Load time: the map texture's conversion
 
