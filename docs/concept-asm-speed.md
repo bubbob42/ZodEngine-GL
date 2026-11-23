@@ -8,6 +8,39 @@ number with its machine, or a counter still to be read), what it would
 change, and an estimate. The recommendation and the open questions are at
 the end.
 
+## Morning summary (night 22./23.11.)
+
+All work on local branches, nothing pushed or merged. Each branch builds on
+the one above it; `asm-a5` holds everything that was kept.
+
+| branch | what | result on voltago (A4000D 68060, AGA 640x512) | state |
+|---|---|---|---|
+| `asm-m0` | ZOD_AGA_MEASURE (compare only / into fast RAM), marked-block counts | the split below; the compare was the big part | measuring aid, off unless set |
+| `asm-a1` | still view: compare only the blocks marked since the buffer was drawn (ZOD_AGA_MARKS) | still 23 -> 30 fps (AGA work 26.6 -> 15.6 ms) | **keep** |
+| `asm-a2` | chunky to planar in 68k assembler (c2p_kern.s, ZOD_AGA_ASM, self-test vs C) | tour AGA work -2 ms (+3.5 %) | **keep** |
+| `asm-a4` | the row as its own function, direct longword compares | tour AGA work -7 ms (+10 % fps), still -2.7 ms | **keep** |
+| `asm-a5` | the row walks ranges (marked runs) instead of every group | still -1.5 ms, tour unchanged | **keep** |
+| `asm-b1` | keyed blit four pixels at a time | objects section +0.2..0.3 ms | rejected, not to merge |
+| `asm-a3` | scroll-aware compare (on top of map, map changes, off-map) | a third fewer compares, no gain | rejected, not to merge |
+
+**Since the start of the night, AGA on voltago:** still view 23 -> ~31 fps
+(AGA work ~26 -> 11.5 ms), tour 9.7 -> ~11 fps (AGA work ~62 -> 55 ms).
+Every kept step: FS-UAE AgaCheck and AgaHwScroll read every frame back from
+the planes, 0 pixels differ; the full FS-UAE set ran on `asm-a5` at the end
+(see the last section).
+
+**Measured and dropped:** ZOD_RTGSCROLL on the ZZ9000 (Zorro III) loses
+(15.2 -> 13.3 fps; stays off); a move16 copy of the map background
+(copyprobe: slower, or only with an aligned source); the block-sum
+multiply (the 040 build already uses shifts); GL option E (the map's
+conversion is ~10 ms a strip, the upload is the library's). GL D2 is a few
+per cent at best by MiniGL's answer; D1 and D2 wait for Hamiller.
+
+**For you:** whether to merge `asm-a5` into `gl` (it contains m0, A1, A2,
+A4, A5); the AGA look is unchanged by construction, but an eye check on
+voltago's or the A1200's native output is the usual last step. A 68040
+machine would show A2's real worth (no 040 was available).
+
 ## Where the time goes, per renderer
 
 **GL (RadeonGL, Hamiller, the gl tip, orig04 tour, 4000 PC samples,
@@ -268,6 +301,22 @@ The 68060 does not pay for reading the destination lines (C, which writes
 them whole, is slower), so a move16 copy helps only with an aligned
 source -- one scroll position in 16. copy_lang stays; the background copy
 is bound by the fast RAM (~51 MB/s read and write together).
+
+## A5 built and measured (branch `asm-a5`, on A4)
+
+The A4 profile (v-prof-s4): hw_row 33.6 % of the still view's samples, ~35 %
+of them the compare's loads (memory), ~30 % the loop's control -- every
+group of a marked row walked with a test of the marks flag and need[g].
+A5 hands hw_row a list of group ranges: the whole window, or the marked
+runs (built once per block row a frame) and the dressed groups. FS-UAE
+AgaHwScroll and AgaCheck: 0 pixels differ (4,900 frames). voltago, A4
+against A5, ABBA (23.11. ~03:40-03:50):
+
+| run | A4 | A5 | A5 | A4 |
+|---|---|---|---|---|
+| still: fps | 30.3 | 30.7 | 31.5 | 30.6 |
+| still: AGA work a frame | 13.5 ms | **11.8 ms** | **11.5 ms** | 12.9 ms |
+| tour: AGA work a frame | 55.0 ms | 55.2 ms | | |
 
 ## The options
 
