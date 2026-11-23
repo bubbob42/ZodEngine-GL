@@ -185,6 +185,9 @@ static unsigned char mark_hist[MARK_HIST][MARK_GH][MARK_GW];
 static int mark_gw = 0, mark_gh = 0;
 static unsigned char need_g[MARK_GH][MARK_GROUPS];
 static unsigned char need_row[MARK_GH];
+/* A5: need_g's runs per block row (pairs of first and last group) */
+static short need_runs[MARK_GH][MARK_GROUPS + 2];
+static short need_nruns[MARK_GH];
 static unsigned long hw_frame_no = 0;
 static int drawn_valid[NBUF];
 static unsigned long drawn_frame[NBUF], drawn_anchor[NBUF];
@@ -1771,63 +1774,70 @@ static int copper_read(const struct ViewPort *vp, ULONG *pt, UWORD *con1)
 	return (have & 3) == 3;
 }
 
-/* one display row of the hardware-scrolling frame: the window's columns
- * x0..x1 of the picture row s (from group gs on: the dressed row ds) compared
- * into the shadow row srow, the groups that differ converted into bitmap row
- * brow. marks: only the groups need[] names are compared below gs (need 0:
- * none). A function of its own and not inlined: inside the frame function
- * the loop's values lived on the stack (the profile of 23.11.: ~22 % of the
- * still view's AGA samples went to the loop's own reloads). */
+/* one display row of the hardware-scrolling frame: the groups of the
+ * ranges rng[2k]..rng[2k+1] (ascending, inside the window's columns x0..x1)
+ * of the picture row s (from group gs on: the dressed row ds) compared into
+ * the shadow row srow, the groups that differ converted into bitmap row
+ * brow. A function of its own and not inlined (A4: inside the frame
+ * function the loop's values lived on the stack); the ranges (A5) so that a
+ * row of the still view walks only the groups marked since the buffer was
+ * drawn, not every group with a test each (~30 % of the row's samples in
+ * the profile of 23.11.). */
 static unsigned long __attribute__((noinline))
 hw_row(const UBYTE *s, const UBYTE *ds, UBYTE *srow, int x0, int x1, int gs,
-       int marks, const unsigned char *need, UBYTE *const *pl, long bpr, long brow)
+       const short *rng, int nrng, UBYTE *const *pl, long bpr, long brow)
 {
-	const int g0 = x0 >> 4, g1 = (x1 - 1) >> 4;
 	const int dfx = x0 + dress_x - 16;      /* ds's column 0 in the bitmap */
 	unsigned long bytes = 0, cmp = 0;
-	int g, run = -1;
+	int k;
 
-	for(g = g0; g <= g1 + 1; g++)
+	for(k = 0; k < nrng; k++)
 	{
-		int differ = 0;
+		const int gb = rng[2 * k + 1];
+		int g, run = -1;
 
-		if(g <= g1 && (!marks || g >= gs || (need && need[g])))
+		for(g = rng[2 * k]; g <= gb + 1; g++)
 		{
-			const int bx = g * 16;
-			const UBYTE *const from = (g < gs) ? s : ds;
-			const int fx = (g < gs) ? x0 : dfx;
+			int differ = 0;
 
-			cmp++;
-			if(bx >= x0 && bx + 16 <= x1)
-				differ = group_take(from + (bx - fx), srow + bx);
-			else
+			if(g <= gb)
 			{
-				const int a = bx < x0 ? x0 : bx;
-				const int e = bx + 16 > x1 ? x1 : bx + 16;
+				const int bx = g * 16;
+				const UBYTE *const from = (g < gs) ? s : ds;
+				const int fx = (g < gs) ? x0 : dfx;
 
-				differ = part_take(from + (a - fx), srow + a, e - a);
+				cmp++;
+				if(bx >= x0 && bx + 16 <= x1)
+					differ = group_take(from + (bx - fx), srow + bx);
+				else
+				{
+					const int a = bx < x0 ? x0 : bx;
+					const int e = bx + 16 > x1 ? x1 : bx + 16;
+
+					differ = part_take(from + (a - fx), srow + a, e - a);
+				}
 			}
-		}
 
-		if(differ)
-		{
-			if(run < 0) run = g;
-		}
-		else if(run >= 0)
-		{
-			int ga = run, gb = g - 1;
+			if(differ)
+			{
+				if(run < 0) run = g;
+			}
+			else if(run >= 0)
+			{
+				int ga = run, gz = g - 1;
 
-			/* longwords: the pair partners go along from the shadow,
-			 * which holds exactly what the planes hold (the bitmap's
-			 * row is a multiple of 64 pixels: the partner exists) */
-			if(c2p32_on) { ga &= ~1; gb |= 1; }
+				/* longwords: the pair partners go along from the shadow,
+				 * which holds exactly what the planes hold (the bitmap's
+				 * row is a multiple of 64 pixels: the partner exists) */
+				if(c2p32_on) { ga &= ~1; gz |= 1; }
 
-			if(measure_mode != 1)
-				c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
-			regions_count((int)brow, ga, gb);
-			st_groups += (unsigned long)(gb - ga + 1);
-			bytes += 16UL * (gb - ga + 1);
-			run = -1;
+				if(measure_mode != 1)
+					c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gz);
+				regions_count((int)brow, ga, gz);
+				st_groups += (unsigned long)(gz - ga + 1);
+				bytes += 16UL * (gz - ga + 1);
+				run = -1;
+			}
 		}
 	}
 
@@ -1989,6 +1999,26 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 						}
 					}
 				}
+				/* A5: the marked groups of each block row as runs */
+				for(by = 0; by < gh; by++)
+				{
+					int g = 0, n = 0;
+
+					if(!need_row[by]) { need_nruns[by] = 0; continue; }
+
+					while(g < MARK_GROUPS)
+					{
+						int e;
+
+						if(!need_g[by][g]) { g++; continue; }
+						for(e = g; e + 1 < MARK_GROUPS && need_g[by][e + 1]; e++) ;
+						need_runs[by][n++] = (short)g;
+						need_runs[by][n++] = (short)e;
+						g = e + 1;
+					}
+					need_nruns[by] = (short)(n / 2);
+				}
+
 				st_marks_frames++;
 			}
 		}
@@ -2014,7 +2044,51 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 
 		if(use_marks && !ds && (!need || !need_row[y >> 4])) continue;
 
-		bytes += hw_row(s, ds, srow, x0, x1, gs, use_marks, need, pl, bpr, brow);
+		{
+			/* the ranges to compare: the whole window, or the marked runs
+			 * below gs and the dressed groups from gs on */
+			short rng[2 * (MARK_GROUPS / 2 + 2)];
+			const int g0 = x0 >> 4, g1 = (x1 - 1) >> 4;
+			int nr = 0;
+
+			if(!use_marks)
+			{
+				rng[0] = (short)g0;
+				rng[1] = (short)g1;
+				nr = 1;
+			}
+			else
+			{
+				const int top = (gs - 1 < g1) ? gs - 1 : g1;   /* last group from s */
+
+				if(need)
+				{
+					const short *const r = need_runs[y >> 4];
+					const int nn = need_nruns[y >> 4];
+					int k;
+
+					for(k = 0; k < nn; k++)
+					{
+						const int a = r[2 * k] < g0 ? g0 : r[2 * k];
+						const int e = r[2 * k + 1] > top ? top : r[2 * k + 1];
+
+						if(a > e) continue;
+						rng[2 * nr] = (short)a;
+						rng[2 * nr + 1] = (short)e;
+						nr++;
+					}
+				}
+
+				if(ds && gs <= g1)
+				{
+					rng[2 * nr] = (short)(gs < g0 ? g0 : gs);
+					rng[2 * nr + 1] = (short)g1;
+					nr++;
+				}
+			}
+
+			if(nr) bytes += hw_row(s, ds, srow, x0, x1, gs, rng, nr, pl, bpr, brow);
+		}
 	}
 
 	/* this buffer's shadow holds the picture now, at this place */
