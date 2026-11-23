@@ -183,6 +183,10 @@ else ifeq ($(PLATFORM),amiga)
   # Der Mischerkern ist reines 68020 und gehoert in ALLE drei CPU-Baeume --
   # anders als AMMX, das nur der 080er bekommt.
   ASM_SRCS      += port/amiga/musik_kern.s
+  # The AGA path's chunky to planar (docs/concept-asm-speed.md, A2): pure
+  # 68020 as well, all three CPU trees; the C stays as the fallback.
+  ASM_SRCS      += port/amiga/c2p_kern.s
+  DEFINES       += -DZOD_C2P_ASM
   ENGINE_C_SRCS += port/amiga/musik_mischer.c port/amiga/musik_ausgabe.c port/amiga/musik_camd.c
   # the PC sampler behind ZOD_PROFILE (RadeonGL's glsmoke/pcprof.c)
   ENGINE_C_SRCS += port/amiga/pcprof.c
@@ -271,6 +275,12 @@ $(OBJDIR)/%.o: %.s
 # Der Mischerkern laeuft auf 040, 060 UND 080. Mit -m68020 lehnt vasm jeden
 # 080-Befehl ab -- das ist die Gegenprobe, nicht die Absicht allein.
 $(OBJDIR)/port/amiga/musik_kern.o: port/amiga/musik_kern.s
+	@mkdir -p $(dir $@)
+	$(VASM) -Fhunk -m68020 -quiet -no-opt $< -o $@
+
+# The same check for the chunky-to-planar kernel: -m68020 refuses any
+# 040/060/080-only instruction.
+$(OBJDIR)/port/amiga/c2p_kern.o: port/amiga/c2p_kern.s
 	@mkdir -p $(dir $@)
 	$(VASM) -Fhunk -m68020 -quiet -no-opt $< -o $@
 

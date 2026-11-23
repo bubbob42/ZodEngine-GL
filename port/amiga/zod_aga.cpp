@@ -968,6 +968,69 @@ static inline void c2p_word_out(const UBYTE *row, UBYTE *const *pl, long off, in
 	for(p = 0; p < 8; p++) *(UWORD *)(pl[p] + off + g * 2) = w[p];
 }
 
+#ifdef ZOD_C2P_ASM
+/* port/amiga/c2p_kern.s (docs/concept-asm-speed.md, A2): pairs of groups,
+ * 32 pixels at a time, into the 8 planes */
+struct zod_c2p_job { ULONG *plane[8]; LONG pairs; };
+extern "C" void zod_c2p32_run(const unsigned char *src, struct zod_c2p_job *job);
+
+static int asm_ok = -1;              /* ZOD_AGA_ASM and the self-test: 1 use it */
+
+/* the first time: ZOD_AGA_ASM (default on), then the assembler routine
+ * against the C one for 4 pairs of test pixels -- any difference: the C */
+static int asm_check(void)
+{
+	static ULONG planes[2][8][4];
+	static UBYTE px[4 * 32];
+	struct zod_c2p_job job;
+	int i, p, k;
+	ULONG v = 0x12345678UL;
+
+	if(asm_ok >= 0) return asm_ok;
+
+	asm_ok = 0;
+	if(!zod_env_switch("ZOD_AGA_ASM", 1))
+	{
+		ZLOG("AGA: chunky to planar in C (ZOD_AGA_ASM off)\n");
+		return 0;
+	}
+
+	for(i = 0; i < (int)sizeof(px); i++)
+	{
+		v = v * 1103515245UL + 12345UL;
+		px[i] = (UBYTE)(v >> 16);
+	}
+	px[0] = 0x00; px[1] = 0xFF; px[2] = 0x80; px[3] = 0x01;   /* the corners */
+
+	for(k = 0; k < 4; k++)
+	{
+		c2p_u32 l[8];
+
+		c2p_32((const c2p_u32 *)(px + 32 * k), l);
+		for(p = 0; p < 8; p++) planes[0][p][k] = l[p];
+	}
+
+	for(p = 0; p < 8; p++) job.plane[p] = planes[1][p];
+	job.pairs = 4;
+	zod_c2p32_run(px, &job);
+
+	for(p = 0; p < 8; p++)
+		for(k = 0; k < 4; k++)
+			if(planes[0][p][k] != planes[1][p][k])
+			{
+				ZLOG("AGA: the assembler chunky to planar differs from C (plane %d, pair %d: "
+				     "%08lx, C %08lx) -- C it is\n", p, k,
+				     (unsigned long)planes[1][p][k], (unsigned long)planes[0][p][k]);
+				return 0;
+			}
+
+	asm_ok = 1;
+	ZLOG("AGA: chunky to planar in assembler (c2p_kern.s; self-test against C passed; "
+	     "ZOD_AGA_ASM=off for the C)\n");
+	return 1;
+}
+#endif
+
 /* rows of 16-pixel groups g0..g1 from the source rows into the planes:
  * groups in pairs that start on an even group as one longword of each
  * plane (the plane rows are 64-bit aligned), a group alone at either end
@@ -986,6 +1049,20 @@ static void c2p_rows(const UBYTE *src, int spitch, UBYTE *const *pl, long bpr,
 		if(c2p32_on)
 		{
 			if(g & 1) { c2p_word_out(row, pl, off, g); g++; }
+
+#ifdef ZOD_C2P_ASM
+			if(g < g1 && asm_check() > 0)
+			{
+				struct zod_c2p_job job;
+				const long n = (long)((g1 - g + 1) >> 1);
+				int q;
+
+				for(q = 0; q < 8; q++) job.plane[q] = (ULONG *)(pl[q] + off + g * 2);
+				job.pairs = n;
+				zod_c2p32_run(row + g * 16, &job);
+				g += (int)(n * 2);
+			}
+#endif
 
 			for(; g < g1; g += 2)
 			{
