@@ -22,6 +22,7 @@ the one above it; `asm-a5` holds everything that was kept.
 | `asm-a5` | the row walks ranges (marked runs) instead of every group | still -1.5 ms, tour unchanged | **keep** |
 | `asm-b1` | keyed blit four pixels at a time | objects section +0.2..0.3 ms | rejected, not to merge |
 | `asm-a3` | scroll-aware compare (on top of map, map changes, off-map) | a third fewer compares, no gain | rejected, not to merge |
+| `asm-d2` | GL: the batches as glDrawArrays, no colour array (ZOD_GL_ARRAYS; Hamiller, 23.11. morning) | 34.3 -> 30.7 fps, drawing +3.2 ms | rejected, not to merge |
 
 **Since the start of the night, AGA on voltago:** still view 23 -> ~31 fps
 (AGA work ~26 -> 11.5 ms), tour 9.7 -> ~11 fps (AGA work ~62 -> 55 ms).
@@ -33,8 +34,10 @@ the planes, 0 pixels differ; the full FS-UAE set ran on `asm-a5` at the end
 (15.2 -> 13.3 fps; stays off); a move16 copy of the map background
 (copyprobe: slower, or only with an aligned source); the block-sum
 multiply (the 040 build already uses shifts); GL option E (the map's
-conversion is ~10 ms a strip, the upload is the library's). GL D2 is a few
-per cent at best by MiniGL's answer; D1 and D2 wait for Hamiller.
+conversion is ~10 ms a strip, the upload is the library's). GL D2 on
+Hamiller (23.11. morning): 11 % slower, rejected; D1 not built -- its close
+cousin ZOD_UVCACHE was measured worse on 19.11. (gl-plan.md), and its
+~0.3 ms lies below what Hamiller resolves.
 
 **For you:** whether to merge `asm-a5` into `gl` (it contains m0, A1, A2,
 A4, A5); the AGA look is unchanged by construction, but an eye check on
@@ -424,6 +427,34 @@ glBegin, four glTexCoord/glVertex pairs, glEnd for every sprite.
   glLockArraysEXT (ignored by DrawArrays; the locked path hashes for
   nothing here), one texture unit. A few per cent of the drawing time at
   best; to be measured behind a switch on Hamiller.
+- **D1, not built:** the same divisions were already tried as ZOD_UVCACHE
+  (19.11., gl-plan.md: kept UVs per texture, bit-identical) and measured
+  worse on the A4000D; the estimate (~0.3 ms) is below the A/B noise.
+- **D2 measured, REJECTED (branch `asm-d2`, 23.11. ~07:00-07:25).** Exactly
+  as MiniGL advised: positions as size-3 floats, texture coordinates as
+  size-2 floats, no colour array (a quad of another colour first sends the
+  quads gathered so far, then glColor4ub), no lock, GL_QUADS; ZOD_GL_ARRAYS=on
+  in one binary (build/d2). FS-UAE `tests/auto/GLArrays` (null card):
+  checker and GL errors 0, 61,614 binds checked without an error, frame 3000
+  through r200view the same as immediate mode apart from what moves between
+  runs (units, effects, the clock, the fps counter). Hamiller (RadeonGL 0.18,
+  minigl.library 29.1 (22.11.26); orig04 tour, 640x480, 60 s, ABBA x2):
+
+  | run | arrays (va1) | immediate (va0) |
+  |---|---|---|
+  | fps | 30.6 / 31.0 / 31.1 / 29.9 (30.7) | 35.6 / 34.8 / 33.9 / 33.0 (34.3) |
+  | drawing a frame | 21.9 ms | 18.7 ms |
+
+  No overlap in any pair. By section (mean us a frame, arrays against
+  immediate): HUD 3274 / 1793 (~11 quads a frame in many colour runs), zones
+  1920 / 1130 (~16 quads), objects after 1479 / 900, GUI 352 / 187, fps
+  counter 418 / 241; objects (59 quads) even at 3767 / 3740; only the map
+  effects (36 quads in long runs) gain, 2571 / 2817. ~11.8 glDrawArrays a
+  frame against ~8.9 batches: a call costs a few hundred us of fixed work,
+  far more than the per-vertex calls it saves. FS-UAE pointed the same way
+  (drawing 1097 / 859 us). A mixed mode (arrays only for long runs) would
+  win at most the map effects' 0.25 ms: not worth it. The numbers went to
+  the MiniGL session.
 
 ### E. Load time: the map texture's conversion
 
