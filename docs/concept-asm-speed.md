@@ -127,6 +127,98 @@ orig01 still view, then the tour, 30 s each (23.11. ~00:50-01:05):
 marks are used in 32 of 326 tour frames: the view stands only between
 moves). The picture is the same by construction and by the read-back check.
 
+## B built and measured: REJECTED (branch `asm-b1`, e0fd899, not to be merged)
+
+The keyed row four pixels at a time (port/amiga/zod_keyblit.h, ZOD_KEYBLIT4;
+host test keyblittest: 112,128 rows byte for byte equal to the byte loop;
+FS-UAE SwSums, NoGL, AgaCheck pass). voltago, software on the ZZ9000, same
+binary, off / on / on / off, then the tour off / on (23.11. ~01:20-01:35):
+
+| run | off | on | on | off |
+|---|---|---|---|---|
+| still: fps | 65.2 | 63.4 | 60.8 | 58.8 |
+| still: objects section | 1.49 ms | 1.76 ms | 1.79 ms | 1.62 ms |
+| tour: objects section | 6.23 ms | 6.49 ms | | |
+
+The frame rate drifts between blocks (65 -> 59 off/off), but the objects
+section is slower with the four-pixel loop every time (+0.2..0.3 ms): Zod's
+sprites are small and ragged, most groups of four are mixed, and the
+row's alignment prologue and the extra tests cost more than the saved
+loads. By the rule (a change measured worse is reverted) B stays on its
+branch; A3 was rebased onto A1 without it.
+
+## A3 built (branch `asm-a3`)
+
+In frames whose window MOVED since the buffer was drawn (same anchor), only
+what can differ from the shadow is compared: what was drawn on top of the
+map in this frame and in the buffer's frame (a second mark grid in
+sdl_video.cpp that leaves out the background's blits and the restores --
+zod_dirty_mapbg_begin/end around ZMap::DoRender's full blit -- and that the
+pointer enters through zod_dirty_mark_ontop), the picture off the map in
+both frames (the side panel, the borders, the rows beside the picture: they
+stand still on the screen, so they move in the bitmap), the map's changes
+since (every blit or fill into ZMap's map surface is reported:
+zod_aga_map_changed; ~40 a frame on the tours, the effect tiles), and the
+places the buffer's window did not cover. ZOD_AGA_SCROLLMARKS (default on).
+
+- The first build missed the pointer (set into the picture before the copy
+  and marked for the output only): 8,000..30,000 pixels differed in the
+  moving runs. With the pointer: FS-UAE AgaHwScroll and AgaCheck, every
+  frame read back, 0 pixels differ (2,289 and 2,302 frames).
+- FS-UAE tours: the compare in 98..292 of ~200..380 frames per run takes
+  this way, 9,000..15,000 groups a frame instead of ~19,000..20,000.
+
+**Measured on voltago: no gain -- REJECTED (branch `asm-a3`, 7e716c5, not
+to be merged).** Same binary, ZOD_AGA_SCROLLMARKS off / on / on / off,
+orig01 tour, 30 s each (23.11. ~01:55-02:05):
+
+| run | off | on | on | off |
+|---|---|---|---|---|
+| fps | 9.3 | 9.9 | 9.4 | 9.9 |
+| AGA work a frame | 64.4 ms | 64.1 ms | 65.4 ms | 62.3 ms |
+| groups compared a frame | 17,985 | 11,680 | 11,752 | 18,014 |
+
+A third fewer compares changed nothing: a compare of two equal groups is
+cheap, and the ~25 ms of the tour's "compare only" run lies elsewhere --
+in the per-row work over all 476 rows, the partial groups at the window's
+edges (byte loops whenever the window is not on a 16-pixel boundary), and
+the shadow updates and runs of the groups that DO differ, which A3 does not
+touch. A1 stays (the still view); A2 was rebased onto A1 without A3.
+
+## A2 built and measured (branch `asm-a2`, on A1 without A3)
+
+port/amiga/c2p_kern.s: 32 pixels at a time by five passes of bit-field swaps
+on eight registers (16, 8, 4, 2, 1 bits; the first pass without a temporary
+by swap and three eor.w, the others with one register parked in a5), the
+eight plane stores inside the last pass, each right after the swap that
+makes its register final. 160 instructions a pair against the 306 gcc makes
+of c2p_32 (18 of them stack spills). Pure 68020 (assembled with -m68020 as
+the check), all CPU trees. The sequence and the register-to-plane mapping
+were checked bit for bit against the C reference in Python (2,000 random
+groups) before the assembler was written; on the Amiga a self-test at the
+first frame compares it with c2p_32 and falls back to C if they differ
+(ZOD_AGA_ASM=off takes the C). FS-UAE AgaHwScroll and AgaCheck: self-test
+passed, every frame read back, 0 pixels differ (4,814 frames, and 2,502
+again after the rebase onto A1).
+
+voltago, same binary (build/a2), ZOD_AGA_ASM off / on / on / off, orig01
+tour, then the still view off / on, 30 s each (23.11. ~02:20-02:35):
+
+| run | C | asm | asm | C |
+|---|---|---|---|---|
+| tour: fps | 9.7 | **10.3** | **9.9** | 9.6 |
+| tour: AGA work a frame | 63.3 ms | **60.1 ms** | **62.0 ms** | 63.3 ms |
+| still: fps | 30.0 | 30.3 | | |
+| still: AGA work a frame | 15.6 ms | 15.5 ms | | |
+
+~2 ms (3.5 %) less AGA work while scrolling, both assembler runs ahead of
+both C runs; the still view converts only ~400 groups a frame, so it hardly
+shows there. Less than the halved instruction count suggests: the chip
+bus (~30 ms of plane writes a scrolling frame at the measured 4.49 MB/s) is
+the floor, and the C version already overlapped part of its arithmetic with
+the stores. On a 68040, where the arithmetic weighs more against the bus,
+the gain should be larger (no 040 machine was available to measure).
+
 ## The options
 
 ### A. AGA: compare less, and compare, convert and write in one assembler pass -- RECOMMENDED
