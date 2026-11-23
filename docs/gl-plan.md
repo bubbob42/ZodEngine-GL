@@ -1308,6 +1308,24 @@ cache gives way to textures by itself, Zod's 1 MB hold stays (harmless).
 ZodLaunch.cfg there: General MIDI on prisma.out.0 (the user's choice: no
 PrismaControl route in between).
 
+## 5m. Release 2.1, 23.11. evening
+
+The night's AGA speed work (docs/concept-asm-speed.md: A1 marks, A2 c2p in
+assembler, A4 the row as its own function, A5 ranges) as release 2.1. The
+user watched asm-a5 on voltago (AGA PAL, build/a5/zod_060, 23.11. ~17:00):
+tour on orig04 10.2 fps (AGA work 59.4 ms a frame), still view on orig01
+33.4 fps (10.8 ms) -- "looks right". asm-a5 merged into gl (--no-ff,
+f45d9a1); rejected and not merged: asm-b1, asm-a3, asm-d2. zod_040 and
+zod_060 of the merged gl (build/rel21) are byte-identical to build/a5, the
+binaries watched. ZodLaunch is the 2.0 one (byte-identical; no launcher
+change since v2.0). FS-UAE on build/rel21: SwSums, NoGL, GLSmoke, GLTour,
+LoadBar, HudKeep, LoadBarPresents, RoundEnd720, AgaCheck, AgaHwScroll,
+MidiCamd -- all pass (CHECK 0 everywhere, 0 pixels differ in 13 AGA
+read-backs, c2p self-test passed, 0 refused, GL error 0, 0 MIDI events
+dropped). Archive ZodEngine_v2.1.lha packed like 2.0 (Amiga LhA under
+vamos, "#?" from the stage drawer; programs rwed, README rw-d). Tag v2.1,
+GitHub release "ZodEngine 2.1" on bubbob42/ZodEngine-GL.
+
 ## 6. Open questions (recommendation first)
 
 1. **Repository.** A GitHub fork of a public repo cannot be private.

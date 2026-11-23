@@ -1,17 +1,29 @@
-# Zod Engine 2.0 — AmigaOS port
+# Zod Engine 2.1 — AmigaOS port
 
 A native AmigaOS 3.2 port of the **Zod Engine**, an open source
 re-implementation of *Z* (Bitmap Brothers, 1996) written by Nighsoft.
 
-This is version 2.0. It is based on cego's port, version 1.1
+This is version 2.1. It is based on cego's port, version 1.1
 ([AMIGAbench/ZodEngine](https://github.com/AMIGAbench/ZodEngine)).
-Version 2.0 adds a 3D card renderer, a native AGA screen, music through
-camd.library, smooth scrolling and many speed-ups. The work is on the `gl`
-branch; `main` is still cego's v1.1.
+Version 2.0 added a 3D card renderer, a native AGA screen, music through
+camd.library, smooth scrolling and many speed-ups; 2.1 makes the AGA screen
+faster. The work is on the `gl` branch; `main` is still cego's v1.1.
 
 **No game data is in this repository.** The graphics, sounds and music belong
 to the Bitmap Brothers. They are read from the user's own CD of *Z*, on the
 Amiga, during installation.
+
+## What 2.1 adds over 2.0
+
+**A faster AGA screen.** A still view compares only the blocks that changed
+since that buffer was last shown. Chunky to planar conversion is done in 68k
+assembler, with the C version as a fallback and a self-test against it at
+the first frame. The rows of the hardware-scrolled screen compare ranges of
+pixel groups at a time. On an A4000D with a 68060 (AGA, PAL, 23.11.2026)
+the still view runs at 33 fps instead of 23, and scrolling at 10.2 to
+11.1 fps instead of 9.7. The picture is unchanged, and so are the MiniGL
+and software renderers. The measurements and the rejected attempts are in
+[docs/concept-asm-speed.md](docs/concept-asm-speed.md).
 
 ## What 2.0 adds over v1.1
 
@@ -50,15 +62,15 @@ cluster field. It starts with MUI 3.8.
 **Game.** A load progress bar in Z's own look. Many server and drawing
 passes are left out while nothing changes.
 
-The release [v2.0](../../releases/tag/v2.0) holds `zod_040`, `zod_060`,
+The release [v2.1](../../releases/tag/v2.1) holds `zod_040`, `zod_060`,
 ZodLaunch and [a README](docs/release/README_GL.txt). It is an update to copy
-over an installed v1.1.
+over an installed v1.1 or 2.0.
 
 ## Hardware
 
 AmigaOS 3.2 with a 68040 or 68060 and FPU (`zod_040`, `zod_060`). The 68080
 build (`zod_080`, for the Vampire V1200) still builds from the same sources
-but was not tested in 2.0. Fast RAM: 32 MB is comfortable. ZodLaunch needs
+but was not tested in 2.0 or 2.1. Fast RAM: 32 MB is comfortable. ZodLaunch needs
 MUI 3.8 or newer.
 
 | Renderer | Needs |
@@ -93,7 +105,8 @@ launcher's logic on the host.
   the release notes (section 5l)
 * [docs/concept-aga.md](docs/concept-aga.md) and
   [docs/research-aga-speed.md](docs/research-aga-speed.md): the AGA screen
-  and its speed
+  and its speed; [docs/concept-asm-speed.md](docs/concept-asm-speed.md):
+  the 2.1 speed work
 * [docs/concept-midi-camd.md](docs/concept-midi-camd.md): music through
   camd.library
 * [docs/concept-smooth-scrolling.md](docs/concept-smooth-scrolling.md),
@@ -113,4 +126,4 @@ Third party code included here under its own terms:
 
 The game data is **not** covered by that licence and is not distributed.
 
-Made with AI: the 2.0 changes were written with Claude Code.
+Made with AI: the 2.0 and 2.1 changes were written with Claude Code.
