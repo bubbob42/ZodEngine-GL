@@ -533,3 +533,26 @@ the flip sums check 0 bytes differ, the AGA planes read back 0 pixels differ
 (4,852 frames, the conversion in assembler after its self-test), NoGL falls
 back to software, RoundEnd720 0 refused and 0 black, MidiCamd 0 events
 dropped, no GL error in any log.
+
+## The PiStorm's A1200: 2.0 against 2.1 (23.11. evening)
+
+The released 2.0 zod_040 (build/glbase, gl 45ba3e4) against 2.1's (build/a5
+= the release), Emu68 reporting a 68040, AGA PAL HiRes Laced 640x512, two
+buffers, hardware scrolling, no smooth scrolling; ABBA, 60 s each, the still
+view on orig01, then the tour on orig04:
+
+| run | 2.0 | 2.1 | 2.1 | 2.0 |
+|---|---|---|---|---|
+| still: fps | 49.2 | 49.3 | 49.4 | 49.3 |
+| still: AGA work a frame | 3.54 ms | 2.70 ms | 2.67 ms | 3.12 ms |
+| tour: fps | 25.5 | 26.3 | 25.9 | 26.0 |
+| tour: AGA work a frame | 27.0 ms | 26.2 ms | 26.5 ms | 26.6 ms |
+
+- **Still view:** the AGA work drops by a fifth (3.3 -> 2.7 ms), but the
+  frame rate stands at the display's 50 Hz already in 2.0: no fps to gain.
+- **Tour:** 25.75 -> 26.1 fps, AGA work 26.8 -> 26.35 ms: within the spread
+  of the runs (0.5 fps between the two 2.0 runs). The tour's AGA work is
+  the chip bus (~6,600 groups a frame written as planes); Emu68 runs the
+  compare and the conversion fast already, as the estimate above expected.
+- Nothing got slower. 2.1's gain is voltago's (a real 68060): the still
+  view 23 -> 33 fps.
