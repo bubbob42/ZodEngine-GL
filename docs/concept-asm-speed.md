@@ -219,6 +219,37 @@ the floor, and the C version already overlapped part of its arithmetic with
 the stores. On a 68040, where the arithmetic weighs more against the bus,
 the gain should be larger (no 040 machine was available to measure).
 
+## Profiles of the AGA frame, and A4 (branch `asm-a4`, on A2)
+
+PC profiles on voltago (A2 build, 40 s each, build/hw/v-prof-s and
+v-prof-t, symbols build/hw/a2-060.syms):
+- **Still view:** the AGA frame's own code 45 % of the running samples, the
+  conversion (C and assembler) ~5.5 %. Inside the frame: ~28 % at the group
+  compare -- gcc 6 had built group_take's memcpy of 4 bytes as copies
+  through the stack and back -- and ~22 % at the group loop's control, the
+  loop's values reloaded from the stack (flip_hw is inlined into the frame
+  function with dozens of live values).
+- **Tour:** the frame's own code 33.7 % (60 % of it the compare), the map
+  background's copy (copy_lang) 13.4 %, the assembler conversion and the OS
+  35 % ("outside": c2p_kern.s is its own code hunk).
+
+A4: the row as a function of its own (hw_row, not inlined), the compare by
+direct longword loads (the 68020+ takes any alignment). The result is the
+same by construction; FS-UAE AgaHwScroll and AgaCheck: 0 pixels differ
+(4,905 frames). voltago, A2's binary against A4's, ABBA, 30 s each
+(23.11. ~02:50-03:05):
+
+| run | A2 | A4 | A4 | A2 |
+|---|---|---|---|---|
+| tour: fps | 9.3 | **10.4** | **11.1** | 10.2 |
+| tour: AGA work a frame | 63.5 ms | **56.5 ms** | **53.8 ms** | 61.0 ms |
+| still: fps | 30.7 | 29.3 | 30.4 | 28.1 |
+| still: AGA work a frame | 15.0 ms | **13.8 ms** | **12.8 ms** | 17.1 ms |
+
+~7 ms less AGA work while scrolling (+10 % fps), ~2.7 ms in the still
+view. Together with A1 and A2: voltago's tour 9.7 -> ~10.8 fps, its still
+view 23 -> ~30 fps since the start of the night.
+
 ## The options
 
 ### A. AGA: compare less, and compare, convert and write in one assembler pass -- RECOMMENDED
