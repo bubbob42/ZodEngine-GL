@@ -810,7 +810,13 @@ Measured on the Radeon A4000D (.132), 60 s bot matches:
   576 against 138 us; FS-UAE showed it too (510 against 663 fps).
   RadeonGL's unlocked array path (core/array.c: Fetch per attribute, the
   byte colours converted per vertex) costs more than its immediate calls.
-  Reverted.
+  Reverted. **Tried again without the colour array** (23.11., branch
+  asm-d2, on MiniGL's advice; RadeonGL 0.18): still 30.7 against 34.3 fps,
+  drawing +3.2 ms. The library's unlocked array loop costs ~1.75x its
+  immediate hooks per vertex (four or five internal calls per vertex and
+  the general Emit, against the glVertex hook's inline fast path; profile
+  mapped by MiniGL). Details in docs/concept-asm-speed.md, D. Client arrays
+  are done with unless RadeonGL gets a fast array path.
 - **The bots' "socket" time is their start**: a packet census in ZBot
   (FS-UAE, 20 s): ~1 packet a frame for both bots together, most of them
   ADD_NEW_OBJECT -- the whole map's objects sent to each bot at the start,

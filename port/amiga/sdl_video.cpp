@@ -595,6 +595,37 @@ extern "C" int zod_dirty_prev_runs(int by, short *x0, short *x1, int max)
 	return grid_runs(prev_grid, by, x0, x1, max);
 }
 
+/* the blocks marked for output this frame, exactly (no runs, no gaps
+ * bridged); *total = the grid's blocks. A measuring aid for the AGA path
+ * (ZOD_AGA_MEASURE, docs/concept-asm-speed.md). */
+extern "C" int zod_dirty_out_count(int *total)
+{
+	int n = 0;
+
+	grids_due_apply();
+
+	for(int by = 0; by < grid_h; by++)
+		for(int bx = 0; bx < grid_w; bx++)
+			if(out_grid[by][bx]) n++;
+
+	if(total) *total = grid_w * grid_h;
+	return n;
+}
+
+/* block row by of the output marks into dst (one byte a block, 0 or 1),
+ * at most n blocks; returns the grid's width (0: no such row). For the AGA
+ * path's compare of the marked blocks only (ZOD_AGA_MARKS). */
+extern "C" int zod_dirty_out_row(int by, unsigned char *dst, int n)
+{
+	if(by < 0 || by >= grid_h) return 0;
+
+	grids_due_apply();
+
+	for(int bx = 0; bx < grid_w && bx < n; bx++) dst[bx] = out_grid[by][bx] ? 1 : 0;
+
+	return grid_w;
+}
+
 extern "C" int zod_dirty_block_shift(void) { return ZOD_BLOCK_SHIFT; }
 extern "C" int zod_dirty_grid_h(void)      { return grid_h; }
 
