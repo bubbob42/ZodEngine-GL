@@ -1224,11 +1224,14 @@ static unsigned long need_out(const SDL_Surface *cs, UBYTE *const *pl, long bpr,
  * aligned); copied when they differ; 1 = they differed */
 static inline int group_take(const UBYTE *s, UBYTE *d)
 {
-	ULONG a0, a1, a2, a3;
-	ULONG *q = (ULONG *)d;
-
-	/* memcpy of 4: one move.l on the 020+ (no alignment needed there) */
-	memcpy(&a0, s, 4); memcpy(&a1, s + 4, 4); memcpy(&a2, s + 8, 4); memcpy(&a3, s + 12, 4);
+	/* longword loads at any alignment (the 68020 and later take them; s is
+	 * off by the window's column whenever that is not a multiple of 4). Not
+	 * memcpy: gcc 6 built those as copies through the stack and back (the
+	 * profile of 23.11.: the compare's loads and that shuffle were ~60 % of
+	 * the tour's AGA frame samples) */
+	const ULONG *const p = (const ULONG *)s;
+	ULONG *const q = (ULONG *)d;
+	const ULONG a0 = p[0], a1 = p[1], a2 = p[2], a3 = p[3];
 
 	if(a0 == q[0] && a1 == q[1] && a2 == q[2] && a3 == q[3]) return 0;
 
@@ -1768,6 +1771,70 @@ static int copper_read(const struct ViewPort *vp, ULONG *pt, UWORD *con1)
 	return (have & 3) == 3;
 }
 
+/* one display row of the hardware-scrolling frame: the window's columns
+ * x0..x1 of the picture row s (from group gs on: the dressed row ds) compared
+ * into the shadow row srow, the groups that differ converted into bitmap row
+ * brow. marks: only the groups need[] names are compared below gs (need 0:
+ * none). A function of its own and not inlined: inside the frame function
+ * the loop's values lived on the stack (the profile of 23.11.: ~22 % of the
+ * still view's AGA samples went to the loop's own reloads). */
+static unsigned long __attribute__((noinline))
+hw_row(const UBYTE *s, const UBYTE *ds, UBYTE *srow, int x0, int x1, int gs,
+       int marks, const unsigned char *need, UBYTE *const *pl, long bpr, long brow)
+{
+	const int g0 = x0 >> 4, g1 = (x1 - 1) >> 4;
+	const int dfx = x0 + dress_x - 16;      /* ds's column 0 in the bitmap */
+	unsigned long bytes = 0, cmp = 0;
+	int g, run = -1;
+
+	for(g = g0; g <= g1 + 1; g++)
+	{
+		int differ = 0;
+
+		if(g <= g1 && (!marks || g >= gs || (need && need[g])))
+		{
+			const int bx = g * 16;
+			const UBYTE *const from = (g < gs) ? s : ds;
+			const int fx = (g < gs) ? x0 : dfx;
+
+			cmp++;
+			if(bx >= x0 && bx + 16 <= x1)
+				differ = group_take(from + (bx - fx), srow + bx);
+			else
+			{
+				const int a = bx < x0 ? x0 : bx;
+				const int e = bx + 16 > x1 ? x1 : bx + 16;
+
+				differ = part_take(from + (a - fx), srow + a, e - a);
+			}
+		}
+
+		if(differ)
+		{
+			if(run < 0) run = g;
+		}
+		else if(run >= 0)
+		{
+			int ga = run, gb = g - 1;
+
+			/* longwords: the pair partners go along from the shadow,
+			 * which holds exactly what the planes hold (the bitmap's
+			 * row is a multiple of 64 pixels: the partner exists) */
+			if(c2p32_on) { ga &= ~1; gb |= 1; }
+
+			if(measure_mode != 1)
+				c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
+			regions_count((int)brow, ga, gb);
+			st_groups += (unsigned long)(gb - ga + 1);
+			bytes += 16UL * (gb - ga + 1);
+			run = -1;
+		}
+	}
+
+	st_cmp_groups += cmp;
+	return bytes;
+}
+
 /* the frame with hardware scrolling: the window placed, the picture
  * compared into the buffer's shadow there, the groups that differ through
  * c2p, the buffer shown at the window's place */
@@ -1944,56 +2011,10 @@ static void flip_hw(SDL_Surface *cs, struct Screen *scr, int dy)
 		/* ZOD_AGA_MARKS: the row's marks (rows beside the picture are
 		 * colour 0 and stay so while the window stands) */
 		const unsigned char *const need = (use_marks && y >= 0 && y < h) ? need_g[y >> 4] : 0;
-		int g, run = -1;
 
 		if(use_marks && !ds && (!need || !need_row[y >> 4])) continue;
 
-		for(g = g0; g <= g1 + 1; g++)
-		{
-			int differ = 0;
-			/* not marked since this buffer was drawn: equals the shadow */
-			const int unmarked = use_marks && g < gs && (!need || !need[g]);
-
-			if(g <= g1 && !unmarked)
-			{
-				const int bx = g * 16;
-
-				st_cmp_groups++;
-				const UBYTE *const from = (g < gs) ? s : ds;
-				const int fx = (g < gs) ? x0 : x0 + dress_x - 16;   /* from's column 0 */
-
-				if(bx >= x0 && bx + 16 <= x1)
-					differ = group_take(from + (bx - fx), srow + bx);
-				else
-				{
-					const int a = bx < x0 ? x0 : bx;
-					const int e = bx + 16 > x1 ? x1 : bx + 16;
-
-					differ = part_take(from + (a - fx), srow + a, e - a);
-				}
-			}
-
-			if(differ)
-			{
-				if(run < 0) run = g;
-			}
-			else if(run >= 0)
-			{
-				int ga = run, gb = g - 1;
-
-				/* longwords: the pair partners go along from the shadow,
-				 * which holds exactly what the planes hold (the bitmap's
-				 * row is a multiple of 64 pixels: the partner exists) */
-				if(c2p32_on) { ga &= ~1; gb |= 1; }
-
-				if(measure_mode != 1)
-					c2p_rows(srow, hw_bw, pl, bpr, (int)brow, 1, ga, gb);
-				regions_count((int)brow, ga, gb);
-				st_groups += (unsigned long)(gb - ga + 1);
-				bytes += 16UL * (gb - ga + 1);
-				run = -1;
-			}
-		}
+		bytes += hw_row(s, ds, srow, x0, x1, gs, use_marks, need, pl, bpr, brow);
 	}
 
 	/* this buffer's shadow holds the picture now, at this place */
