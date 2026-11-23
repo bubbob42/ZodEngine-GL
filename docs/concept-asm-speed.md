@@ -250,6 +250,25 @@ same by construction; FS-UAE AgaHwScroll and AgaCheck: 0 pixels differ
 view. Together with A1 and A2: voltago's tour 9.7 -> ~10.8 fps, its still
 view 23 -> ~30 fps since the start of the night.
 
+## The map background's copy: move16 does not help (measured)
+
+tools/amiga/copyprobe (with copyprobe_k.s), voltago 68060, 476 rows of 512
+bytes from a 1408-byte source pitch (the AGA tour's map view), every source
+offset 0..15, 20 frames each, results checked against the C loop
+(23.11. ~03:20):
+
+| copy | a frame (238 KB) |
+|---|---|
+| A  the C loop (fastcopy.cpp copy_lang) | 9.3 ms |
+| B  four move.l a step, assembler | 9.1 ms |
+| C  four move.l into an aligned line, then move16 to the row | 10.0 ms |
+| D  move16 straight (16-byte aligned source only) | 6.1 ms |
+
+The 68060 does not pay for reading the destination lines (C, which writes
+them whole, is slower), so a move16 copy helps only with an aligned
+source -- one scroll position in 16. copy_lang stays; the background copy
+is bound by the fast RAM (~51 MB/s read and write together).
+
 ## The options
 
 ### A. AGA: compare less, and compare, convert and write in one assembler pass -- RECOMMENDED
